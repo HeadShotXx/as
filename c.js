@@ -11,7 +11,7 @@ const { faker } = require("@faker-js/faker");
 
 
 // WebSocket bağlantısı
-const socket = io("https://2ba4-176-240-67-94.ngrok-free.app");
+const socket = io("https://5044-176-240-67-249.ngrok-free.app");
 
 let isFlooding = false;
 let floodingTimeout;
