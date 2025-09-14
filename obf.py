@@ -152,7 +152,7 @@ class AdvancedObfuscator:
             result_lines.append(line)
 
             # Insert dead code randomly in function bodies
-            if (line.strip().endswith('{') and
+            if (line.strip().endswith('{') and '=' not in line and
                 not line.strip().startswith('#') and
                 not line.strip().startswith('//') and
                 random.random() < 0.1):  # 10% chance
@@ -388,6 +388,10 @@ static std::string {str_func}(int id) {{
         """Rename identifiers in code segment, avoiding namespace/member access"""
         def replacer(match):
             identifier = match.group(1)
+
+            if identifier in self.keywords or identifier in self.std_names or identifier in self.winapi_names:
+                return identifier
+
             match_start = match.start()
 
             # Check context to avoid renaming namespace/member access
