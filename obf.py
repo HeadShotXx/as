@@ -101,6 +101,11 @@ class AdvancedObfuscator:
         temp_source = self.re_comment.sub('', temp_source)
         temp_source = self.re_preprocessor.sub('', temp_source)
 
+        # remove extern "C" blocks
+        temp_source = re.sub(r'extern\s+"C"\s*\{[^{}]*\}', '', temp_source, flags=re.DOTALL)
+        # remove single line extern "C" declarations
+        temp_source = re.sub(r'extern\s+"C"\s+.*;', '', temp_source)
+
         for match in self.re_identifier.finditer(temp_source):
             identifier = match.group(1)
             if (identifier not in self.keywords and
@@ -222,6 +227,9 @@ class AdvancedObfuscator:
 
         def encrypt_string(match):
             original = match.group(0)
+
+            if original == '"C"':
+                return original
 
             # Skip raw strings and wide strings
             if original.startswith('R"') or original.startswith('L'):
