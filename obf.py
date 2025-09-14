@@ -60,8 +60,8 @@ class AdvancedObfuscator:
             "CUSTOM_PEB", "ImageBaseAddress", "Ldr", "ProcessParameters",
             "CUSTOM_RTL_USER_PROCESS_PARAMETERS", "Length", "MaximumLength", "CommandLine",
             # Types and Constants
-            "HANDLE", "PVOID", "ULONG", "PULONG", "NTSTATUS", "BYTE", "USHORT", "LPWSTR", "BOOL",
-            "DWORD", "SIZE_T", "CREATE_SUSPENDED", "CREATE_NEW_CONSOLE", "ProcessBasicInformation", "NULL"
+            "HANDLE", "PVOID", "ULONG", "PULONG", "NTSTATUS", "BYTE", "USHORT", "LPWSTR", "BOOL", "FALSE",
+            "DWORD", "SIZE_T", "CREATE_SUSPENDED", "CREATE_NEW_CONSOLE", "ProcessBasicInformation", "NULL", "ULONG_PTR"
         }
 
         # Regex patterns
@@ -106,7 +106,6 @@ class AdvancedObfuscator:
             if (identifier not in self.keywords and
                 identifier not in self.std_names and
                 identifier not in self.winapi_names and
-                not identifier.isupper() and
                 len(identifier) > 1):
                 identifiers[identifier] = identifiers.get(identifier, 0) + 1
 
@@ -464,9 +463,9 @@ static std::string {str_func}(int id) {{
             print("  ➗ Obfuscating arithmetic expressions...")
             source = self.obfuscate_arithmetic(source)
 
-        if options.get('insert_dead_code', True):
-            print("  💀 Inserting dead code...")
-            source = self.insert_dead_code(source)
+        # if options.get('insert_dead_code', True):
+        #     print("  💀 Inserting dead code...")
+        #     source = self.insert_dead_code(source)
 
         if options.get('obfuscate_control_flow', True):
             print("  🔀 Obfuscating control flow...")
