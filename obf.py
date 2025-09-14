@@ -45,7 +45,8 @@ class AdvancedObfuscator:
             "std", "cout", "cin", "getline", "endl", "to_string", "stoi", "stol", "stoul",
             "printf", "scanf", "puts", "gets", "main", "iostream", "vector", "string",
             "map", "unordered_map", "set", "list", "deque", "algorithm", "memory",
-            "size_t", "push_back", "emplace_back", "reserve", "clear", "insert", "find"
+            "size_t", "push_back", "emplace_back", "reserve", "clear", "insert", "find",
+            "wchar_t", "static_cast", "wcslen", "wstring", "wcout", "wcin", "wstringstream"
         }
 
         self.winapi_names = {
@@ -64,7 +65,7 @@ class AdvancedObfuscator:
         }
 
         # Regex patterns
-        self.re_string = re.compile(r'R"(\([^\)]*\))"|R"[^"]*"|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', re.DOTALL)
+        self.re_string = re.compile(r'L?R"(\([^\)]*\))"|L?R"[^"]*"|L?"(?:\\.|[^"\\])*"|L?\'(?:\\.|[^\'\\])*\'', re.DOTALL)
         self.re_identifier = re.compile(r'\b([A-Za-z_]\w*)\b')
         self.re_comment = re.compile(r'//.*?$|/\*.*?\*/', re.DOTALL | re.MULTILINE)
         self.re_preprocessor = re.compile(r'^[ \t]*#.*$', re.MULTILINE)
@@ -116,7 +117,7 @@ class AdvancedObfuscator:
         def replace_number(match):
             num = int(match.group())
             if num == 0:
-                return "(1-1)"
+                return "0"
             elif num == 1:
                 return "(2-1)"
             elif num < 10:
@@ -138,13 +139,10 @@ class AdvancedObfuscator:
     def insert_dead_code(self, source: str) -> str:
         """Insert dead code blocks that never execute"""
         dead_code_snippets = [
-            "if(0) { int _unused = rand(); }",
-            "while(false) { volatile int _dummy = 0; }",
-            "if(1==2) { static int _dead = 0; _dead++; }",
-            "switch(0) { case 1: { int _never = 42; break; } }",
-            "for(int i=0; i<0; i++) { volatile float _x = 3.14f; }",
-            "if(sizeof(int) < 0) { char _impossible[1]; }",
-            "do { if(NULL) break; } while(0);",
+            "if (false) { int x = 1; x++; }",
+            "while (0) { break; }",
+            "for (int i = 0; i < 0; ++i) { volatile char c = 'a'; }",
+            "do {} while(0);"
         ]
 
         lines = source.split('\n')
@@ -226,8 +224,8 @@ class AdvancedObfuscator:
         def encrypt_string(match):
             original = match.group(0)
 
-            # Skip raw strings
-            if original.startswith('R"'):
+            # Skip raw strings and wide strings
+            if original.startswith('R"') or original.startswith('L'):
                 return original
 
             content = original[1:-1]  # Remove quotes
