@@ -152,7 +152,7 @@ class AdvancedObfuscator:
             result_lines.append(line)
 
             # Insert dead code randomly in function bodies
-            if ('{' in line and
+            if (line.strip().endswith('{') and
                 not line.strip().startswith('#') and
                 not line.strip().startswith('//') and
                 random.random() < 0.1):  # 10% chance
@@ -335,7 +335,7 @@ static std::string {str_func}(int id) {{
 
     def rename_identifiers(self, source: str, identifiers: Dict[str, int]) -> str:
         """Rename identifiers with collision detection"""
-        reserved_names = set(self.keywords) | self.std_names | {'include', 'define', 'pragma', 'main'}
+        reserved_names = set(self.keywords) | self.std_names | self.winapi_names | {'include', 'define', 'pragma', 'main'}
 
         # Build rename mapping
         rename_map = {}
