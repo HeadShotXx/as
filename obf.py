@@ -15,7 +15,7 @@ KEYWORDS = {
     "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept",
     "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private",
     "protected", "public", "reflexpr", "register", "reinterpret_cast",
-    "requires", "return", "short", "signed", "sizeof", "static",
+    "requires", "return", "short", "signed", "sizeof", "static", "size_t",
     "static_assert", "static_cast", "struct", "switch", "synchronized",
     "template", "this", "thread_local", "throw", "true", "try", "typedef",
     "typeid", "typename", "union", "unsigned", "using", "virtual", "void",
@@ -35,7 +35,9 @@ KEYWORDS = {
     "USHORT", "BYTE", "SIZE_T", "PULONG", "STARTUPINFOW", "PROCESS_INFORMATION",
     "SECURITY_ATTRIBUTES", "PROCESS_BASIC_INFORMATION", "PEB", "TEB",
     "CUSTOM_PEB", "CUSTOM_RTL_USER_PROCESS_PARAMETERS", "ProcessBasicInformation",
-    "CREATE_SUSPENDED", "CREATE_NEW_CONSOLE", "FALSE", "NULL",
+    "CREATE_SUSPENDED", "CREATE_NEW_CONSOLE", "FALSE", "NULL", "PebBaseAddress",
+    "dwProcessId", "dwThreadId", "hProcess", "hThread", "cb", "nLength", "ProcessParameters",
+    "CommandLine", "Length", "MaximumLength",
 
     # Windows API Functions
     "CreateProcessW", "NtQueryInformationProcess", "NtReadVirtualMemory",
@@ -80,13 +82,8 @@ def collect_identifiers(code):
 
         for match in RE_IDENTIFIER.finditer(temp_line):
             identifier = match.group(0)
+            # Rely SOLELY on the KEYWORDS list. The old context check was buggy.
             if identifier not in KEYWORDS and not identifier.isupper():
-                start_index = match.start()
-                if start_index > 0:
-                    prev_char = temp_line[start_index - 1]
-                    if prev_char in '.': continue
-                    if start_index > 1 and temp_line[start_index-2:start_index] in ['->', '::']:
-                        continue
                 identifiers.add(identifier)
 
     return identifiers
@@ -100,15 +97,19 @@ def replace_identifiers(code, rename_map):
     if not rename_map:
         return code
 
+    # Create a large regex for all identifiers to be replaced
+    # Sort by length descending to match longer names first
     sorted_keys = sorted(rename_map.keys(), key=len, reverse=True)
     pattern = r'\b(' + '|'.join(re.escape(key) for key in sorted_keys) + r')\b'
 
     processed_lines = []
     for line in code.split('\n'):
+        # Skip preprocessor lines
         if line.strip().startswith('#'):
             processed_lines.append(line)
             continue
 
+        # Store strings and comments and replace them with placeholders
         literals = {}
         def store_literal(match_obj):
             key = f"__LITERAL_{len(literals)}__"
@@ -118,18 +119,10 @@ def replace_identifiers(code, rename_map):
         temp_line = RE_COMMENT.sub(store_literal, line)
         temp_line = RE_STRING.sub(store_literal, temp_line)
 
-        def repl(match):
-            identifier = match.group(0)
-            start_index = match.start()
-            if start_index > 0:
-                prev_char = temp_line[start_index - 1]
-                if prev_char == '.': return identifier
-                if start_index > 1 and temp_line[start_index - 2:start_index] in ['->', '::']:
-                    return identifier
-            return rename_map.get(identifier, identifier)
+        # Perform replacement on the code without literals
+        temp_line = re.sub(pattern, lambda m: rename_map.get(m.group(0), m.group(0)), temp_line)
 
-        temp_line = re.sub(pattern, repl, temp_line)
-
+        # Restore literals
         for key, value in literals.items():
             temp_line = temp_line.replace(key, value, 1)
 
@@ -146,12 +139,14 @@ def obfuscate_strings(code, key_byte=0x55):
         original_str = match.group(3)
         raw_str = match.group(4)
 
+        # Skip wide strings (L"...") and raw strings (R"...")
         if is_wide or raw_str is not None:
             return match.group(0)
 
         if original_str is None:
             return match.group(0)
 
+        # Decode C-style escapes
         decoded_str = bytes(original_str, 'utf-8').decode('unicode_escape')
         xored_bytes = [ord(b) ^ key_byte for b in decoded_str]
 

