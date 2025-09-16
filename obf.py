@@ -22,22 +22,22 @@ KEYWORDS = {
     "volatile", "wchar_t", "while", "xor", "xor_eq",
 
     # Standard Library
-    "std", "cout", "cin", "endl", "string", "wstring", "vector", "map", "set",
+    "std", "cout", "wcout", "cin", "wcin", "endl", "string", "wstring", "vector", "map", "set",
     "list", "deque", "stack", "queue", "priority_queue", "pair",
     "tuple", "array", "unordered_map", "unordered_set", "shared_ptr",
     "unique_ptr", "weak_ptr", "thread", "mutex", "atomic", "future",
     "promise", "chrono", "iostream", "sstream", "wstringstream", "fstream", "algorithm",
     "to_wstring", "size", "find", "replace", "substr", "find_last_not_of", "c_str",
-    "length", "data", "begin", "end", "get", "hex",
+    "length", "data", "begin", "end", "get", "hex", "npos",
 
     # Windows API Types & Constants
-    "HANDLE", "PVOID", "LPWSTR", "DWORD", "BOOL", "NTSTATUS", "ULONG",
+    "HANDLE", "PVOID", "LPWSTR", "DWORD", "BOOL", "NTSTATUS", "ULONG", "ULONG_PTR",
     "USHORT", "BYTE", "SIZE_T", "PULONG", "STARTUPINFOW", "PROCESS_INFORMATION",
     "SECURITY_ATTRIBUTES", "PROCESS_BASIC_INFORMATION", "PEB", "TEB",
     "CUSTOM_PEB", "CUSTOM_RTL_USER_PROCESS_PARAMETERS", "ProcessBasicInformation",
     "CREATE_SUSPENDED", "CREATE_NEW_CONSOLE", "FALSE", "NULL", "PebBaseAddress",
     "dwProcessId", "dwThreadId", "hProcess", "hThread", "cb", "nLength", "ProcessParameters",
-    "CommandLine", "Length", "MaximumLength",
+    "CommandLine", "Length", "MaximumLength", "ImageBaseAddress", "Ldr",
 
     # Windows API Functions
     "CreateProcessW", "NtQueryInformationProcess", "NtReadVirtualMemory",
@@ -73,8 +73,10 @@ def collect_identifiers(code):
     """Collects all valid identifiers from the code, avoiding protected contexts."""
     identifiers = set()
 
+    # Process line by line to handle context correctly
     for line in code.split('\n'):
-        if line.strip().startswith('#'):
+        # Skip preprocessor lines and extern "C" declarations to be safe
+        if line.strip().startswith('#') or 'extern "C"' in line:
             continue
 
         temp_line = RE_COMMENT.sub('', line)
@@ -82,7 +84,6 @@ def collect_identifiers(code):
 
         for match in RE_IDENTIFIER.finditer(temp_line):
             identifier = match.group(0)
-            # Rely SOLELY on the KEYWORDS list. The old context check was buggy.
             if identifier not in KEYWORDS and not identifier.isupper():
                 identifiers.add(identifier)
 
@@ -97,19 +98,16 @@ def replace_identifiers(code, rename_map):
     if not rename_map:
         return code
 
-    # Create a large regex for all identifiers to be replaced
-    # Sort by length descending to match longer names first
     sorted_keys = sorted(rename_map.keys(), key=len, reverse=True)
     pattern = r'\b(' + '|'.join(re.escape(key) for key in sorted_keys) + r')\b'
 
     processed_lines = []
     for line in code.split('\n'):
-        # Skip preprocessor lines
-        if line.strip().startswith('#'):
+        # Skip preprocessor lines and extern "C" declarations to be safe
+        if line.strip().startswith('#') or 'extern "C"' in line:
             processed_lines.append(line)
             continue
 
-        # Store strings and comments and replace them with placeholders
         literals = {}
         def store_literal(match_obj):
             key = f"__LITERAL_{len(literals)}__"
@@ -119,10 +117,8 @@ def replace_identifiers(code, rename_map):
         temp_line = RE_COMMENT.sub(store_literal, line)
         temp_line = RE_STRING.sub(store_literal, temp_line)
 
-        # Perform replacement on the code without literals
         temp_line = re.sub(pattern, lambda m: rename_map.get(m.group(0), m.group(0)), temp_line)
 
-        # Restore literals
         for key, value in literals.items():
             temp_line = temp_line.replace(key, value, 1)
 
@@ -139,14 +135,12 @@ def obfuscate_strings(code, key_byte=0x55):
         original_str = match.group(3)
         raw_str = match.group(4)
 
-        # Skip wide strings (L"...") and raw strings (R"...")
         if is_wide or raw_str is not None:
             return match.group(0)
 
         if original_str is None:
             return match.group(0)
 
-        # Decode C-style escapes
         decoded_str = bytes(original_str, 'utf-8').decode('unicode_escape')
         xored_bytes = [ord(b) ^ key_byte for b in decoded_str]
 
@@ -158,7 +152,6 @@ def obfuscate_strings(code, key_byte=0x55):
     lines = code.split('\n')
     processed_lines = []
     for line in lines:
-        # Skip preprocessor lines and extern "C" declarations
         if line.strip().startswith('#') or 'extern "C"' in line:
             processed_lines.append(line)
         else:
