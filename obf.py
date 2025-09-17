@@ -251,6 +251,102 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
         return code[:insert_pos] + helper_code + code[insert_pos:]
     return helper_code + code
 
+def obfuscate_numbers(code):
+    """Replaces integer literals with arithmetic expressions."""
+
+    def repl(match):
+        num_str = match.group(0)
+        num = int(num_str)
+
+        if num == 0:
+            return "(1 - 1)"
+        if num == 1:
+            return "(1 * 1)"
+
+        # Try to find two factors
+        for i in range(2, int(num**0.5) + 1):
+            if num % i == 0:
+                j = num // i
+                # Let's add more randomness
+                if random.random() > 0.5:
+                    return f"({i} * {j})"
+                else:
+                    addend = random.randint(1, i-1) if i > 1 else 1
+                    return f"(({addend} + {i-addend}) * {j})"
+
+        # If prime or no small factors, use addition
+        addend = random.randint(1, num - 1) if num > 1 else 1
+        return f"({addend} + {num - addend})"
+
+    processed_lines = []
+    for line in code.split('\n'):
+        if line.strip().startswith('#'):
+            processed_lines.append(line)
+            continue
+
+        literals = {}
+        def store_literal(match_obj):
+            key = f"__LITERAL_{len(literals)}__"
+            literals[key] = match_obj.group(0)
+            return key
+
+        temp_line = RE_COMMENT.sub(store_literal, line)
+        temp_line = RE_STRING.sub(store_literal, temp_line)
+
+        # Regex for standalone integers
+        temp_line = re.sub(r'\b\d+\b', repl, temp_line)
+
+        for key, value in literals.items():
+            temp_line = temp_line.replace(key, value, 1)
+
+        processed_lines.append(temp_line)
+
+    return '\n'.join(processed_lines)
+
+def insert_dead_code(code, num_globals=2, num_locals=3):
+    """Inserts dead code (unused variables) into the C++ code."""
+
+    # 1. Insert global variables
+    global_vars = []
+    for _ in range(num_globals):
+        var_name = get_random_name()
+        value = random.randint(1000, 100000)
+        global_vars.append(f"int {var_name} = {value};")
+
+    global_code = "\n".join(global_vars)
+
+    # Find a safe place to insert globals (after includes, before other code)
+    # The string helper namespace is a good marker.
+    helper_namespace_pos = code.find("namespace {")
+    if helper_namespace_pos != -1:
+        code = code[:helper_namespace_pos] + global_code + "\n" + code[helper_namespace_pos:]
+    else:
+        # Fallback if the helper namespace isn't found
+        last_include_pos = code.rfind("#include")
+        if last_include_pos != -1:
+            insert_pos = code.find('\n', last_include_pos) + 1
+            code = code[:insert_pos] + global_code + "\n" + code[insert_pos:]
+        else:
+            code = global_code + "\n" + code
+
+    # 2. Insert local variables into main
+    main_func_body_pos = code.find("int main()")
+    if main_func_body_pos != -1:
+        opening_brace_pos = code.find('{', main_func_body_pos)
+        if opening_brace_pos != -1:
+            local_vars = []
+            for _ in range(num_locals):
+                var_name = get_random_name()
+                value = random.randint(1000, 100000)
+                local_vars.append(f"    int {var_name} = {value};")
+
+            local_code = "\n" + "\n".join(local_vars)
+
+            insert_pos = opening_brace_pos + 1
+            code = code[:insert_pos] + local_code + code[insert_pos:]
+
+    return code
+
 def main():
     parser = argparse.ArgumentParser(description="A simple C++ obfuscator.")
     parser.add_argument("-i", "--input", required=True, help="Input C++ file path.")
@@ -283,6 +379,9 @@ def main():
 
     code, strings, wstrings = obfuscate_strings(code, key_byte=key_byte, helper_names=helper_names)
     code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, helper_names=helper_names)
+
+    code = obfuscate_numbers(code)
+    code = insert_dead_code(code)
 
     final_code = minify(code)
 
