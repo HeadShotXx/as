@@ -103,6 +103,32 @@ def get_random_name(length=8):
     """Generates a random identifier name."""
     return '_' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
+def generate_junk_struct_or_union():
+    """Generates a C++ definition for a random struct or union."""
+    type_keyword = random.choice(["struct", "union"])
+    type_name = get_random_name()
+
+    num_members = random.randint(2, 5)
+    members = []
+    basic_types = ["int", "char", "bool", "float", "double", "long"]
+
+    for _ in range(num_members):
+        member_name = get_random_name()
+        member_type = random.choice(basic_types)
+
+        # 25% chance to make it an array
+        if random.random() < 0.25:
+            array_size = random.randint(2, 64)
+            members.append(f"    {member_type} {member_name}[{array_size}];")
+        else:
+            members.append(f"    {member_type} {member_name};")
+
+    definition = f"{type_keyword} {type_name} {{\n"
+    definition += "\n".join(members)
+    definition += f"\n}}; // End of {type_keyword} {type_name}\n"
+
+    return type_name, definition
+
 def collect_identifiers(code):
     """Collects all valid identifiers from the code, avoiding protected contexts."""
     identifiers = set()
@@ -160,7 +186,7 @@ def replace_identifiers(code, rename_map):
 
     return '\n'.join(processed_lines)
 
-def obfuscate_strings(code, key_byte=0x55, helper_names=None):
+def obfuscate_strings(code, key_byte=0x55, wchar_key=0x5555, helper_names=None):
     """Finds all C-style strings, XORs them, and prepares for runtime decoding."""
     obfuscated_strings = []
     obfuscated_wstrings = []
@@ -179,7 +205,7 @@ def obfuscate_strings(code, key_byte=0x55, helper_names=None):
         decoded_str = bytes(original_str, 'utf-8').decode('unicode_escape')
 
         if is_wide:
-            xored_wchars = [ord(c) ^ key_byte for c in decoded_str]
+            xored_wchars = [ord(c) ^ wchar_key for c in decoded_str]
             array_id = len(obfuscated_wstrings)
             obfuscated_wstrings.append(xored_wchars)
             return f"{helper_names['_obf_wstr']}({array_id})"
@@ -200,10 +226,17 @@ def obfuscate_strings(code, key_byte=0x55, helper_names=None):
     code = '\n'.join(processed_lines)
     return code, obfuscated_strings, obfuscated_wstrings
 
-def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55, helper_names=None):
+def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55, wchar_key=0x5555, helper_names=None):
     """Inserts the C++ helper code for decoding strings at runtime."""
     if not obfuscated_strings and not obfuscated_wstrings:
         return code
+
+    # Generate a pool of junk data to interleave
+    junk_pool = []
+    for _ in range(4): # Create 4 junk data blocks
+        type_name, type_def = generate_junk_struct_or_union()
+        var_name = get_random_name()
+        junk_pool.append(f"{type_def}\n{type_name} {var_name};")
 
     helper_code = "\n// --- String Obfuscation Helper --- \n"
     helper_code += "namespace {\n"
@@ -212,6 +245,8 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
     if obfuscated_strings:
         for i, data in enumerate(obfuscated_strings):
             helper_code += f"    char {helper_names['_obf_data_']}{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+            if i % 2 == 0 and junk_pool:
+                helper_code += junk_pool.pop(0) + "\n"
         helper_code += f"\n    char* {helper_names['_obf_str_table']}[] = {{\n"
         for i in range(len(obfuscated_strings)):
             helper_code += f"        {helper_names['_obf_data_']}{i},\n"
@@ -229,6 +264,8 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
     if obfuscated_wstrings:
         for i, data in enumerate(obfuscated_wstrings):
             helper_code += f"    wchar_t {helper_names['_obf_wdata_']}{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+            if i % 2 != 0 and junk_pool:
+                helper_code += junk_pool.pop(0) + "\n"
         helper_code += f"\n    wchar_t* {helper_names['_obf_wstr_table']}[] = {{\n"
         for i in range(len(obfuscated_wstrings)):
             helper_code += f"        {helper_names['_obf_wdata_']}{i},\n"
@@ -237,10 +274,13 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
         helper_code += f"    const wchar_t* {helper_names['_obf_wstr']}(int id) {{\n"
         helper_code += f"        wchar_t* s = {helper_names['_obf_wstr_table']}[id];\n"
         helper_code += f"        int i = 0;\n"
-        helper_code += f"        for (; s[i] != 0; ++i) {helper_names['_obf_wdecode_buffer']}[i] = s[i] ^ {key_byte};\n"
+        helper_code += f"        for (; s[i] != 0; ++i) {helper_names['_obf_wdecode_buffer']}[i] = s[i] ^ {wchar_key};\n"
         helper_code += f"        {helper_names['_obf_wdecode_buffer']}[i] = 0;\n"
         helper_code += f"        return {helper_names['_obf_wdecode_buffer']};\n"
         helper_code += "    }\n"
+
+    # Add any remaining junk at the end
+    helper_code += "\n".join(junk_pool)
 
     helper_code += "} // anonymous namespace\n"
     helper_code += "// --- End String Obfuscation Helper --- \n\n"
@@ -262,19 +302,19 @@ def obfuscate_numbers(code):
             return num_str
 
         # Try to find two factors
+        factors = []
         for i in range(2, int(num**0.5) + 1):
             if num % i == 0:
-                j = num // i
-                # Let's add more randomness
-                if random.random() > 0.5:
-                    return f"({i} * {j})"
-                else:
-                    addend = random.randint(1, i-1) if i > 1 else 1
-                    return f"(({addend} + {i-addend}) * {j})"
+                factors.append((i, num // i))
 
-        # If prime or no small factors, use addition
-        addend = random.randint(1, num - 1) if num > 1 else 1
-        return f"({addend} + {num - addend})"
+        if factors:
+            # If factors were found, always use multiplication
+            chosen_factors = random.choice(factors)
+            return f"({chosen_factors[0]} * {chosen_factors[1]})"
+        else:
+            # If prime or no small factors, use addition
+            addend = random.randint(1, num - 1)
+            return f"({addend} + {num - addend})"
 
     processed_lines = []
     for line in code.split('\n'):
@@ -301,33 +341,10 @@ def obfuscate_numbers(code):
 
     return '\n'.join(processed_lines)
 
-def insert_dead_code(code, num_globals=2, num_locals=3):
+def insert_dead_code(code, num_locals=3):
     """Inserts dead code (unused variables) into the C++ code."""
 
-    # 1. Insert global variables
-    global_vars = []
-    for _ in range(num_globals):
-        var_name = get_random_name()
-        value = random.randint(1000, 100000)
-        global_vars.append(f"int {var_name} = {value};")
-
-    global_code = "\n".join(global_vars)
-
-    # Find a safe place to insert globals (after includes, before other code)
-    # The string helper namespace is a good marker.
-    helper_namespace_pos = code.find("namespace {")
-    if helper_namespace_pos != -1:
-        code = code[:helper_namespace_pos] + global_code + "\n" + code[helper_namespace_pos:]
-    else:
-        # Fallback if the helper namespace isn't found
-        last_include_pos = code.rfind("#include")
-        if last_include_pos != -1:
-            insert_pos = code.find('\n', last_include_pos) + 1
-            code = code[:insert_pos] + global_code + "\n" + code[insert_pos:]
-        else:
-            code = global_code + "\n" + code
-
-    # 2. Insert local variables into main
+    # Insert local variables into main
     main_func_body_pos = code.find("int main()")
     if main_func_body_pos != -1:
         opening_brace_pos = code.find('{', main_func_body_pos)
@@ -359,6 +376,7 @@ def main():
         return
 
     key_byte = random.randint(1, 255)
+    wchar_key = random.randint(1, 65535)
 
     helper_names = {
         "_obf_str": get_random_name(),
@@ -375,8 +393,8 @@ def main():
     rename_map = build_rename_map(identifiers_to_rename)
     code = replace_identifiers(code, rename_map)
 
-    code, strings, wstrings = obfuscate_strings(code, key_byte=key_byte, helper_names=helper_names)
-    code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, helper_names=helper_names)
+    code, strings, wstrings = obfuscate_strings(code, key_byte=key_byte, wchar_key=wchar_key, helper_names=helper_names)
+    code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, wchar_key=wchar_key, helper_names=helper_names)
 
     code = obfuscate_numbers(code)
     code = insert_dead_code(code)
