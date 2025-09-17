@@ -258,10 +258,8 @@ def obfuscate_numbers(code):
         num_str = match.group(0)
         num = int(num_str)
 
-        if num == 0:
-            return "(1 - 1)"
-        if num == 1:
-            return "(1 * 1)"
+        if num <= 1:
+            return num_str
 
         # Try to find two factors
         for i in range(2, int(num**0.5) + 1):
