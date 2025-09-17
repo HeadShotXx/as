@@ -160,7 +160,7 @@ def replace_identifiers(code, rename_map):
 
     return '\n'.join(processed_lines)
 
-def obfuscate_strings(code, key_byte=0x55):
+def obfuscate_strings(code, key_byte=0x55, helper_names=None):
     """Finds all C-style strings, XORs them, and prepares for runtime decoding."""
     obfuscated_strings = []
     obfuscated_wstrings = []
@@ -182,12 +182,12 @@ def obfuscate_strings(code, key_byte=0x55):
             xored_wchars = [ord(c) ^ key_byte for c in decoded_str]
             array_id = len(obfuscated_wstrings)
             obfuscated_wstrings.append(xored_wchars)
-            return f"_obf_wstr({array_id})"
+            return f"{helper_names['_obf_wstr']}({array_id})"
         else:
             xored_bytes = [ord(b) ^ key_byte for b in decoded_str]
             array_id = len(obfuscated_strings)
             obfuscated_strings.append(xored_bytes)
-            return f"_obf_str({array_id})"
+            return f"{helper_names['_obf_str']}({array_id})"
 
     lines = code.split('\n')
     processed_lines = []
@@ -200,7 +200,7 @@ def obfuscate_strings(code, key_byte=0x55):
     code = '\n'.join(processed_lines)
     return code, obfuscated_strings, obfuscated_wstrings
 
-def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55):
+def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55, helper_names=None):
     """Inserts the C++ helper code for decoding strings at runtime."""
     if not obfuscated_strings and not obfuscated_wstrings:
         return code
@@ -211,35 +211,35 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
     # Narrow strings
     if obfuscated_strings:
         for i, data in enumerate(obfuscated_strings):
-            helper_code += f"    char _obf_data_{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
-        helper_code += "\n    char* _obf_str_table[] = {\n"
+            helper_code += f"    char {helper_names['_obf_data_']}{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+        helper_code += f"\n    char* {helper_names['_obf_str_table']}[] = {{\n"
         for i in range(len(obfuscated_strings)):
-            helper_code += f"        _obf_data_{i},\n"
+            helper_code += f"        {helper_names['_obf_data_']}{i},\n"
         helper_code += "    };\n\n"
-        helper_code += "    char _obf_decode_buffer[4096];\n"
-        helper_code += "    const char* _obf_str(int id) {\n"
-        helper_code += f"        char* s = _obf_str_table[id];\n"
+        helper_code += f"    char {helper_names['_obf_decode_buffer']}[4096];\n"
+        helper_code += f"    const char* {helper_names['_obf_str']}(int id) {{\n"
+        helper_code += f"        char* s = {helper_names['_obf_str_table']}[id];\n"
         helper_code += f"        int i = 0;\n"
-        helper_code += f"        for (; s[i] != 0; ++i) _obf_decode_buffer[i] = s[i] ^ {key_byte};\n"
-        helper_code += f"        _obf_decode_buffer[i] = 0;\n"
-        helper_code += "        return _obf_decode_buffer;\n"
+        helper_code += f"        for (; s[i] != 0; ++i) {helper_names['_obf_decode_buffer']}[i] = s[i] ^ {key_byte};\n"
+        helper_code += f"        {helper_names['_obf_decode_buffer']}[i] = 0;\n"
+        helper_code += f"        return {helper_names['_obf_decode_buffer']};\n"
         helper_code += "    }\n"
 
     # Wide strings
     if obfuscated_wstrings:
         for i, data in enumerate(obfuscated_wstrings):
-            helper_code += f"    wchar_t _obf_wdata_{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
-        helper_code += "\n    wchar_t* _obf_wstr_table[] = {\n"
+            helper_code += f"    wchar_t {helper_names['_obf_wdata_']}{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+        helper_code += f"\n    wchar_t* {helper_names['_obf_wstr_table']}[] = {{\n"
         for i in range(len(obfuscated_wstrings)):
-            helper_code += f"        _obf_wdata_{i},\n"
+            helper_code += f"        {helper_names['_obf_wdata_']}{i},\n"
         helper_code += "    };\n\n"
-        helper_code += "    wchar_t _obf_wdecode_buffer[4096];\n"
-        helper_code += "    const wchar_t* _obf_wstr(int id) {\n"
-        helper_code += f"        wchar_t* s = _obf_wstr_table[id];\n"
+        helper_code += f"    wchar_t {helper_names['_obf_wdecode_buffer']}[4096];\n"
+        helper_code += f"    const wchar_t* {helper_names['_obf_wstr']}(int id) {{\n"
+        helper_code += f"        wchar_t* s = {helper_names['_obf_wstr_table']}[id];\n"
         helper_code += f"        int i = 0;\n"
-        helper_code += f"        for (; s[i] != 0; ++i) _obf_wdecode_buffer[i] = s[i] ^ {key_byte};\n"
-        helper_code += f"        _obf_wdecode_buffer[i] = 0;\n"
-        helper_code += "        return _obf_wdecode_buffer;\n"
+        helper_code += f"        for (; s[i] != 0; ++i) {helper_names['_obf_wdecode_buffer']}[i] = s[i] ^ {key_byte};\n"
+        helper_code += f"        {helper_names['_obf_wdecode_buffer']}[i] = 0;\n"
+        helper_code += f"        return {helper_names['_obf_wdecode_buffer']};\n"
         helper_code += "    }\n"
 
     helper_code += "} // anonymous namespace\n"
@@ -264,12 +264,25 @@ def main():
         print(f"Error: Input file not found at {args.input}")
         return
 
+    key_byte = random.randint(1, 255)
+
+    helper_names = {
+        "_obf_str": get_random_name(),
+        "_obf_wstr": get_random_name(),
+        "_obf_data_": get_random_name() + "_",
+        "_obf_wdata_": get_random_name() + "_",
+        "_obf_str_table": get_random_name(),
+        "_obf_wstr_table": get_random_name(),
+        "_obf_decode_buffer": get_random_name(),
+        "_obf_wdecode_buffer": get_random_name(),
+    }
+
     identifiers_to_rename = collect_identifiers(code)
     rename_map = build_rename_map(identifiers_to_rename)
     code = replace_identifiers(code, rename_map)
 
-    code, strings, wstrings = obfuscate_strings(code)
-    code = insert_string_runtime_helpers(code, strings, wstrings)
+    code, strings, wstrings = obfuscate_strings(code, key_byte=key_byte, helper_names=helper_names)
+    code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, helper_names=helper_names)
 
     final_code = minify(code)
 
