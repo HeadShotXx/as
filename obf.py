@@ -26,7 +26,7 @@ KEYWORDS = {
     "list", "deque", "stack", "queue", "priority_queue", "pair",
     "tuple", "array", "unordered_map", "unordered_set", "shared_ptr",
     "unique_ptr", "weak_ptr", "thread", "mutex", "atomic", "future",
-    "promise", "chrono", "iostream", "sstream", "wstringstream", "fstream", "algorithm",
+    "promise", "chrono", "iostream", "sstream", "str", "wstringstream", "fstream", "algorithm",
     "to_wstring", "size", "find", "replace", "substr", "find_last_not_of", "c_str",
     "length", "data", "begin", "end", "get", "hex", "npos",
 
@@ -161,27 +161,33 @@ def replace_identifiers(code, rename_map):
     return '\n'.join(processed_lines)
 
 def obfuscate_strings(code, key_byte=0x55):
-    """Finds all C-style strings (non-wide), XORs them, and prepares for runtime decoding."""
+    """Finds all C-style strings, XORs them, and prepares for runtime decoding."""
     obfuscated_strings = []
+    obfuscated_wstrings = []
 
     def repl(match):
         is_wide = match.group(1)
         original_str = match.group(3)
         raw_str = match.group(4)
 
-        if is_wide or raw_str is not None:
+        if raw_str is not None:  # Don't obfuscate raw strings
             return match.group(0)
 
         if original_str is None:
             return match.group(0)
 
         decoded_str = bytes(original_str, 'utf-8').decode('unicode_escape')
-        xored_bytes = [ord(b) ^ key_byte for b in decoded_str]
 
-        array_id = len(obfuscated_strings)
-        obfuscated_strings.append(xored_bytes)
-
-        return f"_obf_str({array_id})"
+        if is_wide:
+            xored_wchars = [ord(c) ^ key_byte for c in decoded_str]
+            array_id = len(obfuscated_wstrings)
+            obfuscated_wstrings.append(xored_wchars)
+            return f"_obf_wstr({array_id})"
+        else:
+            xored_bytes = [ord(b) ^ key_byte for b in decoded_str]
+            array_id = len(obfuscated_strings)
+            obfuscated_strings.append(xored_bytes)
+            return f"_obf_str({array_id})"
 
     lines = code.split('\n')
     processed_lines = []
@@ -192,29 +198,50 @@ def obfuscate_strings(code, key_byte=0x55):
             processed_lines.append(RE_STRING.sub(repl, line))
 
     code = '\n'.join(processed_lines)
-    return code, obfuscated_strings
+    return code, obfuscated_strings, obfuscated_wstrings
 
-def insert_string_runtime_helper(code, obfuscated_strings, key_byte=0x55):
+def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55):
     """Inserts the C++ helper code for decoding strings at runtime."""
-    if not obfuscated_strings:
+    if not obfuscated_strings and not obfuscated_wstrings:
         return code
 
     helper_code = "\n// --- String Obfuscation Helper --- \n"
     helper_code += "namespace {\n"
-    for i, data in enumerate(obfuscated_strings):
-        helper_code += f"    char _obf_data_{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
-    helper_code += "\n    char* _obf_str_table[] = {\n"
-    for i in range(len(obfuscated_strings)):
-        helper_code += f"        _obf_data_{i},\n"
-    helper_code += "    };\n\n"
-    helper_code += "    char _obf_decode_buffer[4096];\n"
-    helper_code += "    const char* _obf_str(int id) {\n"
-    helper_code += f"        char* s = _obf_str_table[id];\n"
-    helper_code += f"        int i = 0;\n"
-    helper_code += f"        for (; s[i] != 0; ++i) _obf_decode_buffer[i] = s[i] ^ {key_byte};\n"
-    helper_code += f"        _obf_decode_buffer[i] = 0;\n"
-    helper_code += "        return _obf_decode_buffer;\n"
-    helper_code += "    }\n"
+
+    # Narrow strings
+    if obfuscated_strings:
+        for i, data in enumerate(obfuscated_strings):
+            helper_code += f"    char _obf_data_{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+        helper_code += "\n    char* _obf_str_table[] = {\n"
+        for i in range(len(obfuscated_strings)):
+            helper_code += f"        _obf_data_{i},\n"
+        helper_code += "    };\n\n"
+        helper_code += "    char _obf_decode_buffer[4096];\n"
+        helper_code += "    const char* _obf_str(int id) {\n"
+        helper_code += f"        char* s = _obf_str_table[id];\n"
+        helper_code += f"        int i = 0;\n"
+        helper_code += f"        for (; s[i] != 0; ++i) _obf_decode_buffer[i] = s[i] ^ {key_byte};\n"
+        helper_code += f"        _obf_decode_buffer[i] = 0;\n"
+        helper_code += "        return _obf_decode_buffer;\n"
+        helper_code += "    }\n"
+
+    # Wide strings
+    if obfuscated_wstrings:
+        for i, data in enumerate(obfuscated_wstrings):
+            helper_code += f"    wchar_t _obf_wdata_{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+        helper_code += "\n    wchar_t* _obf_wstr_table[] = {\n"
+        for i in range(len(obfuscated_wstrings)):
+            helper_code += f"        _obf_wdata_{i},\n"
+        helper_code += "    };\n\n"
+        helper_code += "    wchar_t _obf_wdecode_buffer[4096];\n"
+        helper_code += "    const wchar_t* _obf_wstr(int id) {\n"
+        helper_code += f"        wchar_t* s = _obf_wstr_table[id];\n"
+        helper_code += f"        int i = 0;\n"
+        helper_code += f"        for (; s[i] != 0; ++i) _obf_wdecode_buffer[i] = s[i] ^ {key_byte};\n"
+        helper_code += f"        _obf_wdecode_buffer[i] = 0;\n"
+        helper_code += "        return _obf_wdecode_buffer;\n"
+        helper_code += "    }\n"
+
     helper_code += "} // anonymous namespace\n"
     helper_code += "// --- End String Obfuscation Helper --- \n\n"
 
@@ -241,8 +268,8 @@ def main():
     rename_map = build_rename_map(identifiers_to_rename)
     code = replace_identifiers(code, rename_map)
 
-    code, strings = obfuscate_strings(code)
-    code = insert_string_runtime_helper(code, strings)
+    code, strings, wstrings = obfuscate_strings(code)
+    code = insert_string_runtime_helpers(code, strings, wstrings)
 
     final_code = minify(code)
 
