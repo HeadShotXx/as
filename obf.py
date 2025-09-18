@@ -129,6 +129,104 @@ def generate_junk_struct_or_union():
 
     return type_name, definition
 
+def find_functions_and_calls(code):
+    """
+    A simple heuristic-based parser to find function definitions and calls.
+    This is not a full C++ parser and is tailored to the style of psl.cpp.
+    """
+    # Signatures for functions we want to obfuscate calls to.
+    # This is hardcoded for safety. A generic solution is too risky.
+    # For now, we only handle non-overloaded functions to prove the concept.
+    known_functions = {
+        "PadRight": ["std::wstring (const std::wstring&, size_t, wchar_t)"]
+    }
+
+    # Find calls to these functions
+    call_sites = {}
+    for func_name in known_functions:
+        call_sites[func_name] = []
+        pattern = re.compile(r'\b' + func_name + r'\s*\(')
+        for match in pattern.finditer(code):
+            call_sites[func_name].append(match.start())
+
+    return known_functions, call_sites
+
+def generate_fp_table(functions, rename_map):
+    """Generates a C++ global array of function pointers."""
+
+    table_name = get_random_name()
+    table_entries = []
+    func_map = {}
+    i = 0
+
+    for func_name, sig_list in functions.items():
+        if func_name in rename_map:
+            obfuscated_name = rename_map[func_name]
+            for sig in sig_list:
+                parts = sig.split('(', 1)
+                return_type = parts[0].strip()
+                args = parts[1][:-1]
+
+                cast = f"({return_type} (*)({args}))"
+
+                table_entries.append(f"    (void*)({cast}&{obfuscated_name})")
+
+                if func_name not in func_map:
+                    func_map[func_name] = {
+                        "id": i,
+                        "cast": cast,
+                        "table": table_name,
+                        "return_type": return_type
+                    }
+                i += 1
+
+    if not table_entries:
+        return "", {}
+
+    table_code = f"\nvoid* {table_name}[] = {{\n"
+    table_code += ",\n".join(table_entries)
+    table_code += "\n};"
+
+    return table_code, func_map
+
+def replace_function_calls(code, func_map, rename_map):
+    """Replaces direct function calls with indirect calls through a pointer table."""
+    if not func_map:
+        return code
+
+    # The code has already been processed by `replace_identifiers`, so we work with obfuscated names.
+
+    # Create a map from obfuscated name back to original info
+    obf_func_map = {}
+    for func_name, func_info in func_map.items():
+        if func_name in rename_map:
+            obf_name = rename_map[func_name]
+            obf_func_map[obf_name] = func_info
+
+    lines = code.split('\n')
+    processed_lines = []
+    for line in lines:
+        # Heuristic to detect and skip function definitions
+        is_definition = False
+        for obf_name, func_info in obf_func_map.items():
+            if re.search(r'\b' + re.escape(func_info['return_type']) + r'\s+' + re.escape(obf_name) + r'\s*\(', line):
+                is_definition = True
+                break
+
+        if is_definition:
+            processed_lines.append(line)
+            continue
+
+        # If it's not a definition, replace any calls on this line
+        temp_line = line
+        for obf_name, func_info in obf_func_map.items():
+            replacement = f"(({func_info['cast']}){func_info['table']}[{func_info['id']}])"
+            temp_line = temp_line.replace(obf_name, replacement)
+
+        processed_lines.append(temp_line)
+
+    return '\n'.join(processed_lines)
+
 def collect_identifiers(code):
     """Collects all valid identifiers from the code, avoiding protected contexts."""
     identifiers = set()
@@ -226,7 +324,7 @@ def obfuscate_strings(code, key_byte=0x55, wchar_key=0x5555, helper_names=None):
     code = '\n'.join(processed_lines)
     return code, obfuscated_strings, obfuscated_wstrings
 
-def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55, wchar_key=0x5555, helper_names=None):
+def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings, key_byte=0x55, wchar_key=0x5555, helper_names=None, fp_table_code=""):
     """Inserts the C++ helper code for decoding strings at runtime."""
     if not obfuscated_strings and not obfuscated_wstrings:
         return code
@@ -240,6 +338,9 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
 
     helper_code = "\n// --- String Obfuscation Helper --- \n"
     helper_code += "namespace {\n"
+
+    # Add function pointer table
+    helper_code += fp_table_code + "\n"
 
     # Narrow strings
     if obfuscated_strings:
@@ -368,12 +469,24 @@ def main():
         "_obf_wdecode_buffer": get_random_name(),
     }
 
+    # Function pointer obfuscation
+    known_funcs, call_sites = find_functions_and_calls(code)
+
     identifiers_to_rename = collect_identifiers(code)
+    # Make sure we don't rename the functions we want to make pointers to
+    for func in known_funcs:
+        if func in identifiers_to_rename:
+            identifiers_to_rename.remove(func)
+
     rename_map = build_rename_map(identifiers_to_rename)
+
+    fp_table_code, fp_map = generate_fp_table(known_funcs, rename_map)
+
+    code = replace_function_calls(code, fp_map, rename_map)
     code = replace_identifiers(code, rename_map)
 
     code, strings, wstrings = obfuscate_strings(code, key_byte=key_byte, wchar_key=wchar_key, helper_names=helper_names)
-    code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, wchar_key=wchar_key, helper_names=helper_names)
+    code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, wchar_key=wchar_key, helper_names=helper_names, fp_table_code=fp_table_code)
 
     code = obfuscate_numbers(code)
 
