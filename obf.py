@@ -346,29 +346,44 @@ def insert_opaque_predicates(code):
     processed_lines = []
     lines = code.split('\n')
 
+    brace_depth = 0
+    # This regex is a simple heuristic to find lines that are single statements.
     statement_regex = re.compile(r'^\s*[a-zA-Z_].*?;$')
 
     for line in lines:
-        # 10% chance to wrap a matching line
-        if statement_regex.match(line) and random.random() < 0.1:
+        # Track brace depth to determine if we are inside a function/block
+        if '{' in line:
+            brace_depth += line.count('{')
+        if '}' in line:
+            brace_depth -= line.count('}')
+
+        # Only try to wrap if we are inside a block and with a certain probability
+        if brace_depth > 0 and statement_regex.match(line) and random.random() < 0.15:
             var_name1 = get_random_name()
             var_name2 = get_random_name()
             dead_var = get_random_name()
 
             # Create the opaque predicate and the dead code block
             predicate = f"({var_name1} * {var_name1}) >= 0"
-            dead_code = f"    {dead_var} = {var_name1} + {var_name2};"
+            dead_code = f"    int {dead_var} = {var_name1} + {var_name2};" # Fixed dead code
+
+            # Indent the original line
+            indented_line = "    " + line.strip()
 
             new_lines = [
                 f"int {var_name1} = {random.randint(1, 100)};",
                 f"int {var_name2} = {random.randint(1, 100)};",
                 f"if ({predicate}) {{",
-                f"    {line.strip()}",
+                indented_line,
                 f"}} else {{",
                 f"    {dead_code}",
                 f"}}"
             ]
-            processed_lines.extend(new_lines)
+            # The indentation of the new block should match the original line
+            original_indent = len(line) - len(line.lstrip(' '))
+            indented_new_lines = [" " * original_indent + l for l in new_lines]
+
+            processed_lines.extend(indented_new_lines)
         else:
             processed_lines.append(line)
 
