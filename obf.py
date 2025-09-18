@@ -341,54 +341,6 @@ def obfuscate_numbers(code):
 
     return '\n'.join(processed_lines)
 
-def insert_opaque_predicates(code):
-    """Wraps some statements in bogus if-else blocks to complicate the control flow graph."""
-    processed_lines = []
-    lines = code.split('\n')
-
-    brace_depth = 0
-    # This regex is a simple heuristic to find lines that are single statements.
-    statement_regex = re.compile(r'^\s*[a-zA-Z_].*?;$')
-
-    for line in lines:
-        # Track brace depth to determine if we are inside a function/block
-        if '{' in line:
-            brace_depth += line.count('{')
-        if '}' in line:
-            brace_depth -= line.count('}')
-
-        # Only try to wrap if we are inside a block and with a certain probability
-        if brace_depth > 0 and statement_regex.match(line) and random.random() < 0.15:
-            var_name1 = get_random_name()
-            var_name2 = get_random_name()
-            dead_var = get_random_name()
-
-            # Create the opaque predicate and the dead code block
-            predicate = f"({var_name1} * {var_name1}) >= 0"
-            dead_code = f"    int {dead_var} = {var_name1} + {var_name2};" # Fixed dead code
-
-            # Indent the original line
-            indented_line = "    " + line.strip()
-
-            new_lines = [
-                f"int {var_name1} = {random.randint(1, 100)};",
-                f"int {var_name2} = {random.randint(1, 100)};",
-                f"if ({predicate}) {{",
-                indented_line,
-                f"}} else {{",
-                f"    {dead_code}",
-                f"}}"
-            ]
-            # The indentation of the new block should match the original line
-            original_indent = len(line) - len(line.lstrip(' '))
-            indented_new_lines = [" " * original_indent + l for l in new_lines]
-
-            processed_lines.extend(indented_new_lines)
-        else:
-            processed_lines.append(line)
-
-    return '\n'.join(processed_lines)
-
 def main():
     parser = argparse.ArgumentParser(description="A simple C++ obfuscator.")
     parser.add_argument("-i", "--input", required=True, help="Input C++ file path.")
@@ -424,7 +376,6 @@ def main():
     code = insert_string_runtime_helpers(code, strings, wstrings, key_byte=key_byte, wchar_key=wchar_key, helper_names=helper_names)
 
     code = obfuscate_numbers(code)
-    code = insert_opaque_predicates(code)
 
     final_code = minify(code)
 
