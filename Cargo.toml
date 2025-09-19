@@ -3,13 +3,7 @@ name = "rust_stub"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.windows]
-version = "0.51.1"
-features = [
-    "Win32_Foundation",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_Threading",
-    "Win32_Security",
-    "Win32_System_Kernel",
-    "Win32_System_SystemServices"
-]
+[dependencies]
+winapi = { version = "0.3.9", features = ["winnt", "memoryapi", "processthreadsapi", "handleapi", "winbase", "ntdef", "minwindef", "securitybaseapi", "errhandlingapi"] }
+ntapi = "0.4.0"
+rust_syscalls = { git = "https://github.com/janoglezcampos/rust_syscalls", features = ["_INDIRECT_"] }
