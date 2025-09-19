@@ -7,3 +7,4 @@ edition = "2021"
 winapi = { version = "0.3.9", features = ["winnt", "memoryapi", "processthreadsapi", "handleapi", "winbase", "ntdef", "minwindef", "securitybaseapi", "errhandlingapi"] }
 ntapi = "0.4.0"
 rust_syscalls = { git = "https://github.com/janoglezcampos/rust_syscalls", features = ["_INDIRECT_"] }
+dinvoke_rs = "0.1.6"
