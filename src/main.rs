@@ -1,15 +1,14 @@
 mod anti_vm;
 
 fn main() {
-    println!("Running cross-platform VM indicator detection (non-stealthy).");
-
     let indicators = anti_vm::detect_vm_indicators();
     if indicators.is_empty() {
-        println!("[+] No obvious VM indicators found (this is not a guarantee of physical machine).");
+        println!("[WARNING] No VM indicators detected. This does not guarantee that the environment is not virtualized.");
     } else {
-        println!("[!] VM indicators detected ({}):", indicators.len());
-        for (i, it) in indicators.iter().enumerate() {
-            println!("  {}. {}", i + 1, it);
+        println!("[INFO] VM detected. The program will continue to run inside the VM.");
+        println!("[INFO] The following indicators were found:");
+        for (i, indicator) in indicators.iter().enumerate() {
+            println!("  {}. {}", i + 1, indicator);
         }
     }
 }

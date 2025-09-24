@@ -1,1 +1,11 @@
+[package]
+name = "anti_vm_module"
+version = "0.1.0"
+edition = "2021"
 
+[dependencies]
+sysinfo = "0.29"
+raw-cpuid = "10.6.0"
+
+[target.'cfg(windows)'.dependencies]
+wmi = "0.12"
