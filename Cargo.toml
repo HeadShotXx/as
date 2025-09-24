@@ -9,3 +9,4 @@ raw-cpuid = "10.6.0"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "0.12"
+serde = { version = "1.0", features = ["derive"] }

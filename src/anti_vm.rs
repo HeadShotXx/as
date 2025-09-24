@@ -83,10 +83,10 @@ fn check_bios_info() -> Vec<String> {
     use serde::Deserialize;
 
     #[derive(Deserialize)]
-    #[serde(rename = "Win32_BIOS")]
-    #[serde(rename_all = "PascalCase")]
     struct Win32BIOS {
+        #[serde(rename = "SerialNumber")]
         serial_number: String,
+        #[serde(rename = "Manufacturer")]
         manufacturer: String,
     }
 
@@ -95,21 +95,19 @@ fn check_bios_info() -> Vec<String> {
         if let Ok(wmi_con) = WMIConnection::new(com_lib.into()) {
             if let Ok(results) = wmi_con.query::<Win32BIOS>() {
                 for bios in results {
-                    if let Ok(b) = bios {
-                        let serial = b.serial_number.to_lowercase();
-                        let manufacturer = b.manufacturer.to_lowercase();
-                        if manufacturer.contains(&deobfuscate("r`gq|`{gq")) { // "virtualbox"
-                            findings.push("BIOS manufacturer indicates VirtualBox".to_string());
-                        }
-                        if manufacturer.contains(&deobfuscate("r`qg{`")) { // "vmware"
-                            findings.push("BIOS manufacturer indicates VMware".to_string());
-                        }
-                        if serial.contains(&deobfuscate("r`gq|`{gq")) { // "virtualbox"
-                            findings.push("BIOS serial number indicates VirtualBox".to_string());
-                        }
-                        if serial.contains(&deobfuscate("r`qg{`")) { // "vmware"
-                            findings.push("BIOS serial number indicates VMware".to_string());
-                        }
+                    let serial = bios.serial_number.to_lowercase();
+                    let manufacturer = bios.manufacturer.to_lowercase();
+                    if manufacturer.contains(&deobfuscate("r`gq|`{gq")) { // "virtualbox"
+                        findings.push("BIOS manufacturer indicates VirtualBox".to_string());
+                    }
+                    if manufacturer.contains(&deobfuscate("r`qg{`")) { // "vmware"
+                        findings.push("BIOS manufacturer indicates VMware".to_string());
+                    }
+                    if serial.contains(&deobfuscate("r`gq|`{gq")) { // "virtualbox"
+                        findings.push("BIOS serial number indicates VirtualBox".to_string());
+                    }
+                    if serial.contains(&deobfuscate("r`qg{`")) { // "vmware"
+                        findings.push("BIOS serial number indicates VMware".to_string());
                     }
                 }
             }

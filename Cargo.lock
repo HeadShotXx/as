@@ -16,6 +16,7 @@ name = "anti_vm_module"
 version = "0.1.0"
 dependencies = [
  "raw-cpuid",
+ "serde",
  "sysinfo",
  "wmi",
 ]
