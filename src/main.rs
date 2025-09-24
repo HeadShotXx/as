@@ -1,13 +1,13 @@
 mod anti_vm;
 
 fn main() {
-    let vm_indicators = anti_vm::detect_vm_indicators();
-    if vm_indicators.is_empty() {
-        println!("No direct signs of a VM detected.");
+    let indicators = anti_vm::run_analysis();
+    if indicators.is_empty() {
+        println!("System integrity checks passed.");
     } else {
-        println!("Potential VM indicators found:");
-        for indicator in vm_indicators {
-            println!("- {}", indicator);
+        println!("System anomalies detected:");
+        for (i, indicator) in indicators.iter().enumerate() {
+            println!("[{}] {}", i + 1, indicator);
         }
     }
 }
