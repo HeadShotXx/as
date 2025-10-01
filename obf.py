@@ -28,7 +28,14 @@ KEYWORDS = {
     "unique_ptr", "weak_ptr", "thread", "mutex", "atomic", "future",
     "promise", "chrono", "iostream", "sstream", "str", "wstringstream", "fstream", "algorithm",
     "to_wstring", "size", "find", "replace", "substr", "find_last_not_of", "c_str",
-    "length", "data", "begin", "end", "get", "hex", "npos", "getenv", "_stricmp",
+    "length", "data", "begin", "end", "get", "hex", "npos", "getenv", "_stricmp", "push_back",
+    "tolower", "wcsrchr", "_wcsicmp", "__readgsqword", "__readfsdword", "CONTAINING_RECORD",
+
+    # Windows API Struct Members
+    "InMemoryOrderLinks", "InMemoryOrderModuleList", "Flink", "FullDllName", "Buffer", "DllBase", "e_lfanew",
+    "OptionalHeader", "DataDirectory", "VirtualAddress", "AddressOfFunctions",
+    "AddressOfNames", "AddressOfNameOrdinals", "NumberOfNames",
+    "ContextFlags", "Dr0", "Dr1", "Dr2", "Dr3",
 
     # Windows API Types & Constants
     "HANDLE", "PVOID", "LPWSTR", "DWORD", "BOOL", "NTSTATUS", "ULONG", "ULONG_PTR",
@@ -87,7 +94,10 @@ KEYWORDS = {
     "fflush", "feof", "ferror", "clearerr",
 
     # User-defined functions we want to preserve
-    "PadRight", "Debug",
+    "PadRight", "Debug", "CheckForDebugger", "AntiVM", "isVM", "AntiSandbox", "check_cpuid",
+    "check_timing", "check_ram", "check_mac_address", "check_hardware_names",
+    "check_linux_artifacts", "check_registry_keys", "check_vm_files", "check_running_processes",
+    "base64_decode",
 
     # Reserved words
     "main", "include", "define", "pragma", "ifdef", "endif", "ifndef", "comment", "lib"
@@ -95,6 +105,7 @@ KEYWORDS = {
 
 # Regular expressions for parsing
 RE_STRING = re.compile(r'(L)?("([^"\\]*(?:\\.[^"\\]*)*)")|R"(\((?:[^\)]|\n)*\))"')
+RE_CHAR_LITERAL = re.compile(r"L?'([^'\\]*(?:\\.[^'\\]*)*)'")
 RE_COMMENT = re.compile(r'//.*?$|/\*.*?\*/', re.MULTILINE | re.DOTALL)
 RE_IDENTIFIER = re.compile(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b')
 RE_PREPROCESSOR = re.compile(r'^\s*#.*', re.MULTILINE)
@@ -247,6 +258,7 @@ def collect_identifiers(code):
 
         temp_line = RE_COMMENT.sub('', line)
         temp_line = RE_STRING.sub('""', temp_line)
+        temp_line = RE_CHAR_LITERAL.sub("''", temp_line) # Exclude char literals
 
         for match in RE_IDENTIFIER.finditer(temp_line):
             identifier = match.group(0)
@@ -282,6 +294,7 @@ def replace_identifiers(code, rename_map):
 
         temp_line = RE_COMMENT.sub(store_literal, line)
         temp_line = RE_STRING.sub(store_literal, temp_line)
+        temp_line = RE_CHAR_LITERAL.sub(store_literal, temp_line)
 
         temp_line = re.sub(pattern, lambda m: rename_map.get(m.group(0), m.group(0)), temp_line)
 
@@ -327,20 +340,26 @@ def obfuscate_strings(code, key_byte=0x55, wchar_key=0x5555, helper_names=None):
     # Regex to detect char array initializations, e.g., char shellcode[] = "..."
     # This is a heuristic to avoid breaking shellcode-style initializations.
     RE_CHAR_ARRAY_INIT = re.compile(r'\bchar\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\[\s*\]\s*=\s*')
-    in_char_array_init = False
+    RE_STD_STRING_INIT = re.compile(r'std::string\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*')
+
+    in_string_init = False
     for line in lines:
         # Skip preprocessor lines, extern "C"
         if line.strip().startswith('#') or 'extern "C"' in line:
             processed_lines.append(line)
             continue
-        if not in_char_array_init and RE_CHAR_ARRAY_INIT.search(line):
-            in_char_array_init = True
-        if in_char_array_init:
+
+        if not in_string_init:
+            if RE_CHAR_ARRAY_INIT.search(line) or RE_STD_STRING_INIT.search(line):
+                in_string_init = True
+
+        if in_string_init:
             processed_lines.append(line)
             if line.strip().endswith(';'):
-                in_char_array_init = False
+                in_string_init = False
         else:
             processed_lines.append(RE_STRING.sub(repl, line))
+
     code = '\n'.join(processed_lines)
     return code, obfuscated_strings, obfuscated_wstrings
 
@@ -384,7 +403,7 @@ def insert_string_runtime_helpers(code, obfuscated_strings, obfuscated_wstrings,
     # Wide strings
     if obfuscated_wstrings:
         for i, data in enumerate(obfuscated_wstrings):
-            helper_code += f"    wchar_t {helper_names['_obf_wdata_']}{i}[] = {{ {', '.join(map(str, data))}, 0 }};\n"
+            helper_code += f"    wchar_t {helper_names['_obf_wdata_']}{i}[] = {{ {', '.join(f'(wchar_t){d}' for d in data)}, 0 }};\n"
             if i % 2 != 0 and junk_pool:
                 helper_code += junk_pool.pop(0) + "\n"
         helper_code += f"\n    wchar_t* {helper_names['_obf_wstr_table']}[] = {{\n"
