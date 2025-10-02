@@ -14,11 +14,13 @@ def obfuscate_strings(code):
         is_wide_char = match.group(1)
         original_string = match.group(2)
 
-        # Hardcoded exclusion for the known problematic base64 string
-        if "ABCDEFGHIJKLMNOPQRSTUVWXYZ" in original_string:
+        # New, more robust check: look at the code before the match.
+        # If it's part of the base64_chars declaration, don't touch it.
+        context_before = code[max(0, match.start() - 30):match.start()]
+        if 'base64_chars' in context_before:
             return match.group(0)
 
-        # Check if the match is on a line with a preprocessor directive
+        # Also, ensure we don't touch preprocessor directives.
         last_newline = code.rfind('\n', 0, match.start())
         line_start = last_newline + 1 if last_newline != -1 else 0
         line = code[line_start:match.start()]
