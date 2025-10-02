@@ -1,6 +1,7 @@
 import re
 import random
 import string
+import sys
 
 def get_random_string(length=8):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
@@ -14,13 +15,7 @@ def obfuscate_strings(code):
         is_wide_char = match.group(1)
         original_string = match.group(2)
 
-        # New, more robust check: look at the code before the match.
-        # If it's part of the base64_chars declaration, don't touch it.
-        context_before = code[max(0, match.start() - 30):match.start()]
-        if 'base64_chars' in context_before:
-            return match.group(0)
-
-        # Also, ensure we don't touch preprocessor directives.
+        # Check if the match is on a line with a preprocessor directive
         last_newline = code.rfind('\n', 0, match.start())
         line_start = last_newline + 1 if last_newline != -1 else 0
         line = code[line_start:match.start()]
@@ -88,8 +83,25 @@ def add_junk_code(code):
     return "\n".join(junk_functions) + "\n\n" + code
 
 def main():
-    with open("main.cpp", "r") as f:
+    input_file = "main.cpp"
+    output_file = "main_obfuscated.cpp"
+
+    # Handle command-line arguments
+    if len(sys.argv) > 2 and (sys.argv[1] == '-i'):
+        input_file = sys.argv[2]
+
+    with open(input_file, "r") as f:
         code = f.read()
+
+    # === PRE-PROCESSING STEP TO FIX THE ROOT CAUSE OF THE COMPILATION ERROR ===
+    # The C++ code uses adjacent string literals for the base64_chars variable.
+    # The regex-based obfuscator cannot handle this syntax correctly.
+    # To fix this, pre-process the code to merge this specific string
+    # into a single line BEFORE obfuscating. This is a targeted and robust fix.
+    b64_pattern = re.compile(r'std::string\s+base64_chars\s*=\s*[^;]+;', re.DOTALL)
+    single_line_b64_string = 'std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";'
+    code = b64_pattern.sub(single_line_b64_string, code, count=1)
+
 
     # Apply obfuscations
     code = add_junk_code(code)
@@ -106,10 +118,10 @@ def main():
     lines.insert(injection_point, string_decoder)
     code = '\n'.join(lines)
 
-    with open("main_obfuscated.cpp", "w") as f:
+    with open(output_file, "w") as f:
         f.write(code)
 
-    print("Obfuscation complete. Output written to main_obfuscated.cpp")
+    print(f"Obfuscation complete. Output written to {output_file}")
 
 if __name__ == "__main__":
     main()
