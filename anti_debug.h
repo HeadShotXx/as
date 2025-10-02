@@ -203,7 +203,7 @@ static inline void UnhookCriticalAPIs() {
     AntiDebug::unhookModule("ntdll.dll");
     AntiDebug::unhookModule("kernel32.dll");
 }
-#include <Aclapi.h>
+#include <aclapi.h>
 #if defined(_MSC_VER)
 #pragma comment(lib, "advapi32.lib")
 #endif
