@@ -6,9 +6,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <TlHelp32.h>
+#include <tlhelp32.h>
 #include <intrin.h>
-#include <Iphlpapi.h>
+#include <iphlpapi.h>
 #pragma comment(lib, "IPHLPAPI.lib")
 #else
 #include <unistd.h>

