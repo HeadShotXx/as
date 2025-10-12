@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 raw-cpuid = "11.1.0"
+rustpolymorphic = { path = "../rustdie" }
 
 [dependencies.windows]
 version = "0.56.0"

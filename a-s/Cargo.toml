@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+rustpolymorphic = { path = "../rustdie" }
 windows = { version = "0.52.0", features = [
     "Win32_System_SystemInformation",
     "Win32_UI_Input_KeyboardAndMouse",

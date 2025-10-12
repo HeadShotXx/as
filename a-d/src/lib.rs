@@ -1,3 +1,4 @@
+use rustpolymorphic::polymorph;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use windows::{
     core::*,
@@ -17,12 +18,14 @@ use windows::{
 
 /// Checks if a debugger is present using the IsDebuggerPresent API.
 /// This is the simplest check, but easily bypassed.
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn is_debugger_present() -> bool {
     unsafe { IsDebuggerPresent().as_bool() }
 }
 
 /// Checks for a remote debugger using the CheckRemoteDebuggerPresent API.
 /// This can detect debuggers that are not running on the local machine.
+#[polymorph(fn_len = 15, garbage = true)]
 pub fn check_remote_debugger() -> bool {
     let mut is_present = FALSE;
     unsafe {
@@ -51,6 +54,7 @@ const THREAD_HIDE_FROM_DEBUGGER: i32 = 0x11;
 
 /// Spawns a new thread to run all anti-debugging checks and hides the thread from debuggers.
 /// This makes it significantly harder for an analyst to step through the detection logic.
+#[polymorph(fn_len = 40, garbage = true, control_flow = true)]
 pub fn run_all_checks_hidden() -> bool {
     let handle = std::thread::spawn(|| {
         type NtSetInformationThread = unsafe extern "system" fn(
@@ -89,6 +93,7 @@ pub fn run_all_checks_hidden() -> bool {
 
 /// Checks if the parent process is a known debugger.
 /// This is done by getting the parent process ID and then its name.
+#[polymorph(fn_len = 30, garbage = true)]
 pub fn is_parent_a_debugger() -> bool {
     let mut pe32 = PROCESSENTRY32::default();
     pe32.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
@@ -160,6 +165,7 @@ pub fn is_parent_a_debugger() -> bool {
 /// Verifies the integrity of the .text section by calculating its CRC32 checksum
 /// and comparing it to a pre-calculated value.
 #[cfg(target_arch = "x86_64")]
+#[polymorph(fn_len = 25, garbage = true)]
 pub fn crc32_verify_self() -> bool {
     unsafe {
         let base_address = match GetModuleHandleA(PCSTR(std::ptr::null_mut())) {
@@ -217,6 +223,7 @@ const PROCESS_DEBUG_PORT: i32 = 7;
 
 /// Uses NtQueryInformationProcess to check if a debugger is attached.
 /// This is a more advanced and less commonly hooked method.
+#[polymorph(fn_len = 20, garbage = true)]
 pub fn nt_query_information_process() -> bool {
     type NtQueryInformationProcess = unsafe extern "system" fn(
         process_handle: HANDLE,
@@ -246,6 +253,7 @@ pub fn nt_query_information_process() -> bool {
 
 /// Detects timing anomalies using a high-resolution performance counter.
 /// This is more precise than GetTickCount and less prone to false positives.
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn performance_counter_timing_check() -> bool {
     let mut frequency = 0;
     unsafe { let _ = QueryPerformanceFrequency(&mut frequency); };
@@ -272,6 +280,7 @@ pub fn performance_counter_timing_check() -> bool {
 
 /// Scans a small portion of its own function's memory for software breakpoints (INT 3).
 /// This is a simple way to detect if a debugger has placed a breakpoint on this code.
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn scan_for_int3() -> bool {
     // A small buffer to scan. We'll scan this function itself.
     let function_ptr = scan_for_int3 as *const u8;
@@ -293,6 +302,7 @@ const CONTEXT_DEBUG_REGISTERS: u32 = 0x10010;
 /// Checks for hardware breakpoints by examining the thread's context.
 /// Hardware breakpoints are stored in the CPU's debug registers (DR0-DR3).
 #[cfg(target_arch = "x86_64")]
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_hardware_breakpoints() -> bool {
     let mut ctx = CONTEXT::default();
     ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_DEBUG_REGISTERS);

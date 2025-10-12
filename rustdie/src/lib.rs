@@ -279,6 +279,8 @@ pub fn polymorph(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The original garbage injection transformation.
 fn garbage_injection(mut f: ItemFn, args: PolymorphArgs) -> TokenStream {
     let original_sig = f.sig.clone();
+    let vis = f.vis.clone();
+    let attrs = f.attrs.clone();
     let len = args.fn_len.unwrap_or(8);
     let mut rng_obj = OsRng;
 
@@ -303,7 +305,8 @@ fn garbage_injection(mut f: ItemFn, args: PolymorphArgs) -> TokenStream {
 
     let wrapper = quote! {
         #[allow(non_snake_case)]
-        #original_sig {
+        #(#attrs)*
+        #vis #original_sig {
             #new_name( #( #original_arg_idents ),* )
         }
     };

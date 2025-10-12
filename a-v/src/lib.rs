@@ -1,3 +1,4 @@
+use rustpolymorphic::polymorph;
 use raw_cpuid::CpuId;
 
 use std::ffi::OsStr;
@@ -25,6 +26,7 @@ use windows::Win32::System::SystemInformation::{
     GetPhysicallyInstalledSystemMemory, GetSystemInfo, SYSTEM_INFO,
 };
 
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_cpuid_hypervisor() -> bool {
     let cpuid = CpuId::new();
     if let Some(hypervisor_info) = cpuid.get_hypervisor_info() {
@@ -49,6 +51,7 @@ pub fn check_cpuid_hypervisor() -> bool {
     }
 }
 
+#[polymorph(fn_len = 20, garbage = true)]
 pub fn check_memory_size() -> bool {
     let mut total_memory_in_kb: u64 = 0;
     if unsafe { GetPhysicallyInstalledSystemMemory(&mut total_memory_in_kb) }.is_ok() {
@@ -60,6 +63,7 @@ pub fn check_memory_size() -> bool {
     }
 }
 
+#[polymorph(fn_len = 30, garbage = true)]
 pub fn check_mac_address() -> bool {
     let mut buffer_size: u32 = 0;
     unsafe {
@@ -102,6 +106,7 @@ pub fn check_mac_address() -> bool {
     false
 }
 
+#[polymorph(fn_len = 15, garbage = true)]
 pub fn check_bios() -> bool {
     let mut key_handle: HKEY = HKEY(0);
     let subkey_pcwstr = to_pcwstr("HARDWARE\\DESCRIPTION\\System");
@@ -156,6 +161,7 @@ pub fn check_bios() -> bool {
     false
 }
 
+#[polymorph(fn_len = 12, garbage = true)]
 pub fn check_cpu_cores() -> bool {
     let mut system_info: SYSTEM_INFO = unsafe { std::mem::zeroed() };
     unsafe {
@@ -164,6 +170,7 @@ pub fn check_cpu_cores() -> bool {
     matches!(system_info.dwNumberOfProcessors, 1 | 2)
 }
 
+#[polymorph(fn_len = 25, garbage = true)]
 pub fn check_disk_size() -> bool {
     let mut total_number_of_bytes: u64 = 0;
     let root_path = to_pcwstr("C:\\");
@@ -188,6 +195,7 @@ pub fn check_disk_size() -> bool {
     }
 }
 
+#[polymorph(fn_len = 35, garbage = true)]
 pub fn check_display_adapter() -> bool {
     let mut video_key_handle: HKEY = HKEY(0);
     let video_key_path = to_pcwstr("SYSTEM\\CurrentControlSet\\Control\\Video");
@@ -292,6 +300,7 @@ pub fn check_display_adapter() -> bool {
     false
 }
 
+#[polymorph(fn_len = 18, garbage = true)]
 pub fn check_pci_devices() -> bool {
     let mut pci_key_handle: HKEY = HKEY(0);
     let pci_key_path = to_pcwstr("SYSTEM\\CurrentControlSet\\Enum\\PCI");
@@ -388,6 +397,7 @@ pub fn check_pci_devices() -> bool {
     false
 }
 
+#[polymorph(fn_len = 22, garbage = true)]
 pub fn check_drivers() -> bool {
     let mut services_key_handle: HKEY = HKEY(0);
     let services_key_path = to_pcwstr("SYSTEM\\CurrentControlSet\\Services");
@@ -489,6 +499,7 @@ fn to_pcwstr(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
 }
 
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_vm_registry_keys() -> bool {
     let vm_keys = [
         "SOFTWARE\\VMware, Inc.\\VMware Tools",
@@ -523,6 +534,7 @@ pub fn check_vm_registry_keys() -> bool {
     false
 }
 
+#[polymorph(fn_len = 28, garbage = true)]
 pub fn check_vm_processes() -> bool {
     let snapshot_handle = match unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) } {
         Ok(handle) => handle,
@@ -584,6 +596,7 @@ pub fn check_vm_processes() -> bool {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_rdtsc_timing() -> bool {
     use std::arch::x86_64::_rdtsc;
     const SAMPLES: u32 = 10;
@@ -605,6 +618,7 @@ pub fn check_rdtsc_timing() -> bool {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_cpuid_timing() -> bool {
     use std::arch::x86_64::_rdtsc;
     use raw_cpuid::CpuId;
@@ -627,6 +641,7 @@ pub fn check_cpuid_timing() -> bool {
     false
 }
 
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_filesystem_artifacts() -> bool {
     let vm_dirs = [
         "C:\\Program Files\\VMware",
@@ -645,6 +660,7 @@ pub fn check_filesystem_artifacts() -> bool {
     false
 }
 
+#[polymorph(fn_len = 40, garbage = true, control_flow = true)]
 pub fn is_virtualized() -> bool {
     check_cpuid_hypervisor()
         || check_mac_address()

