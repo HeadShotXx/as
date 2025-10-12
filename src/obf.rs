@@ -57,6 +57,7 @@ impl ObfString {
 
     /// Consume wrapper and return the inner Vec<u8>.
     /// *This prevents automatic zeroize on Drop* (caller becomes responsible).
+    #[allow(dead_code)]
     pub fn into_vec(mut self) -> Vec<u8> {
         // take inner, prevent Drop from zeroizing taken data
         let v = std::mem::take(&mut self.inner);
@@ -67,6 +68,7 @@ impl ObfString {
     /// Consume wrapper and return a String (unsafely converting bytes to String).
     /// Caller becomes responsible for zeroing if desired.
     /// Note: this does not zeroize automatically.
+    #[allow(dead_code)]
     pub fn into_string(mut self) -> String {
         let v = std::mem::take(&mut self.inner);
         std::mem::forget(self);
@@ -80,6 +82,7 @@ impl ObfString {
     }
 
     /// Zeroizes and clears internal buffer immediately (optional)
+    #[allow(dead_code)]
     pub fn zeroize_now(&mut self) {
         self.inner.zeroize();
         self.inner.clear();
@@ -122,6 +125,7 @@ pub struct ObfBytes {
 impl ObfBytes {
     /// Construct from already decrypted bytes.
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn from_decrypted_bytes(bytes: Vec<u8>) -> Self {
         Self { inner: bytes }
     }
@@ -132,6 +136,7 @@ impl ObfBytes {
     }
 
     /// Consume and return Vec<u8> (prevents automatic zeroize).
+    #[allow(dead_code)]
     pub fn into_vec(mut self) -> Vec<u8> {
         let v = std::mem::take(&mut self.inner);
         std::mem::forget(self);
@@ -139,6 +144,7 @@ impl ObfBytes {
     }
 
     /// Zeroize now (optional)
+    #[allow(dead_code)]
     pub fn zeroize_now(&mut self) {
         self.inner.zeroize();
         self.inner.clear();

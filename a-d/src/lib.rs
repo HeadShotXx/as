@@ -54,10 +54,10 @@ const THREAD_HIDE_FROM_DEBUGGER: i32 = 0x11;
 pub fn run_all_checks_hidden() -> bool {
     let handle = std::thread::spawn(|| {
         type NtSetInformationThread = unsafe extern "system" fn(
-            ThreadHandle: HANDLE,
-            ThreadInformationClass: i32,
-            ThreadInformation: *mut std::ffi::c_void,
-            ThreadInformationLength: u32,
+            thread_handle: HANDLE,
+            thread_information_class: i32,
+            thread_information: *mut std::ffi::c_void,
+            thread_information_length: u32,
         ) -> NTSTATUS;
 
         let ntdll = unsafe { GetModuleHandleA(s!("ntdll.dll\0")) }.unwrap();
@@ -219,11 +219,11 @@ const PROCESS_DEBUG_PORT: i32 = 7;
 /// This is a more advanced and less commonly hooked method.
 pub fn nt_query_information_process() -> bool {
     type NtQueryInformationProcess = unsafe extern "system" fn(
-        ProcessHandle: HANDLE,
-        ProcessInformationClass: i32,
-        ProcessInformation: *mut std::ffi::c_void,
-        ProcessInformationLength: u32,
-        ReturnLength: *mut u32,
+        process_handle: HANDLE,
+        process_information_class: i32,
+        process_information: *mut std::ffi::c_void,
+        process_information_length: u32,
+        return_length: *mut u32,
     ) -> NTSTATUS;
 
     let ntdll = unsafe { GetModuleHandleA(s!("ntdll.dll\0")) }.unwrap();

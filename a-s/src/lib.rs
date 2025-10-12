@@ -97,7 +97,7 @@ pub fn check_processes() -> bool {
                 let process_name = unsafe { std::ffi::CStr::from_ptr(process_entry.szExeFile.as_ptr() as *const i8) }.to_string_lossy().to_lowercase();
                 for suspicious in suspicious_processes {
                     if process_name.contains(suspicious) {
-                        unsafe { CloseHandle(snapshot) };
+                        unsafe { let _ = CloseHandle(snapshot); };
                         return true;
                     }
                 }
@@ -107,7 +107,7 @@ pub fn check_processes() -> bool {
             }
         }
 
-        unsafe { CloseHandle(snapshot) };
+        unsafe { let _ = CloseHandle(snapshot); };
     }
 
     false
@@ -123,7 +123,7 @@ pub fn check_artifacts() -> bool {
     for key in suspicious_registry_keys {
         let mut hkey = HKEY_LOCAL_MACHINE;
         if unsafe { RegOpenKeyExA(HKEY_LOCAL_MACHINE, PCSTR(key.as_ptr()), 0, KEY_READ, &mut hkey) }.is_ok() {
-            unsafe { RegCloseKey(hkey) };
+            unsafe { let _ = RegCloseKey(hkey); };
             return true;
         }
     }

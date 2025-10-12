@@ -82,7 +82,7 @@ pub fn check_mac_address() -> bool {
         while !current_adapter.is_null() {
             let mac_address_len = unsafe { (*current_adapter).AddressLength } as usize;
             if mac_address_len == 6 {
-                let mac_address_slice = unsafe { &(*current_adapter).Address[0..mac_address_len] };
+                let mac_address_slice = unsafe { &(&(*current_adapter).Address)[0..mac_address_len] };
                 let mac_address_str = mac_address_slice
                     .iter()
                     .map(|&byte| format!("{:02X}", byte))
