@@ -19,6 +19,7 @@ zeroize = "1.6"
 anti-vm = { path = "a-v" }
 anti-sandbox = { path = "a-s" }
 anti-debug-rust = { path = "a-d" }
+obf-helpers = { path = "obf-helpers" }
 
 # ---- Obfuscation / release-hardening önerilen ayarlar ----
 [profile.release]

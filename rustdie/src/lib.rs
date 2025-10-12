@@ -175,9 +175,9 @@ fn obf_impl(bytes: &[u8], span: proc_macro2::Span, is_str: bool) -> TokenStream 
 
     // 5. Choose the return type (`ObfString` or `ObfBytes`)
     let result_ty = if is_str {
-        quote! { crate::obf::ObfString }
+        quote! { obf_helpers::ObfString }
     } else {
-        quote! { crate::obf::ObfBytes }
+        quote! { obf_helpers::ObfBytes }
     };
 
     // 6. Final code expansion
@@ -185,7 +185,7 @@ fn obf_impl(bytes: &[u8], span: proc_macro2::Span, is_str: bool) -> TokenStream 
         {
             #decoder_fn
 
-            let mut decoded_bytes = crate::obf::ascii85_decode(#lit_encoded)
+            let mut decoded_bytes = obf_helpers::ascii85_decode(#lit_encoded)
                 .expect("internal error: invalid ascii85 chunk");
 
             #decoder_name(&mut decoded_bytes, #seed, #base_key);

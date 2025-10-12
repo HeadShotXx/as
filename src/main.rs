@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
 #![allow(unused_unsafe)]
-mod obf;
 mod syscalls;
 mod checks;
 use crate::syscalls::SYSCALLS;
