@@ -96,227 +96,16 @@ fn random_ident(len: usize, rng: &mut impl RngCore) -> String {
     parts.join("_")
 }
 
-/// ---------------- String obfuscation module (with AES & base85/base58) ----------------
 mod string_obfuscation {
     use super::*;
-    use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-    use aes::{Aes128, Aes192, Aes256};
-    use base64::{engine::general_purpose, Engine as _};
-
-    fn pad_pkcs7(data: &[u8], block_size: usize) -> Vec<u8> {
-        let mut padded = data.to_vec();
-        let pad_len = block_size - (data.len() % block_size);
-        padded.extend(vec![pad_len as u8; pad_len]);
-        padded
-    }
-
-    fn generate_aes_key(rng: &mut impl RngCore, size: usize) -> Vec<u8> {
-        generate_random_bytes(rng, size)
-    }
-
-    /// Encodes then encrypts the string; returns (encrypted_bytes, combined_key)
-    pub fn encode_string(input: &str, rng: &mut impl RngCore) -> (Vec<u8>, Vec<u8>) {
-        // 1) base45
-        let base45_encoded = base45::encode(input.as_bytes());
-
-        // 2) base85 (was base85)
-        let base85_encoded = base85::encode(base45_encoded.as_bytes());
-
-        // 3) base58 (from bytes -> string)
-        let base58_encoded = bs58::encode(base85_encoded.as_bytes()).into_string();
-
-        // 4) base32 (RFC4648 padded)
-        let base32_encoded = base32::encode(base32::Alphabet::Rfc4648 { padding: true }, base58_encoded.as_bytes());
-
-        // 5) base64
-        let base64_encoded = general_purpose::STANDARD.encode(base32_encoded.as_bytes());
-
-        // 6) hex encode of base64 bytes
-        let hex_encoded = hex::encode(base64_encoded.as_bytes());
-
-        // XOR key (16 bytes)
-        let xor_key = generate_aes_key(rng, 16);
-        // XOR the hex-encoded ASCII bytes
-        let mut xor_encoded: Vec<u8> = hex_encoded.as_bytes()
-            .iter()
-            .enumerate()
-            .map(|(i, &b)| b ^ xor_key[i % xor_key.len()])
-            .collect();
-
-        // PKCS7 pad to 16-byte blocks before AES
-        xor_encoded = pad_pkcs7(&xor_encoded, 16);
-
-        // AES keys (192, 128, 256)
-        let aes192_key = generate_aes_key(rng, 24);
-        let aes128_key = generate_aes_key(rng, 16);
-        let aes256_key = generate_aes_key(rng, 32);
-
-        // AES-192 encrypt in-place (16-byte blocks)
-        {
-            let cipher192 = Aes192::new(GenericArray::from_slice(&aes192_key));
-            for chunk in xor_encoded.chunks_mut(16) {
-                let mut block = GenericArray::clone_from_slice(chunk);
-                cipher192.encrypt_block(&mut block);
-                chunk.copy_from_slice(&block);
-            }
-        }
-
-        // AES-128 encrypt
-        {
-            let cipher128 = Aes128::new(GenericArray::from_slice(&aes128_key));
-            for chunk in xor_encoded.chunks_mut(16) {
-                let mut block = GenericArray::clone_from_slice(chunk);
-                cipher128.encrypt_block(&mut block);
-                chunk.copy_from_slice(&block);
-            }
-        }
-
-        // AES-256 encrypt
-        {
-            let cipher256 = Aes256::new(GenericArray::from_slice(&aes256_key));
-            for chunk in xor_encoded.chunks_mut(16) {
-                let mut block = GenericArray::clone_from_slice(chunk);
-                cipher256.encrypt_block(&mut block);
-                chunk.copy_from_slice(&block);
-            }
-        }
-
-        // Combine keys: xor_key || aes192 || aes128 || aes256
-        let mut combined_key = xor_key.clone();
-        combined_key.extend(aes192_key);
-        combined_key.extend(aes128_key);
-        combined_key.extend(aes256_key);
-
-        (xor_encoded, combined_key)
-    }
-
-
-    /// Returns a runtime expression string like `decode_fn(&[bytes...], &[key...], 12345u64)`
-    pub fn generate_obfuscated_string(original: &str, rng: &mut impl RngCore, decoder_fn_name: &str, expected_checksum: u64) -> String {
-        let (encrypted_data, key) = encode_string(original, rng);
-
-        // Ensure arrays are properly formatted
-        let encrypted_array = encrypted_data
-            .iter()
-            .map(|b| format!("{}", b))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let key_array = key
-            .iter()
-            .map(|b| format!("{}", b))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        // Use proper formatting with spaces for readability
-        format!(
-            "{}(&[{}],&[{}],{}u64)",
-            decoder_fn_name,
-            encrypted_array,
-            key_array,
-            expected_checksum
-        )
-    }
+    use rand::RngCore;
     pub fn generate_decoder_function(decoder_fn_name: &str, checksum_fn_name: &str) -> String {
-    // Use unique placeholders that won't collide with real code braces.
-    let template = r#"
-#[inline(never)]
-fn {CHECKSUM_FN}(data: &[u8]) -> u64 {
-    let mut a = 1u64;
-    let mut b = 0u64;
-    for &byte in data {
-        a = (a.wrapping_add(byte as u64)) % 65521;
-        b = (b.wrapping_add(a)) % 65521;
+        "".to_string()
     }
-    (b << 32) | a
-}
 
-fn {DECODER_FN}(encrypted: &[u8], key: &[u8], expected_sum: u64) -> &'static str {
-    let s: String = {
-        use aes::cipher::{BlockDecrypt, KeyInit, generic_array::GenericArray};
-        use aes::{Aes128, Aes192, Aes256};
-        use base85; // using base85 for base85 decoding
-        use bs58; // using bs58 for base58 decoding
-        use base64::{engine::general_purpose, Engine as _};
-
-        if key.len() < 88 { return Box::leak(String::from_utf8_lossy(encrypted).to_string().into_boxed_str()); }
-
-        let xor_key = &key[0..16];
-        let aes192_key = &key[16..40];
-        let aes128_key = &key[40..56];
-        let aes256_key = &key[56..88];
-
-        let mut data = encrypted.to_vec();
-
-        let cipher256 = Aes256::new(GenericArray::from_slice(aes256_key));
-        for chunk in data.chunks_mut(16){
-            let mut block = GenericArray::clone_from_slice(chunk);
-            cipher256.decrypt_block(&mut block);
-            chunk.copy_from_slice(&block);
-        }
-
-        let cipher128 = Aes128::new(GenericArray::from_slice(aes128_key));
-        for chunk in data.chunks_mut(16){
-            let mut block = GenericArray::clone_from_slice(chunk);
-            cipher128.decrypt_block(&mut block);
-            chunk.copy_from_slice(&block);
-        }
-
-        let cipher192 = Aes192::new(GenericArray::from_slice(aes192_key));
-        for chunk in data.chunks_mut(16){
-            let mut block = GenericArray::clone_from_slice(chunk);
-            cipher192.decrypt_block(&mut block);
-            chunk.copy_from_slice(&block);
-        }
-
-        if !data.is_empty() {
-            let pad_len = data[data.len() - 1] as usize;
-            if pad_len <= 16 && pad_len <= data.len() {
-                data.truncate(data.len() - pad_len);
-            }
-        }
-
-        let xor_decoded: Vec<u8> = data.iter().enumerate().map(|(i, &b)| b ^ xor_key[i % xor_key.len()]).collect();
-        let hex_str = match String::from_utf8(xor_decoded) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        let base64_bytes = match hex::decode(&hex_str) { Ok(b) => b, Err(_) => return Box::leak(hex_str.into_boxed_str()) };
-        let base64_str = match String::from_utf8(base64_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        let base32_bytes = match general_purpose::STANDARD.decode(&base64_str) { Ok(b) => b, Err(_) => return Box::leak(base64_str.into_boxed_str()) };
-        let base32_str = match String::from_utf8(base32_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        let base58_bytes = match base32::decode(base32::Alphabet::Rfc4648 { padding: true }, &base32_str) { Some(b) => b, None => return Box::leak(base32_str.into_boxed_str()) };
-        let base58_str = match String::from_utf8(base58_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        let base85_bytes = match bs58::decode(&base58_str).into_vec() { Ok(b) => b, Err(_) => return Box::leak(base58_str.into_boxed_str()) };
-        let base85_str = match String::from_utf8(base85_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        let base45_bytes = match base85::decode(&base85_str) {
-            Ok(b) => b,
-            Err(_) => return Box::leak(base85_str.into_boxed_str()),
-        };
-        let base45_str = match String::from_utf8(base45_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        match base45::decode(&base45_str) {
-            Ok(final_bytes) => {
-                let runtime_sum = {CHECKSUM_FN}(&final_bytes);
-                if runtime_sum != expected_sum {
-                    // Tampering detected! Simulated volatile write (to valid memory) then abort.
-                    unsafe {
-                        let mut dummy: u8 = 0;
-                        std::ptr::write_volatile(&mut dummy, 1);
-                    }
-                    std::process::abort();
-                }
-                String::from_utf8_lossy(&final_bytes).to_string()
-            },
-            Err(_) => base45_str,
-        }
-    };
-    Box::leak(s.into_boxed_str())
-}
-"#;
-
-    // Replace unique placeholders with provided names
-    let s = template
-        .replace("{DECODER_FN}", decoder_fn_name)
-        .replace("{CHECKSUM_FN}", checksum_fn_name);
-    s
- }
+    pub fn generate_obfuscated_string(original: &str, rng: &mut impl RngCore, decoder_fn_name: &str, expected_checksum: u64) -> String {
+        format!("\"{}\"", original)
+    }
 }
 /// Helper: detect presence of #[no_mangle] attribute
 fn has_no_mangle(attrs: &Vec<Attribute>) -> bool {
@@ -517,8 +306,7 @@ impl Fold for FullObfFold {
             // common standard methods that break when renamed
             "to_string", "as_ref", "as_mut", "len", "is_empty", "push", "pop",
             // other helper names you rely on
-            "clone", "iter", "next", "expect", "into", "collect", "resize", "encode_utf16",
-            "as_str", "as_slice"
+            "clone", "iter", "next", "expect", "into", "collect", "resize", "encode_utf16"
         ];
 
         // Names of receiver idents or path segments that strongly indicate an RNG or external object.
