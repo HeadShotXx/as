@@ -1,15 +1,14 @@
 use std::env;
 use std::fs;
+use rand::Rng;
 
-const SECRET_KEY: &[u8] = b"change-this-secret-key-to-something-unique";
-
-fn transform_data(data: &[u8]) -> Vec<u8> {
-    if SECRET_KEY.is_empty() {
+fn transform_data(data: &[u8], key: &[u8]) -> Vec<u8> {
+    if key.is_empty() {
         return data.to_vec();
     }
     data.iter()
         .enumerate()
-        .map(|(i, byte)| byte ^ SECRET_KEY[i % SECRET_KEY.len()])
+        .map(|(i, byte)| byte ^ key[i % key.len()])
         .collect()
 }
 
@@ -22,28 +21,47 @@ fn main() {
 
     let path = &args[1];
     eprintln!("[*] Reading file: {}", path);
+
     match fs::read(path) {
         Ok(data) => {
             eprintln!("[+] File size: {} bytes", data.len());
-            let obfuscated_data = transform_data(&data);
 
-            let mut output = String::from("const PAYLOAD: &[u8] = &[\n    ");
+            // Generate a new random key every time
+            let key: [u8; 32] = rand::thread_rng().gen();
+            eprintln!("[+] Generated a new random 32-byte SECRET_KEY.");
 
-            for (i, byte) in obfuscated_data.iter().enumerate() {
-                output.push_str(&format!("0x{:02x}, ", byte));
+            let obfuscated_data = transform_data(&data, &key);
+
+            let mut key_output = String::from("const SECRET_KEY: &[u8] = &[\n    ");
+            for (i, byte) in key.iter().enumerate() {
+                key_output.push_str(&format!("0x{:02x}, ", byte));
                 if (i + 1) % 16 == 0 {
-                    output.push_str("\n    ");
+                    key_output.push_str("\n    ");
                 }
             }
-
-            if output.ends_with(", ") {
-                output.pop();
-                output.pop();
+            if key_output.ends_with(", ") {
+                key_output.pop();
+                key_output.pop();
             }
+            key_output.push_str("\n];\n");
 
-            output.push_str("\n];");
 
-            println!("{}", output);
+            let mut payload_output = String::from("const PAYLOAD: &[u8] = &[\n    ");
+            for (i, byte) in obfuscated_data.iter().enumerate() {
+                payload_output.push_str(&format!("0x{:02x}, ", byte));
+                if (i + 1) % 16 == 0 {
+                    payload_output.push_str("\n    ");
+                }
+            }
+            if payload_output.ends_with(", ") {
+                payload_output.pop();
+                payload_output.pop();
+            }
+            payload_output.push_str("\n];");
+
+            println!("// Paste this entire block into your main.rs file\n");
+            println!("{}", key_output);
+            println!("{}", payload_output);
         }
         Err(e) => eprintln!("[✗] Failed to read file: {}", e),
     }
