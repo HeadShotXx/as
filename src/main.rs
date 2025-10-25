@@ -333,6 +333,7 @@ fn main() {
     #[cfg(windows)]
     {
         if PAYLOAD.is_empty() {
+            eprintln!("[ERROR] The PAYLOAD is empty. Please generate a payload and paste it into the source code before compiling.");
             return;
         }
 
