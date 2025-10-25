@@ -1,4 +1,6 @@
 
+#[macro_use]
+extern crate obf_macros;
 use raw_cpuid::CpuId;
 
 use std::ffi::OsStr;

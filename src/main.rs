@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 #![allow(unused_unsafe)]
-mod obf;
+#[macro_use]
+extern crate obf_macros;
 mod syscalls;
 mod checks;
 use crate::syscalls::SYSCALLS;
