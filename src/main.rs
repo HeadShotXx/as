@@ -99,8 +99,12 @@ const IMAGE_DIRECTORY_ENTRY_BASERELOC: usize = 5;
 #[cfg(windows)]
 const IMAGE_DIRECTORY_ENTRY_TLS: usize = 9;
 
+// 1. Run obin_generator on your executable to generate key.rs and payload.rs
+// 2. Paste the contents of key.rs here.
 #[cfg(windows)]
 const SECRET_KEY: &[u8] = &[];
+
+// 3. Paste the contents of payload.rs here.
 #[cfg(windows)]
 const PAYLOAD: &[u8] = &[];
 

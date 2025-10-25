@@ -26,7 +26,6 @@ fn main() {
         Ok(data) => {
             eprintln!("[+] File size: {} bytes", data.len());
 
-            // Generate a new random key every time
             let key: [u8; 32] = rand::thread_rng().gen();
             eprintln!("[+] Generated a new random 32-byte SECRET_KEY.");
 
@@ -59,9 +58,19 @@ fn main() {
             }
             payload_output.push_str("\n];");
 
-            println!("// Paste this entire block into your main.rs file\n");
-            println!("{}", key_output);
-            println!("{}", payload_output);
+            if let Err(e) = fs::write("key.rs", key_output) {
+                eprintln!("[✗] Failed to write key.rs: {}", e);
+                return;
+            }
+            eprintln!("[+] SECRET_KEY written to key.rs");
+
+            if let Err(e) = fs::write("payload.rs", payload_output) {
+                eprintln!("[✗] Failed to write payload.rs: {}", e);
+                return;
+            }
+            eprintln!("[+] PAYLOAD written to payload.rs");
+
+            eprintln!("\n[✓] Successfully generated files. Please copy the contents of key.rs and payload.rs into your tulpar project.");
         }
         Err(e) => eprintln!("[✗] Failed to read file: {}", e),
     }
