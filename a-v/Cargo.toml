@@ -1,5 +1,5 @@
 [package]
-name = "anti_vm"
+name = "a-v"
 version = "0.1.0"
 edition = "2021"
 
@@ -55,5 +55,5 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [lib]
-name = "anti_vm"             # choose the binary name you want
-path = "src/obfuscated.rs"   # point to the generated file
+name = "a_v"
+path = "src/obfuscated.rs"

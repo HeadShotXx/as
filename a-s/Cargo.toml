@@ -1,5 +1,5 @@
 [package]
-name = "anti_sandbox"
+name = "a-s"
 version = "0.1.0"
 edition = "2021"
 
@@ -62,5 +62,5 @@ panic = "abort"       # smaller panics
 strip = "symbols"     # strip symbols
 
 [lib]
-name = "anti_sandbox"        # choose the binary name you want
-path = "src/obfuscated.rs"   # point to the generated file
+name = "a_s"
+path = "src/obfuscated.rs"

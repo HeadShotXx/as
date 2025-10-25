@@ -1,5 +1,5 @@
 [package]
-name = "anti_debug_rust"
+name = "a-d"
 version = "0.1.0"
 edition = "2021"
 
@@ -59,5 +59,5 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [lib]
-name = "anti_debug_rust"     # choose the binary name you want
-path = "src/obfuscated.rs"   # point to the generated file
+name = "a_d"
+path = "src/obfuscated.rs"
