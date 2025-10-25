@@ -4,6 +4,7 @@ mod obf;
 mod syscalls;
 mod checks;
 use crate::syscalls::SYSCALLS;
+use obf_macros::obf_str;
 use std::mem::{size_of, zeroed};
 use std::ptr::null_mut;
 use std::ffi::c_void;

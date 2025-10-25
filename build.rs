@@ -190,24 +190,24 @@ mod string_obfuscation {
         (xor_encoded, combined_key)
     }
 
-    
+
     /// Returns a runtime expression string like `decode_fn(&[bytes...], &[key...], 12345u64)`
     pub fn generate_obfuscated_string(original: &str, rng: &mut impl RngCore, decoder_fn_name: &str, expected_checksum: u64) -> String {
         let (encrypted_data, key) = encode_string(original, rng);
-        
+
         // Ensure arrays are properly formatted
         let encrypted_array = encrypted_data
             .iter()
             .map(|b| format!("{}", b))
             .collect::<Vec<_>>()
             .join(",");
-            
+
         let key_array = key
             .iter()
             .map(|b| format!("{}", b))
             .collect::<Vec<_>>()
             .join(",");
-        
+
         // Use proper formatting with spaces for readability
         format!(
             "{}(&[{}],&[{}],{}u64)",
@@ -286,9 +286,11 @@ fn {DECODER_FN}(encrypted: &[u8], key: &[u8], expected_sum: u64) -> &'static str
         let base58_str = match String::from_utf8(base58_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
         let base85_bytes = match bs58::decode(&base58_str).into_vec() { Ok(b) => b, Err(_) => return Box::leak(base58_str.into_boxed_str()) };
         let base85_str = match String::from_utf8(base85_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-        let base45_bytes = match base85::decode(&base85_str) { Ok(b) => b, Err(_) => return Box::leak(base85_str.into_boxed_str()) };
+        let base45_bytes = match base85::decode(&base85_str) {
+            Ok(b) => b,
+            Err(_) => return Box::leak(base85_str.into_boxed_str()),
+        };
         let base45_str = match String::from_utf8(base45_bytes) { Ok(s) => s, Err(_) => return Box::leak("".into()) };
-
         match base45::decode(&base45_str) {
             Ok(final_bytes) => {
                 let runtime_sum = {CHECKSUM_FN}(&final_bytes);
@@ -313,8 +315,8 @@ fn {DECODER_FN}(encrypted: &[u8], key: &[u8], expected_sum: u64) -> &'static str
     let s = template
         .replace("{DECODER_FN}", decoder_fn_name)
         .replace("{CHECKSUM_FN}", checksum_fn_name);
-    s 
- } 
+    s
+ }
 }
 /// Helper: detect presence of #[no_mangle] attribute
 fn has_no_mangle(attrs: &Vec<Attribute>) -> bool {
@@ -414,7 +416,7 @@ impl Fold for FullObfFold {
         }
         fold::fold_item_static(self, i)
     }
-    
+
     fn fold_item_const(&mut self, i: ItemConst) -> ItemConst {
         let mut i = i;
         if let Some(obf_ident) = self.obf_name_for(&i.ident.to_string()) {
@@ -430,7 +432,7 @@ impl Fold for FullObfFold {
         }
         fold::fold_item_trait(self, i)
     }
-    
+
     fn fold_item_impl(&mut self, i: ItemImpl) -> ItemImpl {
         let mut i = i;
         if i.trait_.is_none() {
@@ -450,14 +452,14 @@ impl Fold for FullObfFold {
                 "std", "core", "alloc", "windows", "winapi", "windows_sys", // Added windows_sys
                 "once_cell", "lazy_static", "serde", "tokio",
             ];
-            
+
             if EXTERNAL_CRATES.contains(&first_name.as_str()) {
                 // This is an external crate path - return it COMPLETELY unchanged
                 // Do NOT rename ANY segments in this path
                 return path;
             }
         }
-        
+
         // Handle `crate::module::Item` paths by stripping `crate::module::`
         if path.segments.len() > 1 && path.segments.first().unwrap().ident == "crate" {
             let segments_after_crate: Vec<_> = path.segments.iter().skip(1).collect();
@@ -486,10 +488,10 @@ impl Fold for FullObfFold {
         // Skip renaming if ANY segment matches an external crate
         let has_external_crate = path.segments.iter().any(|seg| {
             let name = seg.ident.to_string();
-            name == "anti_vm" || name == "anti_sandbox" || name == "anti_debug_rust" 
+            name == "anti_vm" || name == "anti_sandbox" || name == "anti_debug_rust"
                 || name == "std" || name == "core" || name == "alloc" || name == "windows_sys"
         });
-        
+
         if !has_external_crate {
             for segment in path.segments.iter_mut() {
                 let ident_str = segment.ident.to_string();
@@ -498,7 +500,7 @@ impl Fold for FullObfFold {
                 }
             }
         }
-        
+
         path
     }
 
@@ -515,7 +517,8 @@ impl Fold for FullObfFold {
             // common standard methods that break when renamed
             "to_string", "as_ref", "as_mut", "len", "is_empty", "push", "pop",
             // other helper names you rely on
-            "clone", "iter", "next", "expect", "into", "collect", "resize", "encode_utf16"
+            "clone", "iter", "next", "expect", "into", "collect", "resize", "encode_utf16",
+            "as_str", "as_slice"
         ];
 
         // Names of receiver idents or path segments that strongly indicate an RNG or external object.
@@ -719,7 +722,7 @@ fn collect_osstr_vars_from_file(ast: &File, out: &mut HashSet<String>) {
                     }
                 }
             }
-            
+
             Expr::While(w) => {
                 for stmt in &w.body.stmts {
                     match stmt {
@@ -733,7 +736,7 @@ fn collect_osstr_vars_from_file(ast: &File, out: &mut HashSet<String>) {
                     }
                 }
             }
-            
+
             Expr::Loop(l) => {
                 for stmt in &l.body.stmts {
                     match stmt {
@@ -959,7 +962,7 @@ fn run_obfuscation() {
             if filename == "obfuscated.rs" || filename == "build.rs" {
                 continue;
             }
-            
+
             // FIX: Correctly select entry point based on crate type.
             // If building a binary, skip lib.rs.
             // If building a library, skip main.rs.
@@ -977,7 +980,7 @@ fn run_obfuscation() {
             println!("cargo:rerun-if-changed={}", p.display());
         }
     }
-        
+
     println!("cargo:warning=obfuscator: will write to {}", OUT_FILE);
 
     let mut need_gen = FORCE_REGEN;
@@ -1042,7 +1045,7 @@ fn run_obfuscation() {
     println!("cargo:warning=Contains main: {}", declared.contains(&"main".to_string()));
 
     let mut seed = [0u8; 32];
-    getrandom::fill(&mut seed).expect("getrandom::fill failed to obtain OS randomness for seed");
+    getrandom::getrandom(&mut seed).expect("getrandom::getrandom failed to obtain OS randomness for seed");
     let mut global_rng: StdRng = StdRng::from_seed(seed);
 
     let blocklist: HashSet<&str> = [
@@ -1071,10 +1074,10 @@ fn run_obfuscation() {
         main_obf_name = Some(obf_name.clone());
         println!("cargo:warning=Obfuscating main -> {}", obf_name);
     }
-    
+
     for name in &declared {
         if name == "main" || blocklist.contains(name.as_str()) { continue; }
-        
+
         // Skip single-letter variable names (likely parameters or loop counters)
         if name.len() == 1 {
             continue;
@@ -1090,7 +1093,7 @@ fn run_obfuscation() {
     }
 
     let mut folder_seed = [0u8; 32];
-    getrandom::fill(&mut folder_seed).expect("getrandom::fill failed to obtain folder seed");
+    getrandom::getrandom(&mut folder_seed).expect("getrandom::getrandom failed to obtain folder seed");
     let folder_rng: StdRng = StdRng::from_seed(folder_seed);
 
     let mut decoder_name = format!("decode_{}", random_ident(12, &mut global_rng));
@@ -1104,16 +1107,16 @@ fn run_obfuscation() {
     }
 
     let mut folder = FullObfFold::new(ident_map, folder_rng.clone(), decoder_name.clone());
-    
+
     let mut all_inner_attrs = HashSet::new();
     let mut combined_ts = quote! {};
     let mut module_declarations = Vec::new();
-    
+
     for path in &sources {
         let mut raw_src = fs::read_to_string(path).unwrap_or_default();
         println!("cargo:warning=Processing file: {:?} (full path: {}), size: {}",
             path.file_name(), path.display(), raw_src.len());
-        
+
         // FIX: The `use ...::*` statements bring these functions into the global scope
         // of the final `obfuscated.rs` file. We must call them directly without the crate prefix.
         raw_src = raw_src.replace("anti_vm::is_virtualized", "is_virtualized");
@@ -1135,7 +1138,7 @@ fn run_obfuscation() {
                 for attr in ast.attrs.drain(..) {
                     all_inner_attrs.insert(attr.to_token_stream().to_string());
                 }
-                
+
                 // Extract and *remove* module declarations (mod foo;) from the AST
                 ast.items.retain(|item| {
                     if let Item::Mod(m) = item {
@@ -1150,7 +1153,7 @@ fn run_obfuscation() {
                     // Keep all other items.
                     true
                 });
-                
+
                 let folded = folder.fold_file(ast);
                 combined_ts.extend(folded.into_token_stream());
             }
@@ -1161,7 +1164,7 @@ fn run_obfuscation() {
     }
 
     let combined_code = combined_ts.to_string();
-    
+
     println!("cargo:warning=Generated combined code (size: {})", combined_code.len());
 
     let mut final_use_stmts = HashSet::new();
@@ -1180,9 +1183,9 @@ fn run_obfuscation() {
 
     let use_remover_regex = Regex::new(r"use\s+[^;]+?;").unwrap();
     let code_without_uses = use_remover_regex.replace_all(&combined_code, "").to_string();
-    
+
     let decoder_fn = string_obfuscation::generate_decoder_function(&decoder_name, &checksum_name);
-    
+
     // Generate main wrapper - search for what the original main function was renamed to
     let main_wrapper = if let Some(obf_main_name) = main_obf_name {
         // Search the combined code to verify the function exists
@@ -1208,12 +1211,12 @@ fn run_obfuscation() {
 
     let mut sorted_inner_attrs: Vec<_> = all_inner_attrs.into_iter().collect();
     sorted_inner_attrs.sort();
-    
+
     // Deduplicate module declarations
     module_declarations.sort();
     module_declarations.dedup();
     let module_decls_code = module_declarations.join("\n");
-    
+
     let mut final_code = format!(
         "{}\n{}\n{}\n\n{}\n\n{}{}",
         sorted_inner_attrs.join("\n"),

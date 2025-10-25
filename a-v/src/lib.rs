@@ -1,4 +1,5 @@
 
+use obf_macros::obf_str;
 use raw_cpuid::CpuId;
 
 use std::ffi::OsStr;

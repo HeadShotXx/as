@@ -5,8 +5,7 @@ edition = "2021"
 
 [dependencies]
 raw-cpuid = "11.1.0"
-rustpolymorphic = { path = "../rustdie" }
-obf-helpers = { path = "../obf-helpers" }
+obf_macros = { path = "../obf_macros" }
 
 [dependencies.windows]
 version = "0.56.0"
