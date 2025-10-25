@@ -46,3 +46,11 @@ serde_json = "1.0"
 [profile.release]
 opt-level = 3
 lto = true
+
+[[bin]]
+name = "tulpar"
+path = "src/main.rs"
+
+[[bin]]
+name = "obin_generator"
+path = "src/bin/obin_generator.rs"
