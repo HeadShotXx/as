@@ -16,21 +16,34 @@ fn transform_data(data: &[u8]) -> Vec<u8> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: {} <input-file>", args[0]);
+        eprintln!("Usage: {} <input-file>", args.get(0).unwrap_or(&"obin_generator".to_string()));
         return;
     }
 
     let path = &args[1];
-    println!("[*] Reading file: {}", path);
+    eprintln!("[*] Reading file: {}", path);
     match fs::read(path) {
         Ok(data) => {
-            println!("[+] File size: {} bytes", data.len());
+            eprintln!("[+] File size: {} bytes", data.len());
             let obfuscated_data = transform_data(&data);
-            let out_path = format!("{}.obin", path);
-            match fs::write(&out_path, &obfuscated_data) {
-                Ok(_) => println!("[+] Wrote obfuscated binary to: {}", out_path),
-                Err(e) => eprintln!("[✗] Failed to write {}: {}", out_path, e),
+
+            let mut output = String::from("const PAYLOAD: &[u8] = &[\n    ");
+
+            for (i, byte) in obfuscated_data.iter().enumerate() {
+                output.push_str(&format!("0x{:02x}, ", byte));
+                if (i + 1) % 16 == 0 {
+                    output.push_str("\n    ");
+                }
             }
+
+            if output.ends_with(", ") {
+                output.pop();
+                output.pop();
+            }
+
+            output.push_str("\n];");
+
+            println!("{}", output);
         }
         Err(e) => eprintln!("[✗] Failed to read file: {}", e),
     }
