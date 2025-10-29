@@ -1,0 +1,27 @@
+[package]
+name = "rust_s"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+windows-sys = { version = "0.48.0", features = [
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_Security",
+    "Win32_System_SystemServices",
+    "Win32_System_Kernel"
+] }
+anti-vm = { path = "a-v" }
+anti-sandbox = { path = "a-s" }
+anti-debug-rust = { path = "a-d" }
+
+# ---- Obfuscation / release-hardening önerilen ayarlar ----
+[profile.release]
+opt-level = "z"        # boyutu küçült, optimizasyon yoğun
+lto = true             # link-time optimization (analizi zorlaştırır)
+codegen-units = 1      # tek codegen birimi (daha birleşik kod)
+debug = false          # debug bilgilerini üretme
+panic = "abort"        # daha küçük panic/stack trace
+strip = "symbols"      # sembol tablosunu mümkün olduğunca küçült
