@@ -53,7 +53,6 @@ const THREAD_HIDE_FROM_DEBUGGER: i32 = 0x11;
 
 /// Spawns a new thread to run all anti-debugging checks and hides the thread from debuggers.
 /// This makes it significantly harder for an analyst to step through the detection logic.
-#[polymorph(fn_len = 40, garbage = true, control_flow = true)]
 pub fn run_all_checks_hidden() -> bool {
     let handle = std::thread::spawn(|| {
         type NtSetInformationThread = unsafe extern "system" fn(
