@@ -39,6 +39,9 @@ impl Syscall {
     }
 }
 
+unsafe impl Send for Syscall {}
+unsafe impl Sync for Syscall {}
+
 pub fn get_syscall(func_name: &str) -> Option<Syscall> {
     unsafe {
         let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr() as _);
@@ -70,6 +73,8 @@ pub unsafe fn indirect_ntallocatevirtualmemory(
     unsafe {
         asm!(
             "mov r10, rcx",
+            "mov [rsp + 8 * 4], r12",
+            "mov [rsp + 8 * 5], r13",
             "syscall",
             in("rax") syscall_number,
             in("rcx") ProcessHandle,
@@ -97,6 +102,7 @@ pub unsafe fn indirect_ntprotectvirtualmemory(
     unsafe {
         asm!(
             "mov r10, rcx",
+            "mov [rsp + 8 * 4], r12",
             "syscall",
             in("rax") syscall_number,
             in("rcx") ProcessHandle,

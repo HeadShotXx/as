@@ -8,11 +8,6 @@ use winapi::shared::minwindef::{DWORD, HMODULE, LPVOID};
 #[cfg(windows)]
 use winapi::um::errhandlingapi::GetLastError;
 #[cfg(windows)]
-use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryA};
-#[cfg(windows)]
-use winapi::um::memoryapi::{VirtualAlloc, VirtualProtect};
-#[cfg(windows)]
-use winapi::um::processthreadsapi::FlushInstructionCache;
 #[cfg(windows)]
 use winapi::um::winnt::{
     MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
