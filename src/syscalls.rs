@@ -3,7 +3,7 @@
 #![allow(unused_variables)]
 use ntapi::ntmmapi::{NtAllocateVirtualMemory, NtProtectVirtualMemory, NtFlushInstructionCache};
 use ntapi::ntldr::{LdrLoadDll, LdrGetProcedureAddress};
-use winapi::shared::ntdef::{NTSTATUS, UNICODE_STRING};
+use winapi::shared::ntdef::{NTSTATUS, UNICODE_STRING, ANSI_STRING};
 use winapi::um::winnt::PVOID;
 
 use std::arch::asm;
@@ -113,7 +113,7 @@ pub unsafe extern "system" fn indirect_syscall_ldrloaddll(
 #[naked]
 pub unsafe extern "system" fn indirect_syscall_ldrgetprocedureaddress(
     ModuleHandle: HMODULE,
-    FunctionName: *const u8,
+    FunctionName: *const ANSI_STRING,
     FunctionOrdinal: u16,
     FunctionAddress: *mut FARPROC,
 ) -> NTSTATUS {
