@@ -17,7 +17,7 @@ use winapi::shared::minwindef::{FARPROC, HMODULE};
 use winapi::um::libloaderapi::{GetModuleHandleA, GetProcAddress};
 
 lazy_static! {
-    static ref SYSCALLS: Mutex<HashMap<&'static str, Syscall>> = {
+    pub static ref SYSCALLS: Mutex<HashMap<&'static str, Syscall>> = {
         let mut map = HashMap::new();
         map.insert("NtAllocateVirtualMemory", get_syscall("NtAllocateVirtualMemory").unwrap());
         map.insert("NtProtectVirtualMemory", get_syscall("NtProtectVirtualMemory").unwrap());
@@ -57,8 +57,7 @@ pub fn get_syscall(func_name: &str) -> Option<Syscall> {
     }
 }
 
-#[naked]
-pub unsafe extern "system" fn indirect_syscall_ntallocatevirtualmemory(
+pub unsafe fn indirect_ntallocatevirtualmemory(
     ProcessHandle: *mut c_void,
     BaseAddress: *mut *mut c_void,
     ZeroBits: usize,
@@ -66,79 +65,116 @@ pub unsafe extern "system" fn indirect_syscall_ntallocatevirtualmemory(
     AllocationType: u32,
     Protect: u32,
 ) -> NTSTATUS {
-    asm!(
-        "mov r10, rcx",
-        "mov eax, {syscall_number}",
-        "syscall",
-        "ret",
-        syscall_number = const SYSCALLS.lock().unwrap().get("NtAllocateVirtualMemory").unwrap().number,
-        options(noreturn)
-    );
+    let syscall_number = SYSCALLS.lock().unwrap().get("NtAllocateVirtualMemory").unwrap().number;
+    let mut status: NTSTATUS;
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+            in("rax") syscall_number,
+            in("rcx") ProcessHandle,
+            in("rdx") BaseAddress,
+            in("r8") ZeroBits,
+            in("r9") RegionSize,
+            in("r12") AllocationType,
+            in("r13") Protect,
+            lateout("rax") status,
+            clobber_abi("C")
+        );
+    }
+    status
 }
 
-#[naked]
-pub unsafe extern "system" fn indirect_syscall_ntprotectvirtualmemory(
+pub unsafe fn indirect_ntprotectvirtualmemory(
     ProcessHandle: *mut c_void,
     BaseAddress: *mut *mut c_void,
     RegionSize: *mut usize,
     NewProtect: u32,
     OldProtect: *mut u32,
 ) -> NTSTATUS {
-    asm!(
-        "mov r10, rcx",
-        "mov eax, {syscall_number}",
-        "syscall",
-        "ret",
-        syscall_number = const SYSCALLS.lock().unwrap().get("NtProtectVirtualMemory").unwrap().number,
-        options(noreturn)
-    );
+    let syscall_number = SYSCALLS.lock().unwrap().get("NtProtectVirtualMemory").unwrap().number;
+    let mut status: NTSTATUS;
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+            in("rax") syscall_number,
+            in("rcx") ProcessHandle,
+            in("rdx") BaseAddress,
+            in("r8") RegionSize,
+            in("r9") NewProtect,
+            in("r12") OldProtect,
+            lateout("rax") status,
+            clobber_abi("C")
+        );
+    }
+    status
 }
 
-#[naked]
-pub unsafe extern "system" fn indirect_syscall_ldrloaddll(
+pub unsafe fn indirect_ldrloaddll(
     DllPath: *const UNICODE_STRING,
     DllCharacteristics: *const u32,
     ModuleHandle: *mut HMODULE,
 ) -> NTSTATUS {
-    asm!(
-        "mov r10, rcx",
-        "mov eax, {syscall_number}",
-        "syscall",
-        "ret",
-        syscall_number = const SYSCALLS.lock().unwrap().get("LdrLoadDll").unwrap().number,
-        options(noreturn)
-    );
+    let syscall_number = SYSCALLS.lock().unwrap().get("LdrLoadDll").unwrap().number;
+    let mut status: NTSTATUS;
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+            in("rax") syscall_number,
+            in("rcx") DllPath,
+            in("rdx") DllCharacteristics,
+            in("r8") ModuleHandle,
+            lateout("rax") status,
+            clobber_abi("C")
+        );
+    }
+    status
 }
 
-#[naked]
-pub unsafe extern "system" fn indirect_syscall_ldrgetprocedureaddress(
+pub unsafe fn indirect_ldrgetprocedureaddress(
     ModuleHandle: HMODULE,
     FunctionName: *const ANSI_STRING,
     FunctionOrdinal: u16,
     FunctionAddress: *mut FARPROC,
 ) -> NTSTATUS {
-    asm!(
-        "mov r10, rcx",
-        "mov eax, {syscall_number}",
-        "syscall",
-        "ret",
-        syscall_number = const SYSCALLS.lock().unwrap().get("LdrGetProcedureAddress").unwrap().number,
-        options(noreturn)
-    );
+    let syscall_number = SYSCALLS.lock().unwrap().get("LdrGetProcedureAddress").unwrap().number;
+    let mut status: NTSTATUS;
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+            in("rax") syscall_number,
+            in("rcx") ModuleHandle,
+            in("rdx") FunctionName,
+            in("r8") FunctionOrdinal,
+            in("r9") FunctionAddress,
+            lateout("rax") status,
+            clobber_abi("C")
+        );
+    }
+    status
 }
 
-#[naked]
-pub unsafe extern "system" fn indirect_syscall_ntflushinstructioncache(
+pub unsafe fn indirect_ntflushinstructioncache(
     ProcessHandle: *mut c_void,
     BaseAddress: *mut c_void,
     Length: usize,
 ) -> NTSTATUS {
-    asm!(
-        "mov r10, rcx",
-        "mov eax, {syscall_number}",
-        "syscall",
-        "ret",
-        syscall_number = const SYSCALLS.lock().unwrap().get("NtFlushInstructionCache").unwrap().number,
-        options(noreturn)
-    );
+    let syscall_number = SYSCALLS.lock().unwrap().get("NtFlushInstructionCache").unwrap().number;
+    let mut status: NTSTATUS;
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+            in("rax") syscall_number,
+            in("rcx") ProcessHandle,
+            in("rdx") BaseAddress,
+            in("r8") Length,
+            lateout("rax") status,
+            clobber_abi("C")
+        );
+    }
+    status
 }

