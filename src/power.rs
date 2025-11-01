@@ -1,34 +1,23 @@
 // src/lib.rs
 
-use anti_debug_rust;
-use anti_vm;
-use anti_sandbox;
 // ============================================================================
 // TOP-LEVEL 'USE' STATEMENTS
 // ============================================================================
 use windows::{
-    core::*,
     Win32::{
-        Foundation::*,
         System::{
-            Diagnostics::Debug::*,
-            ProcessStatus::*,
             SystemInformation::*,
             Threading::*,
-            LibraryLoader::*,
         },
         UI::WindowsAndMessaging::*,
-        Security::*,
     },
 };
-use windows::Win32::System::Threading::PROCESS_NAME_FORMAT;
-use windows::Win32::UI::WindowsAndMessaging::{SM_CXSCREEN, SM_CYSCREEN};
 
 // --- Import functions and modules from the new files (use crate::... to ensure internal modules are used) ---
 
 // From anti_debug
-use crate::anti_debug_rust::run_debug_checks;
-use crate::anti_debug_rust::{
+use anti_debug_rust::run_debug_checks;
+use anti_debug_rust::{
     debugger_detection,
     parent_anti_debug,
     bad_processes,
@@ -37,8 +26,8 @@ use crate::anti_debug_rust::{
 };
 
 // From anti_vm
-use crate::anti_vm::run_vm_checks;
-use crate::anti_vm::{
+use anti_vm::run_vm_checks;
+use anti_vm::{
     shadow_defender_detection,
     anyrun_detection,
     comodo_antivirus_detection,
@@ -57,8 +46,8 @@ use crate::anti_vm::{
 };
 
 // From anti_sandbox
-use crate::anti_sandbox::run_environment_checks;
-use crate::anti_sandbox::{
+use anti_sandbox::run_environment_checks;
+use anti_sandbox::{
     admin_check,
     all_tokens,
     clean_environment_detection,
@@ -311,6 +300,11 @@ impl Default for AntiAnalysisConfig {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use anti_debug_rust::{debugger_detection, parent_anti_debug, bad_processes};
+    use anti_sandbox::{admin_check, pc_uptime, running_processes, internet_check, username_check, usb_check, clean_environment_detection, all_tokens};
+    use anti_vm::{monitor_metrics, run_vm_checks};
+
 
     #[test]
     fn test_runtime_detection() {

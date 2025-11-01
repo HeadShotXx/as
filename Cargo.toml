@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # We still need windows-sys for essential types, and for LoadLibraryA/GetProcAddress
-windows = { version = "0.62.0", features = [
+windows = { version = "0.52.0", features = [
     "Win32_Foundation",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_ProcessStatus",
@@ -74,4 +74,4 @@ strip = "symbols"     # strip symbols
 
 [[bin]]
 name = "rust_s"        # choose the binary name you want
-path = "src/obfuscated.rs"   # point to the generated file
+path = "src/main.rs"   # point to the generated file
