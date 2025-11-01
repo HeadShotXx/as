@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-winapi = { version = "0.3", features = ["memoryapi", "winnt", "libloaderapi", "processthreadsapi", "errhandlingapi"] }
+ntapi = "0.3.6"
+lazy_static = "1.4.0"
+winapi = { version = "0.3", features = ["memoryapi", "winnt", "libloaderapi", "processthreadsapi", "errhandlingapi", "ntdef"] }
 
 # --- Your existing build dependencies ---
 walkdir = "2.3"

