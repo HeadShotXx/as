@@ -72,19 +72,13 @@ pub unsafe fn indirect_ntallocatevirtualmemory(
     let mut status: NTSTATUS;
     unsafe {
         asm!(
-            "sub rsp, 40",
-            "mov [rsp + 32], r12",
-            "mov [rsp + 40], r13",
             "mov r10, rcx",
             "syscall",
-            "add rsp, 40",
             in("rax") syscall_number,
             in("rcx") ProcessHandle,
             in("rdx") BaseAddress,
             in("r8") ZeroBits,
             in("r9") RegionSize,
-            in("r12") AllocationType,
-            in("r13") Protect,
             lateout("rax") status,
             clobber_abi("C")
         );
@@ -103,17 +97,13 @@ pub unsafe fn indirect_ntprotectvirtualmemory(
     let mut status: NTSTATUS;
     unsafe {
         asm!(
-            "sub rsp, 40",
-            "mov [rsp + 32], r12",
             "mov r10, rcx",
             "syscall",
-            "add rsp, 40",
             in("rax") syscall_number,
             in("rcx") ProcessHandle,
             in("rdx") BaseAddress,
             in("r8") RegionSize,
             in("r9") NewProtect,
-            in("r12") OldProtect,
             lateout("rax") status,
             clobber_abi("C")
         );
