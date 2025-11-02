@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 winapi = { version = "0.3", features = ["memoryapi", "winnt", "libloaderapi", "processthreadsapi", "errhandlingapi"] }
+lazy_static = "1.4.0"
+ntapi = "0.4.0"
 
 # --- Your existing build dependencies ---
 walkdir = "2.3"
