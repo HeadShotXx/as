@@ -86,7 +86,7 @@ pub unsafe fn indirect_ntallocatevirtualmemory(
             in("r12") AllocationType,
             in("r13") Protect,
             lateout("rax") status,
-            clobber_abi("C")
+            clobber_abi("system")
         );
     }
     status
@@ -115,7 +115,7 @@ pub unsafe fn indirect_ntprotectvirtualmemory(
             in("r9") NewProtect,
             in("r12") OldProtect,
             lateout("rax") status,
-            clobber_abi("C")
+            clobber_abi("system")
         );
     }
     status
@@ -139,7 +139,7 @@ pub unsafe fn indirect_ldrloaddll(
             in("r8") ModuleFileName,
             in("r9") ModuleHandle,
             lateout("rax") status,
-            clobber_abi("C")
+            clobber_abi("system")
         );
     }
     status
@@ -163,7 +163,7 @@ pub unsafe fn indirect_ldrgetprocedureaddress(
             in("r8") FunctionOrdinal,
             in("r9") FunctionAddress,
             lateout("rax") status,
-            clobber_abi("C")
+            clobber_abi("system")
         );
     }
     status
@@ -185,7 +185,7 @@ pub unsafe fn indirect_ntflushinstructioncache(
             in("rdx") BaseAddress,
             in("r8") Length,
             lateout("rax") status,
-            clobber_abi("C")
+            clobber_abi("system")
         );
     }
     status
