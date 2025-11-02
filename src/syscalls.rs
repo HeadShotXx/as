@@ -73,9 +73,8 @@ pub unsafe fn indirect_ntallocatevirtualmemory(
     unsafe {
         asm!(
             "sub rsp, 40",
-            "mov [rsp + 32], r9",
-            "mov [rsp + 40], r12",
-            "mov [rsp + 48], r13",
+            "mov [rsp + 32], r12",
+            "mov [rsp + 40], r13",
             "mov r10, rcx",
             "syscall",
             "add rsp, 40",
@@ -105,8 +104,7 @@ pub unsafe fn indirect_ntprotectvirtualmemory(
     unsafe {
         asm!(
             "sub rsp, 40",
-            "mov [rsp + 32], r9",
-            "mov [rsp + 40], r12",
+            "mov [rsp + 32], r12",
             "mov r10, rcx",
             "syscall",
             "add rsp, 40",
@@ -124,8 +122,9 @@ pub unsafe fn indirect_ntprotectvirtualmemory(
 }
 
 pub unsafe fn indirect_ldrloaddll(
-    DllPath: *const UNICODE_STRING,
+    DllPath: *const u32,
     DllCharacteristics: *const u32,
+    ModuleFileName: *const UNICODE_STRING,
     ModuleHandle: *mut HMODULE,
 ) -> NTSTATUS {
     let syscall_number = SYSCALLS.lock().unwrap().get("LdrLoadDll").unwrap().number;
@@ -137,7 +136,8 @@ pub unsafe fn indirect_ldrloaddll(
             in("rax") syscall_number,
             in("rcx") DllPath,
             in("rdx") DllCharacteristics,
-            in("r8") ModuleHandle,
+            in("r8") ModuleFileName,
+            in("r9") ModuleHandle,
             lateout("rax") status,
             clobber_abi("C")
         );

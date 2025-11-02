@@ -203,8 +203,9 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
         };
         let status = unsafe {
             indirect_ldrloaddll(
-                &mut us,
-                ptr::null_mut(),
+                ptr::null(),
+                ptr::null(),
+                &us,
                 &mut module,
             )
         };
