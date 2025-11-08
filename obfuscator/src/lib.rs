@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, LitStr};
+use syn::{parse_macro_input, LitStr, ItemFn};
 use rand::{Rng, thread_rng};
 use rand::seq::SliceRandom;
 use rand::distributions::Alphanumeric;
@@ -224,4 +224,45 @@ pub fn obfuscate(input: TokenStream) -> TokenStream {
     };
 
     gen.into()
+}
+
+#[proc_macro_attribute]
+pub fn obfuscate_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut main_fn = parse_macro_input!(item as ItemFn);
+
+    if main_fn.sig.ident != "main" {
+        panic!("The obfuscate_main macro can only be used on the main function");
+    }
+
+    let mut rng = thread_rng();
+    let random_fn_name: String = std::iter::repeat(())
+        .map(|()| rng.sample(Alphanumeric))
+        .map(char::from)
+        .take(20)
+        .collect();
+    let random_fn_ident = syn::Ident::new(&random_fn_name, main_fn.sig.ident.span());
+
+    let main_fn_body = main_fn.block;
+
+    let new_fn = quote! {
+        fn #random_fn_ident() {
+            #main_fn_body
+        }
+    };
+
+    let new_main_body = quote! {
+        {
+            #random_fn_ident();
+        }
+    };
+
+    let new_main_body_tokens: TokenStream = new_main_body.into();
+    main_fn.block = syn::parse(new_main_body_tokens).expect("Failed to parse new main body");
+
+    let output = quote! {
+        #new_fn
+        #main_fn
+    };
+
+    output.into()
 }
