@@ -266,3 +266,62 @@ pub fn obfuscate_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     output.into()
 }
+
+#[proc_macro_attribute]
+pub fn obfuscate_junk(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut subject_fn = parse_macro_input!(item as ItemFn);
+    let mut rng = thread_rng();
+
+    // Generate a random number of junk statements
+    let num_junk_statements = rng.gen_range(5..=15);
+    let mut junk_statements = Vec::new();
+
+    for _ in 0..num_junk_statements {
+        let random_part: String = std::iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(10)
+            .collect();
+        let var_name = format!("_{}", random_part);
+        let var_ident = syn::Ident::new(&var_name, proc_macro2::Span::call_site());
+        let random_val: u32 = rng.gen();
+
+        let junk_statement = quote! {
+            let #var_ident = #random_val;
+        };
+        junk_statements.push(junk_statement);
+    }
+
+    // Wrap junk code in a complex loop
+    let loop_iterations = rng.gen_range(1..=3);
+    let loop_counter_name: String = std::iter::repeat(())
+        .map(|()| rng.sample(Alphanumeric))
+        .map(char::from)
+        .take(8)
+        .collect();
+    let loop_counter_ident = syn::Ident::new(&loop_counter_name, proc_macro2::Span::call_site());
+
+    let junk_code_block = quote! {
+        for #loop_counter_ident in 0..#loop_iterations {
+            if #loop_counter_ident > #loop_iterations {
+                #(#junk_statements)*
+            }
+        }
+    };
+
+    let original_body = subject_fn.block;
+    let new_body_block = syn::parse2(quote! {
+        {
+            #junk_code_block
+            #original_body
+        }
+    }).expect("Failed to parse new body");
+
+    subject_fn.block = Box::new(new_body_block);
+
+    let output = quote! {
+        #subject_fn
+    };
+
+    output.into()
+}
