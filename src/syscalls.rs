@@ -69,7 +69,7 @@ impl Syscalls {
     fn new() -> Result<Syscalls, &'static str> {
         unsafe {
             let ntdll = LoadLibraryA("ntdll.dll\0".as_ptr());
-            if ntdll == 0 {
+            if (ntdll as *mut std::ffi::c_void).is_null() {
                 return Err("Failed to load ntdll.dll");
             }
 
