@@ -149,6 +149,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
+name = "once_cell"
+version = "1.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -355,6 +361,7 @@ dependencies = [
  "bs58",
  "getrandom",
  "hex",
+ "once_cell",
  "proc-macro2",
  "quote",
  "rand",
@@ -364,6 +371,7 @@ dependencies = [
  "syn",
  "walkdir",
  "winapi",
+ "windows-sys",
 ]
 
 [[package]]
