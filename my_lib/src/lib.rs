@@ -1,7 +1,7 @@
-use obfuscator::obfuscate;
+use obfuscator::obfuscate_string;
 
 pub fn get_secret_message() -> String {
-    obfuscate!("This is a secret message from my_lib!").to_string()
+    obfuscate_string!("This is a secret message from my_lib!").to_string()
 }
 
 #[cfg(test)]

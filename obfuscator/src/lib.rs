@@ -2,7 +2,9 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, LitStr, ItemFn};
+use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit};
+use syn::punctuated::Punctuated;
+use syn::parse::Parser;
 use rand::{Rng, thread_rng};
 use rand::seq::SliceRandom;
 use rand::distributions::Alphanumeric;
@@ -151,7 +153,7 @@ fn generate_key_reconstruction_logic(
 }
 
 #[proc_macro]
-pub fn obfuscate(input: TokenStream) -> TokenStream {
+pub fn obfuscate_string(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as LitStr);
     let original_str = input.value();
     let mut rng = thread_rng();
@@ -226,12 +228,9 @@ pub fn obfuscate(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
-#[proc_macro_attribute]
-pub fn obfuscate_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut main_fn = parse_macro_input!(item as ItemFn);
-
+fn apply_main_obfuscation(mut main_fn: ItemFn) -> (proc_macro2::TokenStream, ItemFn) {
     if main_fn.sig.ident != "main" {
-        panic!("The obfuscate_main macro can only be used on the main function");
+        panic!("The main obfuscation can only be used on the main function");
     }
 
     let mut rng = thread_rng();
@@ -259,17 +258,64 @@ pub fn obfuscate_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let new_main_body_tokens: TokenStream = new_main_body.into();
     main_fn.block = syn::parse(new_main_body_tokens).expect("Failed to parse new main body");
 
-    let output = quote! {
-        #new_fn
-        #main_fn
-    };
+    (new_fn, main_fn)
+}
 
-    output.into()
+#[derive(Default)]
+struct ObfuscatorArgs {
+    fonk_len: Option<u64>,
+    garbage: bool,
+    main: bool,
+}
+
+impl ObfuscatorArgs {
+    fn from_attrs(attrs: &[Meta]) -> Self {
+        let mut args = Self::default();
+        for attr in attrs {
+            if let Meta::NameValue(nv) = attr {
+                if nv.path.is_ident("fonk_len") {
+                    if let Expr::Lit(ExprLit { lit: Lit::Int(lit_int), .. }) = &nv.value {
+                        args.fonk_len = lit_int.base10_parse().ok();
+                    }
+                } else if nv.path.is_ident("garbage") {
+                    if let Expr::Lit(ExprLit { lit: Lit::Bool(lit_bool), .. }) = &nv.value {
+                        args.garbage = lit_bool.value;
+                    }
+                } else if nv.path.is_ident("main") {
+                    if let Expr::Lit(ExprLit { lit: Lit::Bool(lit_bool), .. }) = &nv.value {
+                        args.main = lit_bool.value;
+                    }
+                }
+            }
+        }
+        args
+    }
 }
 
 #[proc_macro_attribute]
-pub fn obfuscate_junk(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attrs = Punctuated::<Meta, syn::Token![,]>::parse_terminated.parse(attr).unwrap();
+    let args = ObfuscatorArgs::from_attrs(&attrs.into_iter().collect::<Vec<_>>());
     let mut subject_fn = parse_macro_input!(item as ItemFn);
+
+    let mut output = quote! {};
+
+    if args.main {
+        let (new_fn, modified_main) = apply_main_obfuscation(subject_fn.clone());
+        output.extend(new_fn);
+        subject_fn = modified_main;
+    }
+
+    if args.garbage {
+        let fonk_len = args.fonk_len.unwrap_or(3);
+        subject_fn = apply_junk_obfuscation(subject_fn, fonk_len);
+    }
+
+    output.extend(quote! { #subject_fn });
+    output.into()
+}
+
+fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
     let mut rng = thread_rng();
 
     // Generate a random number of junk statements
@@ -293,7 +339,7 @@ pub fn obfuscate_junk(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     // Wrap junk code in a complex loop
-    let loop_iterations = rng.gen_range(1..=3);
+    let loop_iterations = fonk_len;
     let loop_counter_name: String = std::iter::repeat(())
         .map(|()| rng.sample(Alphanumeric))
         .map(char::from)
@@ -319,9 +365,5 @@ pub fn obfuscate_junk(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     subject_fn.block = Box::new(new_body_block);
 
-    let output = quote! {
-        #subject_fn
-    };
-
-    output.into()
+    subject_fn
 }
