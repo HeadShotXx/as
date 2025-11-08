@@ -234,11 +234,12 @@ fn apply_main_obfuscation(mut main_fn: ItemFn) -> (proc_macro2::TokenStream, Ite
     }
 
     let mut rng = thread_rng();
-    let random_fn_name: String = std::iter::repeat(())
+    let random_part: String = std::iter::repeat(())
         .map(|()| rng.sample(Alphanumeric))
         .map(char::from)
         .take(20)
         .collect();
+    let random_fn_name = format!("obf_{}", random_part);
     let random_fn_ident = syn::Ident::new(&random_fn_name, main_fn.sig.ident.span());
 
     let main_fn_body = main_fn.block;
