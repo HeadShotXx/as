@@ -267,6 +267,7 @@ struct ObfuscatorArgs {
     fonk_len: Option<u64>,
     garbage: bool,
     main: bool,
+    inline: bool,
 }
 
 impl ObfuscatorArgs {
@@ -285,6 +286,10 @@ impl ObfuscatorArgs {
                 } else if nv.path.is_ident("main") {
                     if let Expr::Lit(ExprLit { lit: Lit::Bool(lit_bool), .. }) = &nv.value {
                         args.main = lit_bool.value;
+                    }
+                } else if nv.path.is_ident("inline") {
+                    if let Expr::Lit(ExprLit { lit: Lit::Bool(lit_bool), .. }) = &nv.value {
+                        args.inline = lit_bool.value;
                     }
                 }
             }
@@ -312,7 +317,15 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
         subject_fn = apply_junk_obfuscation(subject_fn, fonk_len);
     }
 
-    output.extend(quote! { #subject_fn });
+    if args.inline {
+        output.extend(quote! {
+            #[inline]
+            #subject_fn
+        });
+    } else {
+        output.extend(quote! { #subject_fn });
+    }
+
     output.into()
 }
 
