@@ -13,4 +13,14 @@ mod tests {
         let message = get_secret_message();
         assert_eq!(message, "This is a secret message from my_lib!");
     }
+
+    #[obfuscator::obfuscate(inline = true)]
+    fn inlined_function() -> i32 {
+        42
+    }
+
+    #[test]
+    fn test_inlined_function() {
+        assert_eq!(inlined_function(), 42);
+    }
 }
