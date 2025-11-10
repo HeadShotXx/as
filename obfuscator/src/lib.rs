@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit};
+use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit, visit_mut::VisitMut, ExprIf};
 use syn::punctuated::Punctuated;
 use syn::parse::Parser;
 use rand::{Rng, thread_rng};
@@ -336,26 +336,39 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
-    let mut rng = thread_rng();
-    let original_body = subject_fn.block;
-
-    let p1: i32 = rng.gen();
-    let p2: i32 = rng.gen_range(1..100);
-
-    let predicate = quote! { (#p1.wrapping_add(#p2)) != #p1 };
-
-    let new_body_block = syn::parse_quote! {
-        {
-            if #predicate {
-                #original_body
-            }
-        }
-    };
-
-    subject_fn.block = Box::new(new_body_block);
+    let mut visitor = ControlFlowVisitor;
+    visitor.visit_item_fn_mut(&mut subject_fn);
     subject_fn
 }
 
+struct ControlFlowVisitor;
+
+use syn::visit_mut;
+
+impl VisitMut for ControlFlowVisitor {
+    fn visit_expr_if_mut(&mut self, i: &mut ExprIf) {
+        let mut rng = thread_rng();
+        let true_val: u32 = rng.gen();
+        let false_val: u32 = rng.gen();
+
+        let original_cond = &i.cond;
+
+        // Replace the original condition with an obfuscated version
+        let new_cond = syn::parse_quote! {
+            {
+                let val = match #original_cond {
+                    true => #true_val,
+                    false => #false_val,
+                };
+                val == #true_val
+            }
+        };
+        i.cond = Box::new(new_cond);
+
+        // Continue traversing the rest of the AST
+        visit_mut::visit_expr_if_mut(self, i);
+    }
+}
 
 fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
     let mut rng = thread_rng();
