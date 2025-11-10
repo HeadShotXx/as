@@ -268,7 +268,6 @@ struct ObfuscatorArgs {
     garbage: bool,
     main: bool,
     inline: bool,
-    cf: bool,
 }
 
 impl ObfuscatorArgs {
@@ -291,10 +290,6 @@ impl ObfuscatorArgs {
                 } else if nv.path.is_ident("inline") {
                     if let Expr::Lit(ExprLit { lit: Lit::Bool(lit_bool), .. }) = &nv.value {
                         args.inline = lit_bool.value;
-                    }
-                } else if nv.path.is_ident("cf") {
-                    if let Expr::Lit(ExprLit { lit: Lit::Bool(lit_bool), .. }) = &nv.value {
-                        args.cf = lit_bool.value;
                     }
                 }
             }
@@ -327,33 +322,8 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
         subject_fn.attrs.push(inline_attr);
     }
 
-    if args.cf {
-        subject_fn = apply_cf_obfuscation(subject_fn);
-    }
-
     output.extend(quote! { #subject_fn });
     output.into()
-}
-
-fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
-    let mut rng = thread_rng();
-    let original_body = subject_fn.block;
-
-    let p1: i32 = rng.gen();
-    let p2: i32 = rng.gen_range(1..100);
-
-    let predicate = quote! { (#p1.wrapping_add(#p2)) != #p1 };
-
-    let new_body_block = syn::parse_quote! {
-        {
-            if #predicate {
-                #original_body
-            }
-        }
-    };
-
-    subject_fn.block = Box::new(new_body_block);
-    subject_fn
 }
 
 

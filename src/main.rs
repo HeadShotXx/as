@@ -6,7 +6,7 @@ fn junk_test() {
     println!("This is a test function with junk code.");
 }
 
-#[obfuscate(garbage = true, fonk_len = 12, cf = true)]
+#[obfuscate(garbage = true, fonk_len = 12)]
 fn kontrol_et(sayi: i32) {
     if sayi > 0 {
         println!("Sayı pozitif!");
