@@ -348,6 +348,8 @@ fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
         {
             if #predicate {
                 #original_body
+            } else {
+                unreachable!();
             }
         }
     };
