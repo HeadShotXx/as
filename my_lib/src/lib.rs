@@ -23,4 +23,21 @@ mod tests {
     fn test_inlined_function() {
         assert_eq!(inlined_function(), 42);
     }
+
+    #[obfuscator::obfuscate(cf = true)]
+    fn cf_obfuscated_function(a: i32, b: i32) -> i32 {
+        let mut result = a;
+        if a > b {
+            result += b;
+        } else {
+            result -= b;
+        }
+        result * 2
+    }
+
+    #[test]
+    fn test_cf_obfuscation() {
+        assert_eq!(cf_obfuscated_function(10, 5), 30);
+        assert_eq!(cf_obfuscated_function(5, 10), -10);
+    }
 }
