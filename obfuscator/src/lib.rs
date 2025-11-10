@@ -317,6 +317,10 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
         subject_fn = modified_main;
     }
 
+    if args.cf {
+        subject_fn = apply_cf_obfuscation(subject_fn);
+    }
+
     if args.garbage {
         let fonk_len = args.fonk_len.unwrap_or(3);
         subject_fn = apply_junk_obfuscation(subject_fn, fonk_len);
@@ -325,10 +329,6 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
     if args.inline {
         let inline_attr: syn::Attribute = syn::parse_quote! { #[inline] };
         subject_fn.attrs.push(inline_attr);
-    }
-
-    if args.cf {
-        subject_fn = apply_cf_obfuscation(subject_fn);
     }
 
     output.extend(quote! { #subject_fn });
@@ -364,8 +364,7 @@ fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
         if let syn::Stmt::Local(local) = stmt {
             if let syn::Pat::Ident(pat_ident) = &local.pat {
                 let ident = &pat_ident.ident;
-                let mutability = &pat_ident.mutability;
-                declarations.push(quote! { let #mutability #ident = std::mem::MaybeUninit::uninit().assume_init(); });
+                declarations.push(quote! { let mut #ident = std::mem::MaybeUninit::uninit().assume_init(); });
 
                 if let Some(init) = &local.init {
                     let expr = &init.expr;
