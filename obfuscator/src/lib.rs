@@ -337,24 +337,91 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
     let mut rng = thread_rng();
-    let original_body = subject_fn.block;
+    let mut stmts = subject_fn.block.stmts.clone();
 
-    let p1: i32 = rng.gen();
-    let p2: i32 = rng.gen_range(1..100);
-
-    let predicate = quote! { (#p1.wrapping_add(#p2)) != #p1 };
-
-    let new_body_block = syn::parse_quote! {
-        {
-            if #predicate {
-                #original_body
+    // Extract the final return expression, if it exists
+    let return_expr = match stmts.last() {
+        Some(syn::Stmt::Expr(_, None)) => {
+            let last_stmt = stmts.pop().unwrap();
+            if let syn::Stmt::Expr(expr, None) = last_stmt {
+                quote!(#expr)
             } else {
-                unreachable!();
+                unreachable!()
             }
+        }
+        _ => quote!(()),
+    };
+
+    if stmts.is_empty() {
+        subject_fn.block = Box::new(syn::parse2(quote!({ #return_expr })).unwrap());
+        return subject_fn;
+    }
+
+    // Hoist variable declarations
+    let mut declarations = Vec::new();
+    let mut transformed_stmts = Vec::new();
+    for stmt in &stmts {
+        if let syn::Stmt::Local(local) = stmt {
+            if let syn::Pat::Ident(pat_ident) = &local.pat {
+                let ident = &pat_ident.ident;
+                let mutability = &pat_ident.mutability;
+                declarations.push(quote! { let #mutability #ident = std::mem::MaybeUninit::uninit().assume_init(); });
+
+                if let Some(init) = &local.init {
+                    let expr = &init.expr;
+                    transformed_stmts.push(syn::parse2(quote! { #ident = #expr; }).unwrap());
+                }
+            } else {
+                transformed_stmts.push(stmt.clone());
+            }
+        } else {
+            transformed_stmts.push(stmt.clone());
+        }
+    }
+
+    subject_fn.block.stmts.clear();
+
+    let num_stmts = transformed_stmts.len();
+    let mut state_order: Vec<usize> = (0..num_stmts).collect();
+    state_order.shuffle(&mut rng);
+
+    let mut state_var_name_str = String::from("_state_");
+    state_var_name_str.push_str(&rng.gen::<u32>().to_string());
+    let state_var = syn::Ident::new(&state_var_name_str, proc_macro2::Span::call_site());
+    let state_var_boxed = syn::Ident::new(&format!("{}_boxed", state_var), state_var.span());
+
+    let mut match_arms = Vec::new();
+    for (i, &stmt_idx) in state_order.iter().enumerate() {
+        let stmt = &transformed_stmts[stmt_idx];
+        let next_state = if stmt_idx == num_stmts - 1 {
+            quote! { break; }
+        } else {
+            let next_i = state_order.iter().position(|&r| r == stmt_idx + 1).unwrap();
+            quote! { *#state_var = #next_i; }
+        };
+        match_arms.push(quote! {
+            #i => { #stmt #next_state }
+        });
+    }
+
+    let initial_state = state_order.iter().position(|&r| r == 0).unwrap_or(0);
+
+    let new_body = quote! {
+        unsafe {
+        #(#declarations)*
+        let mut #state_var_boxed = Box::new(#initial_state);
+        let #state_var = &mut *#state_var_boxed;
+        loop {
+            match *#state_var {
+                #(#match_arms)*
+                _ => break,
+            }
+        }
+        #return_expr
         }
     };
 
-    subject_fn.block = Box::new(new_body_block);
+    subject_fn.block = Box::new(syn::parse2(quote!({ #new_body })).unwrap());
     subject_fn
 }
 
