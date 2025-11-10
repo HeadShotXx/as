@@ -348,6 +348,8 @@ fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
         {
             if #predicate {
                 #original_body
+            } else {
+                unreachable!();
             }
         }
     };
@@ -387,7 +389,7 @@ fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
         .map(char::from)
         .take(8)
         .collect();
-    let loop_counter_ident = syn::Ident::new(&loop_counter_name, proc_macro2::Span::call_site());
+    let loop_counter_ident = syn::Ident::new(&format!("_{}", loop_counter_name), proc_macro2::Span::call_site());
 
     let junk_code_block = quote! {
         for #loop_counter_ident in 0..#loop_iterations {
