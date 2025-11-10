@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit, visit_mut::VisitMut, ExprIf};
+use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit, visit_mut::VisitMut, ExprIf, Block};
 use syn::punctuated::Punctuated;
 use syn::parse::Parser;
 use rand::{Rng, thread_rng};
@@ -336,38 +336,97 @@ pub fn obfuscate(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 fn apply_cf_obfuscation(mut subject_fn: ItemFn) -> ItemFn {
-    let mut visitor = ControlFlowVisitor;
+    let mut visitor = IfChainVisitor;
     visitor.visit_item_fn_mut(&mut subject_fn);
     subject_fn
 }
 
-struct ControlFlowVisitor;
+struct IfChainVisitor;
 
 use syn::visit_mut;
 
-impl VisitMut for ControlFlowVisitor {
-    fn visit_expr_if_mut(&mut self, i: &mut ExprIf) {
-        let mut rng = thread_rng();
-        let true_val: u32 = rng.gen();
-        let false_val: u32 = rng.gen();
-
-        let original_cond = &i.cond;
-
-        // Replace the original condition with an obfuscated version
-        let new_cond = syn::parse_quote! {
-            {
-                let val = match #original_cond {
-                    true => #true_val,
-                    false => #false_val,
-                };
-                val == #true_val
+impl VisitMut for IfChainVisitor {
+    fn visit_expr_mut(&mut self, i: &mut Expr) {
+        if let Expr::If(if_expr) = i {
+            let (conds, branches, final_else) = deconstruct_if_chain(if_expr);
+            if conds.len() == 1 && final_else.is_none() {
+                visit_mut::visit_expr_mut(self, i);
+                return;
             }
-        };
-        i.cond = Box::new(new_cond);
 
-        // Continue traversing the rest of the AST
-        visit_mut::visit_expr_if_mut(self, i);
+            let mut rng = thread_rng();
+            let mut arm_values: Vec<u32> = (0..conds.len()).map(|_| rng.gen()).collect();
+            while arm_values.iter().collect::<std::collections::HashSet<_>>().len() != arm_values.len() {
+                arm_values = (0..conds.len()).map(|_| rng.gen()).collect();
+            }
+
+            let mut else_value = rng.gen();
+            while arm_values.contains(&else_value) {
+                else_value = rng.gen();
+            }
+
+            let mut inner_if_chain = if final_else.is_some() {
+                quote! { else { #else_value } }
+            } else {
+                quote! { else { #else_value } }
+            };
+
+            for (j, cond) in conds.iter().rev().enumerate() {
+                let arm_val = arm_values[conds.len() - 1 - j];
+                inner_if_chain = quote! {
+                    if #cond { #arm_val } #inner_if_chain
+                };
+            }
+
+            let mut match_arms = Vec::new();
+            for (j, branch) in branches.iter().enumerate() {
+                let arm_val = arm_values[j];
+                match_arms.push(quote! { #arm_val => #branch });
+            }
+
+            if let Some(else_branch) = final_else {
+                match_arms.push(quote! { _ => #else_branch });
+            } else {
+                match_arms.push(quote! { _ => {} });
+            }
+
+            let new_expr = syn::parse_quote! {
+                match { #inner_if_chain } {
+                    #(#match_arms),*
+                }
+            };
+
+            *i = new_expr;
+            return;
+        }
+
+        visit_mut::visit_expr_mut(self, i);
     }
+}
+
+fn deconstruct_if_chain(if_expr: &ExprIf) -> (Vec<Box<Expr>>, Vec<Block>, Option<Block>) {
+    let mut conds = Vec::new();
+    let mut branches = Vec::new();
+    let mut current_if = if_expr.clone();
+    let mut final_else = None;
+
+    loop {
+        conds.push(current_if.cond);
+        branches.push(current_if.then_branch);
+
+        if let Some((_, else_branch)) = current_if.else_branch {
+            if let Expr::If(else_if_expr) = *else_branch {
+                current_if = else_if_expr;
+            } else {
+                final_else = Some(syn::parse_quote! { #else_branch });
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    (conds, branches, final_else)
 }
 
 fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
