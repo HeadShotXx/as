@@ -2,7 +2,8 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit, visit_mut::{self, VisitMut}, Stmt, Block};
+use syn::{parse_macro_input, LitStr, ItemFn, Meta, Lit, Expr, ExprLit};
+use syn::visit_mut::{self, VisitMut};
 use syn::punctuated::Punctuated;
 use syn::parse::Parser;
 use rand::{Rng, thread_rng};
