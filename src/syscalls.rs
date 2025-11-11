@@ -74,7 +74,7 @@ impl Syscalls {
             let ntdll_str = obfuscate_string!("ntdll.dll\0");
             let ntdll = LoadLibraryA(ntdll_str.as_ptr());
             if (ntdll as *mut std::ffi::c_void).is_null() {
-                return Err(obfuscate_string!("Failed to load ntdll.dll"));
+                return Err("Failed to load ntdll.dll");
             }
 
             let nt_query_info_proc_str = obfuscate_string!("NtQueryInformationProcess\0");
@@ -103,7 +103,7 @@ impl Syscalls {
                 || NtProtectVirtualMemory.is_none()
                 || NtFlushInstructionCache.is_none()
             {
-                return Err(obfuscate_string!("Failed to get one or more function addresses"));
+                return Err("Failed to get one or more function addresses");
             }
 
             Ok(Syscalls {
@@ -120,5 +120,5 @@ impl Syscalls {
     }
 }
 pub static SYSCALLS: Lazy<Syscalls> = Lazy::new(|| {
-    Syscalls::new().expect(obfuscate_string!(""))
+    Syscalls::new().expect("")
 });

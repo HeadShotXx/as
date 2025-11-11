@@ -189,7 +189,7 @@ unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHea
 }
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true)]
 unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let import_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (*import_dir).virtual_address == 0 {
