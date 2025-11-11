@@ -341,56 +341,83 @@ struct ControlFlowObfuscator;
 
 impl VisitMut for ControlFlowObfuscator {
     fn visit_expr_mut(&mut self, expr: &mut Expr) {
-        // First, traverse deeper into the AST to handle nested ifs correctly.
-        visit_mut::visit_expr_mut(self, expr);
-
         if let Expr::If(if_expr) = expr {
-            // Take ownership of the if_expr to deconstruct it by cloning.
+            let mut conditions_and_blocks = vec![];
+            let mut final_else_block = None;
             let mut current_if = if_expr.clone();
 
-            let mut arms = Vec::new();
-            let mut final_else = None;
-
+            // 1. Deconstruct the entire if-else-if chain into a flat list.
             loop {
-                let cond = &current_if.cond;
-                let then_branch = &current_if.then_branch;
+                let cond = *current_if.cond;
+                let then_block = current_if.then_branch;
+                conditions_and_blocks.push((cond, then_block));
 
-                arms.push(quote! { _ if #cond => #then_branch });
-
-                match current_if.else_branch {
-                    Some((_, else_branch)) => {
-                        if let Expr::If(next_if) = *else_branch {
-                            current_if = next_if;
+                if let Some((_, else_branch)) = current_if.else_branch {
+                    if let Expr::If(next_if) = *else_branch {
+                        current_if = next_if;
+                    } else {
+                        if let Expr::Block(expr_block) = *else_branch {
+                            final_else_block = Some(expr_block.block);
                         } else {
-                            final_else = Some(*else_branch);
-                            break;
+                            // Handle cases like `else { some_expression }`
+                            let new_block = syn::parse_quote!({ #else_branch });
+                            final_else_block = Some(new_block);
                         }
-                    }
-                    None => {
                         break;
                     }
+                } else {
+                    break;
                 }
             }
 
-            if let Some(else_branch) = final_else {
-                arms.push(quote! { _ => #else_branch });
-            } else {
-                // If there's no else branch, the expression type is unit `()`.
-                // A match must be exhaustive, so we provide a default arm.
-                arms.push(quote! { _ => {} });
+            // 2. Recurse into the collected parts to obfuscate nested ifs.
+            for (cond, block) in &mut conditions_and_blocks {
+                self.visit_expr_mut(cond);
+                self.visit_block_mut(block);
             }
+            if let Some(else_block) = &mut final_else_block {
+                self.visit_block_mut(else_block);
+            }
+
+            // 3. Rebuild the logic as a single, flattened match expression with randomization.
+            let mut rng = thread_rng();
+            let mut arms = Vec::new();
+            for (cond, block) in conditions_and_blocks {
+                arms.push(quote! { _ if #cond => #block });
+            }
+
+            // Add junk arms that can never be reached.
+            let num_junk_arms = rng.gen_range(2..=5);
+            for _ in 0..num_junk_arms {
+                let random_u32: u32 = rng.gen();
+                arms.push(quote! { _ if false && #random_u32 == 0 => {} });
+            }
+
+            // Shuffle the arms to obscure the original order.
+            arms.shuffle(&mut rng);
+
+            let final_arm = if let Some(else_block) = final_else_block {
+                quote! { _ => #else_block }
+            } else {
+                quote! { _ => {} }
+            };
 
             let match_expr_tokens = quote! {
                 match () {
                     #(#arms,)*
+                    #final_arm,
                 }
             };
 
             if let Ok(new_match_expr) = syn::parse2(match_expr_tokens) {
                 *expr = new_match_expr;
             }
-            // If parsing fails, we silently leave the original `if` expression unmodified.
+            // If parsing fails, leave the original expression untouched.
+            return;
         }
+
+        // Default traversal for all other expression types.
+        visit_mut::visit_expr_mut(self, expr);
     }
 }
 
@@ -420,11 +447,14 @@ fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
 
     // Wrap junk code in a complex loop
     let loop_iterations = fonk_len;
-    let loop_counter_name: String = std::iter::repeat(())
-        .map(|()| rng.sample(Alphanumeric))
-        .map(char::from)
-        .take(8)
-        .collect();
+    let loop_counter_name: String = format!(
+        "i_{}",
+        std::iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(8)
+            .collect::<String>()
+    );
     let loop_counter_ident = syn::Ident::new(&loop_counter_name, proc_macro2::Span::call_site());
 
     let junk_code_block = quote! {
