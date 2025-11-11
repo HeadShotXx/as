@@ -47,12 +47,12 @@ impl Codec {
 
     fn get_decode_logic(&self, data_var: &syn::Ident) -> proc_macro2::TokenStream {
         match self {
-            Codec::Base36 => quote! { let #data_var = base36::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
-            Codec::Base45 => quote! { let #data_var = base45::decode(String::from_utf8_lossy(&#data_var).as_ref()).unwrap(); },
-            Codec::Base58 => quote! { let #data_var = bs58::decode(String::from_utf8_lossy(&#data_var).as_ref()).into_vec().unwrap(); },
-            Codec::Base85 => quote! { let #data_var = base85::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
-            Codec::Base91 => quote! { let #data_var = base91::slice_decode(&#data_var); },
-            Codec::Base122 => quote! { let #data_var = base122_rs::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
+            Codec::Base36 => quote! { #data_var = base36::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
+            Codec::Base45 => quote! { #data_var = base45::decode(String::from_utf8_lossy(&#data_var).as_ref()).unwrap(); },
+            Codec::Base58 => quote! { #data_var = bs58::decode(String::from_utf8_lossy(&#data_var).as_ref()).into_vec().unwrap(); },
+            Codec::Base85 => quote! { #data_var = base85::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
+            Codec::Base91 => quote! { #data_var = base91::slice_decode(&#data_var); },
+            Codec::Base122 => quote! { #data_var = base122_rs::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
         }
     }
 }
@@ -184,29 +184,59 @@ pub fn obfuscate_string(input: TokenStream) -> TokenStream {
 
     let final_encoded = proc_macro2::Literal::byte_string(&data);
 
-    let mut decode_logic = Vec::new();
     let data_var = syn::Ident::new("data", proc_macro2::Span::call_site());
 
     let (key1_var, key1_recon_logic) = generate_key_reconstruction_logic("reconstructed_key_1", 16, &key1_frag_vars, &key1_checksum_vars);
     let (key2_var, key2_recon_logic) = generate_key_reconstruction_logic("reconstructed_key_2", 16, &key2_frag_vars, &key2_checksum_vars);
 
+    // Create a list of all decoding operations.
+    // Create a list of all decoding operations.
+    let mut decoding_ops = Vec::new();
     for codec in third_codecs.iter().rev() {
-        decode_logic.push(codec.get_decode_logic(&data_var));
+        decoding_ops.push(codec.get_decode_logic(&data_var));
     }
-    decode_logic.push(quote! {
-        let #data_var: Vec<u8> = #data_var.iter().zip(#key2_var.iter().cycle()).map(|(&b, &k)| b ^ k).collect();
+    decoding_ops.push(quote! {
+        #data_var = #data_var.iter().zip(#key2_var.iter().cycle()).map(|(&b, &k)| b ^ k).collect();
         #key2_var.zeroize();
     });
     for codec in second_codecs.iter().rev() {
-        decode_logic.push(codec.get_decode_logic(&data_var));
+        decoding_ops.push(codec.get_decode_logic(&data_var));
     }
-    decode_logic.push(quote! {
-        let #data_var: Vec<u8> = #data_var.iter().zip(#key1_var.iter().cycle()).map(|(&b, &k)| b ^ k).collect();
+    decoding_ops.push(quote! {
+        #data_var = #data_var.iter().zip(#key1_var.iter().cycle()).map(|(&b, &k)| b ^ k).collect();
         #key1_var.zeroize();
     });
     for codec in first_codecs.iter().rev() {
-        decode_logic.push(codec.get_decode_logic(&data_var));
+        decoding_ops.push(codec.get_decode_logic(&data_var));
     }
+
+    // Generate randomized state machine.
+    let num_ops = decoding_ops.len();
+    let mut states: Vec<u32> = (0..num_ops as u32).collect();
+    states.shuffle(&mut rng);
+    let initial_state = states[0];
+
+    let mut state_machine_arms = Vec::new();
+    for i in 0..num_ops {
+        let current_state = states[i];
+        let next_state = if i + 1 < num_ops { states[i+1] } else { 999 }; // 999 is the exit state.
+        let op = &decoding_ops[i];
+        state_machine_arms.push(quote! {
+            #current_state => {
+                #op
+                state = #next_state;
+            }
+        });
+    }
+    // Add exit state.
+    state_machine_arms.push(quote! { 999 => break, });
+    // Add junk states.
+    for _ in 0..5 {
+        let junk_state: u32 = rng.gen_range(1000..=2000);
+        state_machine_arms.push(quote! { #junk_state => { /* unreachable */ }, });
+    }
+    state_machine_arms.shuffle(&mut rng);
+
 
     let gen = quote! {
         {
@@ -220,7 +250,13 @@ pub fn obfuscate_string(input: TokenStream) -> TokenStream {
 
             let mut #data_var = #final_encoded.to_vec();
 
-            #(#decode_logic)*
+            let mut state = #initial_state;
+            loop {
+                match state {
+                    #(#state_machine_arms)*
+                    _ => { /* Default case, can be used for anti-tampering */ }
+                }
+            }
 
             String::from_utf8(#data_var).unwrap()
         }
