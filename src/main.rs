@@ -1,7 +1,7 @@
 use my_lib::get_secret_message;
 use obfuscator::{obfuscate, obfuscate_string};
 
-#[obfuscate(garbage = true, fonk_len = 12)]
+#[obfuscate(garbage = true, fonk_len = 12, inline = true)]
 fn junk_test() {
     println!("This is a test function with junk code.");
 }
@@ -17,7 +17,7 @@ fn kontrol_et(sayi: i32) {
     }
 }
 
-#[obfuscate(main = true, garbage = true, fonk_len = 5)]
+#[obfuscate(main = true, garbage = true, fonk_len = 5, inline = true)]
 fn main() {
     junk_test();
 	kontrol_et(10);
