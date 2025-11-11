@@ -1,11 +1,16 @@
 [package]
 name = "tulpar"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 winapi = { version = "0.3", features = ["memoryapi", "winnt", "libloaderapi", "processthreadsapi", "errhandlingapi"] }
-
+obfuscator = { path = "obfuscator" }
+zeroize = "1.8.2"
+crc32fast = "1.5.0"
+base91 = "0.1.0"
+base122-rs = "0.1.4"
+base36 = "0.0.1"
 # --- Your existing build dependencies ---
 walkdir = "2.3"
 quote = "1.0"

