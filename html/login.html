@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Night Crypt - Login</title>
+    <link rel="stylesheet" href="/css/auth.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="auth-card">
+            <div class="logo-section">
+                <div class="logo">
+                    <span class="logo-text">Night</span>
+                    <span class="logo-accent">Crypt</span>
+                </div>
+                <p class="tagline">Premium Cryptocurrency Experience</p>
+            </div>
+            
+            <form id="loginForm" class="auth-form">
+                <h2>Welcome Back</h2>
+                <p class="form-subtitle">Sign in to your Night Crypt account</p>
+                
+                <div class="form-group">
+                    <label for="username">Username or Email</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <div class="form-options">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="remember">
+                        <span class="checkmark"></span>
+                        Remember me
+                    </label>
+                    <a href="#" class="forgot-link">Forgot Password?</a>
+                </div>
+                
+                <button type="submit" class="auth-button">
+                    <span>Sign In</span>
+                    <div class="button-loader" style="display: none;">
+                        <div class="spinner"></div>
+                    </div>
+                </button>
+                
+                <div class="auth-links">
+                    <p>Don't have an account? <a href="register">Sign Up</a></p>
+                </div>
+            </form>
+            
+            <div class="auth-footer">
+                <p>&copy; 2024 Night Crypt. All rights reserved.</p>
+            </div>
+        </div>
+        
+        <div class="background-decoration">
+            <div class="crypto-particles"></div>
+        </div>
+    </div>
+    
+    <script src="/script/auth.js"></script>
+</body>
+</html>

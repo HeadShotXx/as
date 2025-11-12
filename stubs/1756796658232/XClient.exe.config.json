@@ -1,0 +1,13 @@
+{
+  "fileName": "XClient.exe",
+  "options": {
+    "autoStart": true,
+    "hideProcess": false,
+    "persistence": false,
+    "antiVM": false
+  },
+  "createdAt": "2025-09-12T19:41:39.566634",
+  "hasUploadedFile": true,
+  "powershellFile": "3.ps1",
+  "cppExecutable": "exp_stub_3.exe"
+}
