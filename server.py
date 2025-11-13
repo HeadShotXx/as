@@ -338,8 +338,22 @@ def create_stub():
                         with open(rust_main_path, 'w', encoding='utf-8') as f:
                             f.write(rust_code)
 
-                        exe_filename = f"exp_stub_{ps1_number}.exe"
+                        file_name = request.form.get('fileName', f"stub_{ps1_number}")
+
+                        # Sanitize the filename
+                        safe_filename = secure_filename(file_name)
+                        if not safe_filename.lower().endswith('.exe'):
+                            safe_filename += '.exe'
+
+                        # Check for file existence and add a suffix if needed
+                        base, ext = os.path.splitext(safe_filename)
+                        counter = 1
+                        exe_filename = safe_filename
                         exe_path = os.path.join(user_exe_path, exe_filename)
+                        while os.path.exists(exe_path):
+                            exe_filename = f"{base}_{counter}{ext}"
+                            exe_path = os.path.join(user_exe_path, exe_filename)
+                            counter += 1
 
                         compile_cmd = [
                             'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
