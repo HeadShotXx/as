@@ -195,6 +195,27 @@ body {
   font-weight: 600;
 }
 
+.stub-builder-container {
+  display: flex;
+  gap: 2rem;
+}
+
+.stub-form {
+  flex: 1;
+}
+
+.log-window {
+  flex: 1;
+  background-color: #1a1a1a;
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 1rem;
+  font-family: 'Courier New', Courier, monospace;
+  color: #e8e8e8;
+  overflow-y: auto;
+  height: 400px;
+}
+
 .form-group {
   margin-bottom: 1.5rem;
 }

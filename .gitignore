@@ -1,0 +1,4 @@
+db/
+stubs/
+*.log
+dummy.exe

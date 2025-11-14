@@ -12,11 +12,11 @@
             background-color: #28a745 !important;
             margin-left: 5px;
         }
-        
+
         .exe-btn:hover {
             background-color: #218838 !important;
         }
-        
+
         .file-actions {
             display: flex;
             gap: 5px;
@@ -124,7 +124,7 @@
                     <span class="logo-text">Night</span>
                     <span class="logo-accent">Crypt</span>
                 </div>
-                
+
                 <nav class="main-nav">
                     <a href="#" class="nav-link" onclick="showTab('dashboard')">Dashboard</a>
                     <a href="#" class="nav-link active" onclick="showTab('stub-builder')">Stub Builder</a>
@@ -132,7 +132,7 @@
                     <!-- Changed Settings to User Settings -->
                     <a href="#" class="nav-link" onclick="showTab('settings')">User Settings</a>
                 </nav>
-                
+
                 <div class="user-section">
                     <div class="user-info">
                         <span class="username" id="username">Loading...</span>
@@ -204,12 +204,13 @@
                     <!-- Stub Builder Section -->
                     <section class="stub-builder">
                         <h2>Create New Stub</h2>
-                        <div class="stub-form" id="stubForm">
-                            <div class="form-group">
-                                <label for="fileName">File Name:</label>
+                        <div class="stub-builder-container">
+                            <div class="stub-form" id="stubForm">
+                                <div class="form-group">
+                                    <label for="fileName">File Name:</label>
                                 <input type="text" id="fileName" placeholder="Enter file name (e.g., document.exe)" />
                             </div>
-                            
+
                             <!-- Added drag and drop file upload area -->
                             <div class="form-group">
                                 <label>Upload Your File:</label>
@@ -231,7 +232,7 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="form-group">
                                 <label>Startup Options:</label>
                                 <div class="checkbox-group">
@@ -253,11 +254,13 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <button class="create-stub-btn" onclick="createStub()">Create Stub</button>
                         </div>
-                    </section>
-                </div>
+                        <div id="logWindow" class="log-window"></div>
+                    </div>
+                </section>
+            </div>
             </div>
 
             <!-- Files Tab -->
@@ -368,14 +371,14 @@
             // Hide all tabs
             const tabs = document.querySelectorAll('.tab-content');
             tabs.forEach(tab => tab.style.display = 'none');
-            
+
             // Remove active class from all nav links
             const navLinks = document.querySelectorAll('.nav-link');
             navLinks.forEach(link => link.classList.remove('active'));
-            
+
             // Show selected tab
             document.getElementById(tabName + '-tab').style.display = 'block';
-            
+
             // Add active class to clicked nav link
             event.target.classList.add('active');
 
@@ -393,19 +396,19 @@
                 // Check if user is authenticated
                 const response = await fetch('/api/user');
                 const data = await response.json();
-                
+
                 if (data.success) {
                     currentUser = data.user;
                     // Update UI with user info
                     document.getElementById('username').textContent = data.user.username;
                     document.getElementById('welcomeUsername').textContent = data.user.username;
-                    
+
                     updatePremiumStatus(data.user);
-                    
+
                     // Load dashboard data
                     loadDashboardData();
                     setupFileUpload();
-                    
+
                     checkPremiumAccess();
                 } else {
                     // Redirect to login if not authenticated
@@ -430,7 +433,7 @@
             const premiumWarning = document.getElementById('premiumWarning');
             const dailyLimitWarning = document.getElementById('dailyLimitWarning');
             const stubForm = document.getElementById('stubForm');
-            
+
             if (!currentUser.isPremium) {
                 premiumWarning.style.display = 'block';
                 stubForm.style.opacity = '0.5';
@@ -439,7 +442,7 @@
                 premiumWarning.style.display = 'none';
                 stubForm.style.opacity = '1';
                 stubForm.style.pointerEvents = 'auto';
-                
+
                 // Check daily limit for premium users
                 if (currentUser.dailyUsage >= currentUser.dailyLimit) {
                     dailyLimitWarning.style.display = 'block';
@@ -465,7 +468,7 @@
                     document.getElementById('totalStubs').textContent = stats.total || 0;
                     document.getElementById('activeStubs').textContent = stats.active || 0;
                     document.getElementById('recentStubs').textContent = stats.recent || 0;
-                    document.getElementById('dailyRemaining').textContent = 
+                    document.getElementById('dailyRemaining').textContent =
                         currentUser.isPremium ? (currentUser.dailyLimit - currentUser.dailyUsage) : 0;
                 }
             } catch (error) {
@@ -479,22 +482,22 @@
                 if (response.ok) {
                     const data = await response.json();
                     const user = data.user;
-                    
+
                     document.getElementById('settingsUsername').textContent = user.username;
                     document.getElementById('settingsEmail').textContent = user.email;
-                    document.getElementById('settingsMemberSince').textContent = 
+                    document.getElementById('settingsMemberSince').textContent =
                         new Date(user.createdAt).toLocaleDateString();
-                    document.getElementById('settingsAccountStatus').textContent = 
+                    document.getElementById('settingsAccountStatus').textContent =
                         user.isPremium ? 'Premium Member' : 'Free Member';
-                    document.getElementById('settingsPlan').textContent = 
+                    document.getElementById('settingsPlan').textContent =
                         user.isPremium ? 'Premium' : 'Free';
-                    document.getElementById('settingsDailyLimit').textContent = 
+                    document.getElementById('settingsDailyLimit').textContent =
                         user.isPremium ? user.dailyLimit : '0';
-                    document.getElementById('settingsUsedToday').textContent = 
+                    document.getElementById('settingsUsedToday').textContent =
                         user.dailyUsage || 0;
-                    document.getElementById('settingsRemaining').textContent = 
+                    document.getElementById('settingsRemaining').textContent =
                         user.isPremium ? (user.dailyLimit - user.dailyUsage) : '0';
-                    
+
                     // Show subscription details for premium users
                     const subscriptionDetails = document.getElementById('subscriptionDetails');
                     if (user.isPremium && user.subscriptionExpiry) {
@@ -505,7 +508,7 @@
                             </div>
                         `;
                     }
-                    
+
                     // Hide upgrade card for premium users
                     if (user.isPremium) {
                         document.getElementById('upgradeCard').style.display = 'none';
@@ -535,7 +538,7 @@
                 });
 
                 const result = await response.json();
-                
+
                 if (result.success) {
                     alert('Upgrade successful! Your account has been upgraded to Premium.');
                     location.reload(); // Refresh to update UI
@@ -554,7 +557,7 @@
                 if (response.ok) {
                     const activities = await response.json();
                     const activityList = document.getElementById('activityList');
-                    
+
                     if (activities.length === 0) {
                         activityList.innerHTML = '<div class="no-activity">No recent activity. Create your first stub!</div>';
                         return;
@@ -607,7 +610,7 @@
             uploadArea.addEventListener('drop', (e) => {
                 e.preventDefault();
                 uploadArea.classList.remove('drag-over');
-                
+
                 const files = e.dataTransfer.files;
                 if (files.length > 0) {
                     handleFileUpload(files[0]);
@@ -624,7 +627,7 @@
 
         function handleFileUpload(file) {
             uploadedFile = file;
-            
+
             // Show uploaded file info
             const uploadContent = document.querySelector('.upload-content');
             const uploadedFileDiv = document.getElementById('uploadedFile');
@@ -646,13 +649,13 @@
 
         function removeUploadedFile() {
             uploadedFile = null;
-            
+
             const uploadContent = document.querySelector('.upload-content');
             const uploadedFileDiv = document.getElementById('uploadedFile');
-            
+
             uploadContent.style.display = 'block';
             uploadedFileDiv.style.display = 'none';
-            
+
             document.getElementById('fileInput').value = '';
         }
 
@@ -680,22 +683,25 @@
             const hideProcess = document.getElementById('hideProcess').checked;
             const persistence = document.getElementById('persistence').checked;
             const antiVM = document.getElementById('antiVM').checked;
-            
+
             if (!fileName) {
                 alert('Please enter a file name');
                 return;
             }
-            
+
             const formData = new FormData();
             formData.append('fileName', fileName);
             formData.append('autoStart', autoStart);
             formData.append('hideProcess', hideProcess);
             formData.append('persistence', persistence);
             formData.append('antiVM', antiVM);
-            
+
             if (uploadedFile) {
                 formData.append('file', uploadedFile);
             }
+
+            const logWindow = document.getElementById('logWindow');
+            logWindow.innerHTML = ''; // Clear log window
 
             try {
                 const response = await fetch('/api/create-stub', {
@@ -704,14 +710,18 @@
                 });
 
                 const result = await response.json();
-                
+
+                if (result.logs) {
+                    logWindow.innerHTML = result.logs.join('<br>');
+                }
+
                 if (result.success) {
                     let message = `Stub created successfully!\nFile: ${fileName}\nFolder: ${result.folderPath}`;
-                    
+
                     // Check if C++ executable was created
                     if (result.config && result.config.cppExecutable) {
                         message += `\n\nC++ Executable: ${result.config.cppExecutable}`;
-                        
+
                         // Show download confirmation
                         const downloadNow = confirm(message + '\n\nWould you like to download the executable now?');
                         if (downloadNow) {
@@ -720,15 +730,15 @@
                     } else {
                         alert(message);
                     }
-                    
+
                     // Reset form
                     document.getElementById('fileName').value = '';
                     document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
                     removeUploadedFile();
-                    
+
                     currentUser.dailyUsage++;
                     checkPremiumAccess();
-                    
+
                     // Refresh dashboard data
                     loadDashboardData();
                 } else {
@@ -737,6 +747,7 @@
             } catch (error) {
                 console.error('Error creating stub:', error);
                 alert('Network error. Please try again.');
+                logWindow.innerHTML = 'A network error occurred. Please try again.';
             }
         }
 
@@ -746,9 +757,9 @@
                 if (response.ok) {
                     const files = await response.json();
                     const filesList = document.getElementById('filesList');
-                    
+
                     const exeFiles = files.filter(file => file.name.endsWith('.exe'));
-                    
+
                     if (exeFiles.length === 0) {
                         filesList.innerHTML = '<div class="no-files">No executable files found. Create your first stub!</div>';
                         return;

