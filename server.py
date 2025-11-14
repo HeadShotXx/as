@@ -365,8 +365,8 @@ def create_stub():
                         if result.returncode == 0:
                             # Run obin.py on the compiled stub
                             compiled_stub_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
-                            obin_cmd = ['python3', 'obin.py', compiled_stub_path]
-                            obin_result = subprocess.run(obin_cmd, capture_output=True, text=True)
+                            obin_cmd = ['python', 'obin.py', compiled_stub_path]
+                            obin_result = subprocess.run(obin_cmd, capture_output=True, text=True, shell=True)
 
                             if obin_result.returncode != 0:
                                 print(f"obin.py failed: {obin_result.stderr}")
