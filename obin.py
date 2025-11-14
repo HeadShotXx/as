@@ -63,7 +63,7 @@ def main():
         print(f"[✗] Failed to write payload.rs: {e}")
         return
 
-    print("\n[✓] Successfully generated files. Please copy the contents of key.rs and payload.rs into your tulpar project.")
+    print("\n[+] Successfully generated files. Please copy the contents of key.rs and payload.rs into your tulpar project.")
 
 if __name__ == "__main__":
     main()
