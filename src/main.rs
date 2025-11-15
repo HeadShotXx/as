@@ -17,7 +17,7 @@ use windows_sys::Win32::Foundation::{NTSTATUS, UNICODE_STRING};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, CREATE_NEW_CONSOLE, CREATE_SUSPENDED, PEB, PROCESS_BASIC_INFORMATION,
-    PROCESS_INFORMATION, PROCESS_INFORMATION_CLASS,
+    PROCESS_INFORMATION, PROCESS_INFORMATION_CLASS, STARTUPINFOW,
 };
 mod power;
 use power::run_all_checks;
