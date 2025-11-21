@@ -90,9 +90,9 @@ def generator():
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_stub_path = os.path.join(temp_dir, "stub")
-        shutil.copytree("templates/stub", temp_stub_path)
+        shutil.copytree("templates/stub", temp_stub_path, ignore=shutil.ignore_patterns('target'))
 
-        # Stub'ı derle ve raw_link'i ekle
+        # Modify the main.rs file in the temporary directory
         stub_main_path = os.path.join(temp_stub_path, "src", "main.rs")
         with open(stub_main_path, "r") as f:
             stub_code = f.read()
@@ -104,7 +104,7 @@ def generator():
 
         # Build the stub
         try:
-            subprocess.run(["cargo", "build", "--release"], cwd=temp_stub_path, check=True)
+            subprocess.run(["cargo", "build", "--release", "--target-dir", os.path.abspath("templates/stub/target")], cwd=temp_stub_path, check=True)
         except subprocess.CalledProcessError as e:
             return jsonify({"error": "Failed to build the stub", "details": str(e)}), 500
 
@@ -112,7 +112,7 @@ def generator():
         user_exe_dir = f"stubs/{user_id}/exe"
         os.makedirs(user_exe_dir, exist_ok=True)
 
-        built_exe_path = os.path.join(temp_stub_path, "target", "release", "stub.exe")
+        built_exe_path = os.path.join("templates/stub/target/release", "rust_s.exe")
         new_exe_path = os.path.join(user_exe_dir, f"{user_id}.exe")
 
         if os.path.exists(built_exe_path):
