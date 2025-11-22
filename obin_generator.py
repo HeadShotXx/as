@@ -7,27 +7,12 @@ def transform_data(data, key):
         return data
     return bytes([b ^ key[i % len(key)] for i, b in enumerate(data)])
 
-def main():
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <input-file>")
-        return
-
-    path = sys.argv[1]
-    print(f"[*] Reading file: {path}")
-
-    try:
-        with open(path, 'rb') as f:
-            data = f.read()
-    except IOError as e:
-        print(f"[✗] Failed to read file: {e}")
-        return
-
-    print(f"[+] File size: {len(data)} bytes")
-
+def generate_rust_obfuscation(input_data):
+    """
+    Takes binary data, obfuscates it, and returns Rust code for the key and payload.
+    """
     key = os.urandom(32)
-    print("[+] Generated a new random 32-byte SECRET_KEY.")
-
-    obfuscated_data = transform_data(data, key)
+    obfuscated_data = transform_data(input_data, key)
 
     key_output = "const SECRET_KEY: &[u8] = &[\n    "
     for i, byte in enumerate(key):
@@ -47,9 +32,30 @@ def main():
         payload_output = payload_output[:-2]
     payload_output += "\n];"
 
+    return key_output, payload_output
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <input-file>")
+        return
+
+    path = sys.argv[1]
+    print(f"[*] Reading file: {path}")
+
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except IOError as e:
+        print(f"[✗] Failed to read file: {e}")
+        return
+
+    print(f"[+] File size: {len(data)} bytes")
+
+    key_str, payload_str = generate_rust_obfuscation(data)
+
     try:
         with open("key.rs", 'w') as f:
-            f.write(key_output)
+            f.write(key_str)
         print("[+] SECRET_KEY written to key.rs")
     except IOError as e:
         print(f"[✗] Failed to write key.rs: {e}")
@@ -57,7 +63,7 @@ def main():
 
     try:
         with open("payload.rs", 'w') as f:
-            f.write(payload_output)
+            f.write(payload_str)
         print("[+] PAYLOAD written to payload.rs")
     except IOError as e:
         print(f"[✗] Failed to write payload.rs: {e}")

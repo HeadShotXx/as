@@ -34,3 +34,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32
 [profile.release]
 opt-level = 3
 lto = true
+
+[[bin]]
+name = "output"
+path = "src/main.rs"
