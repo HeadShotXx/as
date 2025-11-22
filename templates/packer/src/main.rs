@@ -104,13 +104,13 @@ const IMAGE_DIRECTORY_ENTRY_TLS: usize = 9;
 
 #[cfg(windows)]
 const SECRET_KEY: &[u8] = &[
- //Secret Key Here - replace
+ /*Secret Key Here - replace*/
 ];
 
 
 #[cfg(windows)]
 const PAYLOAD: &[u8] = &[
- //Payload Here - replace
+ /*Payload Here - replace*/
 ];
 
 #[cfg(windows)]
