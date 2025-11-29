@@ -12,18 +12,14 @@ use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS32;
 use windows_sys::Win32::System::SystemServices::IMAGE_NT_SIGNATURE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows_sys::Win32::Security::{GetTokenInformation, ConvertSidToStringSidW, TOKEN_USER, TOKEN_QUERY};
+use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_USER, TOKEN_QUERY};
+use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Foundation::{UNICODE_STRING, HANDLE, NTSTATUS};
 use windows_sys::Win32::System::Memory::LocalFree;
 use windows_sys::Win32::System::WindowsProgramming::OBJECT_ATTRIBUTES;
 use std::ffi::{c_void, OsString, OsStr};
 use std::os::windows::ffi::{OsStringExt, OsStrExt};
 use std::iter::once;
-
-#[cfg(target_pointer_width = "64")]
-pub type IMAGE_NT_HEADERS = IMAGE_NT_HEADERS64;
-#[cfg(target_pointer_width = "32")]
-pub type IMAGE_NT_HEADERS = IMAGE_NT_HEADERS32;
 
 pub fn get_image_size(base_address: *const u8) -> Option<usize> {
     unsafe {
@@ -33,13 +29,23 @@ pub fn get_image_size(base_address: *const u8) -> Option<usize> {
         }
 
         let nt_headers_ptr = base_address.add((*dos_header).e_lfanew as usize);
-        let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS;
 
-        if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
-            return None;
+        #[cfg(target_pointer_width = "64")]
+        {
+            let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS64;
+            if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
+                return None;
+            }
+            Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
         }
-
-        Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
+        #[cfg(target_pointer_width = "32")]
+        {
+            let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS32;
+            if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
+                return None;
+            }
+            Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
+        }
     }
 }
 
