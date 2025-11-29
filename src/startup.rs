@@ -4,27 +4,28 @@ use std::io::Write;
 use std::path::Path;
 use std::ptr;
 use crate::syscalls::SYSCALLS;
-use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, TOKEN_USER, TOKEN_QUERY};
+use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
 #[cfg(target_pointer_width = "64")]
 use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS64;
 #[cfg(target_pointer_width = "32")]
 use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS32;
-use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_SIGNATURE;
+use windows_sys::Win32::System::SystemServices::IMAGE_NT_SIGNATURE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows_sys::Win32::Security::{GetTokenInformation, ConvertSidToStringSidW};
-use windows_sys::Win32::Foundation::{UNICODE_STRING, HANDLE, LocalFree, NTSTATUS};
-use windows_sys::Win32::System::Kernel::OBJECT_ATTRIBUTES;
+use windows_sys::Win32::Security::{GetTokenInformation, ConvertSidToStringSidW, TOKEN_USER, TOKEN_QUERY};
+use windows_sys::Win32::Foundation::{UNICODE_STRING, HANDLE, NTSTATUS};
+use windows_sys::Win32::System::Memory::LocalFree;
+use windows_sys::Win32::System::WindowsProgramming::OBJECT_ATTRIBUTES;
 use std::ffi::{c_void, OsString, OsStr};
 use std::os::windows::ffi::{OsStringExt, OsStrExt};
 use std::iter::once;
 
 #[cfg(target_pointer_width = "64")]
-type IMAGE_NT_HEADERS = IMAGE_NT_HEADERS64;
+pub type IMAGE_NT_HEADERS = IMAGE_NT_HEADERS64;
 #[cfg(target_pointer_width = "32")]
-type IMAGE_NT_HEADERS = IMAGE_NT_HEADERS32;
+pub type IMAGE_NT_HEADERS = IMAGE_NT_HEADERS32;
 
-fn get_image_size(base_address: *const u8) -> Option<usize> {
+pub fn get_image_size(base_address: *const u8) -> Option<usize> {
     unsafe {
         let dos_header = base_address as *const IMAGE_DOS_HEADER;
         if (*dos_header).e_magic != IMAGE_DOS_SIGNATURE {
@@ -42,7 +43,7 @@ fn get_image_size(base_address: *const u8) -> Option<usize> {
     }
 }
 
-fn get_user_sid_string() -> Result<String, std::io::Error> {
+pub fn get_user_sid_string() -> Result<String, std::io::Error> {
     let mut token_handle: HANDLE = 0;
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) } == 0 {
         return Err(std::io::Error::last_os_error());

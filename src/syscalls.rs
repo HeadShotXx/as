@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use windows_sys::Win32::System::Threading::PROCESS_INFORMATION_CLASS;
 use windows_sys::Win32::System::LibraryLoader::{LoadLibraryA, GetProcAddress};
 use windows_sys::Win32::Foundation::{HANDLE, NTSTATUS, UNICODE_STRING};
-use windows_sys::Win32::System::Kernel::OBJECT_ATTRIBUTES;
+use windows_sys::Win32::System::WindowsProgramming::OBJECT_ATTRIBUTES;
 
 type NtQueryInformationProcess = extern "system" fn(
     ProcessHandle: *mut c_void,
