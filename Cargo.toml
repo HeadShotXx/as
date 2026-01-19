@@ -2,6 +2,7 @@
 members = [
     ".",
     "polimorphic",
+    "polimorphic_core",
 ]
 
 [package]
@@ -11,3 +12,4 @@ edition = "2021"
 
 [dependencies]
 polimorphic = { path = "polimorphic" }
+polimorphic_core = { path = "polimorphic_core" }
