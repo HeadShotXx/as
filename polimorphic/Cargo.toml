@@ -16,4 +16,3 @@ base-x = "0.2"
 base64 = "0.22"
 base85 = "1.1"
 base91 = "0.1.0"
-polimorphic_core = { path = "../polimorphic_core" }
