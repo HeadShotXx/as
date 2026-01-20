@@ -37,8 +37,6 @@ name = "calculator"
 version = "0.1.0"
 dependencies = [
  "base-x",
- "base32",
- "base64",
  "base85",
  "base91",
  "polimorphic",
