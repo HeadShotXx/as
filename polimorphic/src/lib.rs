@@ -14,7 +14,6 @@ enum Encoding {
     Base36,
     Base64,
     Base85,
-    Base91,
 }
 
 const ALL_ENCODINGS: &[Encoding] = &[
@@ -22,47 +21,37 @@ const ALL_ENCODINGS: &[Encoding] = &[
     Encoding::Base36,
     Encoding::Base64,
     Encoding::Base85,
-    Encoding::Base91,
 ];
 
-// Corrected encoding functions to ensure all return String
 fn encode_b32(data: &[u8]) -> String { base32::encode(base32::Alphabet::RFC4648 { padding: false }, data).to_lowercase() }
 fn encode_b36(data: &[u8]) -> String { base36::encode(data) }
 fn encode_b64(data: &[u8]) -> String { BASE64_STANDARD.encode(data) }
 fn encode_b85(data: &[u8]) -> String { z85::encode(data) }
-// FIX: Ensure b91 returns a String to prevent runtime panics with non-UTF8 data.
-fn encode_b91(data: &[u8]) -> String { String::from_utf8_lossy(&base91::slice_encode(data)).to_string() }
 
 fn generate_decoder(encoding: Encoding, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
-    match encoding {
-        // All decoders now take a &str as input
-        Encoding::Base32 => quote! { let #output_var = base32::decode(base32::Alphabet::RFC4648 { padding: false }, &#input_var).unwrap(); },
-        Encoding::Base36 => quote! { let #output_var = base36::decode(&#input_var).unwrap(); },
-        Encoding::Base64 => quote! { let #output_var = BASE64_STANDARD.decode(&#input_var).unwrap(); },
-        Encoding::Base85 => quote! { let #output_var = z85::decode(&#input_var).unwrap(); },
-        // b91 decode takes &[u8] but its output is Vec<u8> which might not be a valid string for the next layer.
-        // The final output of the chain is converted to a string at the very end.
-        Encoding::Base91 => quote! { let #output_var = base91::slice_decode(#input_var.as_bytes()); },
-    }
+    let core_decode_logic = match encoding {
+        Encoding::Base32 => quote! { base32::decode(base32::Alphabet::RFC4648 { padding: false }, &#input_var) },
+        Encoding::Base36 => quote! { base36::decode(&#input_var) },
+        Encoding::Base64 => quote! { BASE64_STANDARD.decode(&#input_var) },
+        Encoding::Base85 => quote! { z85::decode(&#input_var) },
+    };
+    quote! { let #output_var = #core_decode_logic.unwrap(); }
 }
 
 fn generate_dead_decoder(encoding: Encoding, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
     let decoder_logic = generate_decoder(encoding, input_var, output_var);
-    let random_bool = rand::random::<bool>();
     quote! {
-        if #random_bool && 1 > 2 {
+        if 1 > 2 {
             let #input_var = "decoy";
             #decoder_logic
-            // FIX: Replaced println! with a no-op calculation
-            let _ = #output_var.len() + 1;
+            let _ = #output_var.len();
         }
     }
 }
 
-fn generate_obfuscated_decrypt(key: u8, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
-    let mut rng = thread_rng();
-    let key_ident = Ident::new(&format!("key_{}", rng.gen::<u32>()), Span::call_site());
-    let len_ident = Ident::new(&format!("len_{}", rng.gen::<u32>()), Span::call_site());
+fn generate_obfuscated_decrypt(key: u8, input_var: &Ident, output_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
+    let key_ident = Ident::new(&format!("k_{}", rng.gen::<u32>()), Span::call_site());
+    let len_ident = Ident::new(&format!("l_{}", rng.gen::<u32>()), Span::call_site());
 
     match rng.gen_range(0..3) {
         0 => quote! {
@@ -103,7 +92,6 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             Encoding::Base36 => encode_b36(current_data.as_bytes()),
             Encoding::Base64 => encode_b64(current_data.as_bytes()),
             Encoding::Base85 => encode_b85(current_data.as_bytes()),
-            Encoding::Base91 => encode_b91(current_data.as_bytes()),
         };
     }
     encoding_layers.reverse();
@@ -121,14 +109,18 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             let odd: Vec<u8> = encrypted_bytes.iter().skip(1).step_by(2).cloned().collect();
             let even_lit = Literal::byte_string(&even);
             let odd_lit = Literal::byte_string(&odd);
-            let total_len = encrypted_bytes.len();
-            let reassembly = quote! {
-                let mut reassembled_data = vec![0u8; #total_len];
-                for i in 0..#total_len/2 { reassembled_data[i*2] = even_data[i]; }
-                for i in 0..#total_len/2 { reassembled_data[i*2+1] = odd_data[i]; }
-                if #total_len % 2 != 0 { reassembled_data[#total_len-1] = even_data[#total_len/2]; }
-            };
-            (quote! { let even_data = #even_lit; let odd_data = #odd_lit; }, reassembly)
+            (
+                quote! { let even_data = #even_lit; let odd_data = #odd_lit; },
+                quote! {
+                    let mut reassembled_data = Vec::new();
+                    let mut even_iter = even_data.iter();
+                    let mut odd_iter = odd_data.iter();
+                    loop {
+                        if let Some(e) = even_iter.next() { reassembled_data.push(*e); } else { break; }
+                        if let Some(o) = odd_iter.next() { reassembled_data.push(*o); } else { break; }
+                    }
+                }
+            )
         },
         _ => {
             let junk_interspersed: Vec<u8> = encrypted_bytes.iter().flat_map(|&b| vec![b, rng.gen()]).collect();
@@ -138,23 +130,21 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     };
 
     let mut real_chain_statements = Vec::<TokenStream2>::new();
-    let mut current_var = Ident::new("decrypted_bytes_as_string", Span::call_site());
-    let decryption_logic = generate_obfuscated_decrypt(xor_key, &Ident::new("reassembled_data", Span::call_site()), &Ident::new("decrypted_bytes", Span::call_site()));
+    let mut current_var = Ident::new("s_0", Span::call_site());
+    let decryption_logic = generate_obfuscated_decrypt(xor_key, &Ident::new("reassembled_data", Span::call_site()), &Ident::new("decrypted_bytes", Span::call_site()), &mut rng);
 
     real_chain_statements.push(quote! { let #current_var = String::from_utf8(decrypted_bytes).unwrap(); });
 
     for (i, encoding) in encoding_layers.iter().enumerate() {
-        let next_var = Ident::new(&format!("decoded_level_{}", i), Span::call_site());
-        real_chain_statements.push(generate_decoder(*encoding, &current_var, &next_var));
+        let next_bytes = Ident::new(&format!("b_{}", i + 1), Span::call_site());
+        real_chain_statements.push(generate_decoder(*encoding, &current_var, &next_bytes));
 
-        // Prepare for the next iteration: convert the Vec<u8> output to a String
-        let next_var_as_string = Ident::new(&format!("decoded_level_{}_as_string", i), Span::call_site());
-        real_chain_statements.push(quote! { let #next_var_as_string = String::from_utf8(#next_var).unwrap(); });
-        current_var = next_var_as_string;
+        let next_str = Ident::new(&format!("s_{}", i + 1), Span::call_site());
+        real_chain_statements.push(quote! { let #next_str = String::from_utf8(#next_bytes).unwrap(); });
+        current_var = next_str;
     }
 
     let final_result_var = current_var;
-
     let real_logic_block = quote! {{
         #reassembly_logic
         #decryption_logic
@@ -165,20 +155,18 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let num_decoys = rng.gen_range(2..=5);
     let mut decoy_blocks = Vec::<TokenStream2>::new();
     for i in 0..num_decoys {
-        let decoy_input_var = Ident::new(&format!("decoy_data_{}", i), Span::call_site());
-        let decoy_output_var = Ident::new(&format!("decoy_result_{}", i), Span::call_site());
-        decoy_blocks.push(generate_dead_decoder(*ALL_ENCODINGS.choose(&mut rng).unwrap(), &decoy_input_var, &decoy_output_var));
+        let decoy_in = Ident::new(&format!("di_{}", i), Span::call_site());
+        let decoy_out = Ident::new(&format!("do_{}", i), Span::call_site());
+        decoy_blocks.push(generate_dead_decoder(*ALL_ENCODINGS.choose(&mut rng).unwrap(), &decoy_in, &decoy_out));
     }
 
-    let result_var = Ident::new(&format!("result_{}", rng.gen::<u32>()), Span::call_site());
-
+    let result_var = Ident::new("final_res", Span::call_site());
     let mut all_blocks = decoy_blocks;
-    all_blocks.push(quote! { #result_var = #real_logic_block; });
+    all_blocks.push(quote! { let #result_var = #real_logic_block; });
     all_blocks.shuffle(&mut rng);
 
     let expanded = quote! {{
         use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-        let mut #result_var = String::new();
         #data_definition
         #(#all_blocks)*
         #result_var
