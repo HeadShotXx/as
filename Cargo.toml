@@ -11,6 +11,9 @@ edition = "2021"
 
 [dependencies]
 polimorphic = { path = "polimorphic" }
-base-x = "0.2"
-base85 = "1.1"
+base32 = "0.4.0"
+base36 = "0.0.1"
+base64 = "0.22"
+z85 = "3.0.5"
 base91 = "0.1.0"
+rand = "0.8"
