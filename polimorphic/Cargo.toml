@@ -1,0 +1,18 @@
+[package]
+name = "polimorphic"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+rand = "0.8"
+proc-macro2 = "1.0"
+base32 = "0.4.0"
+base36 = "0.0.1"
+base64 = "0.22"
+z85 = "3.0.5"
+base91 = "0.1.0"
