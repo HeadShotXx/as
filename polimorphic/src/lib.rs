@@ -7,24 +7,7 @@ use syn::{parse_macro_input, LitStr};
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use base64::Engine;
-use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Encoding {
-    Base32,
-    Base36,
-    Base64,
-    Z85,
-    Base91,
-}
-
-const ALL_ENCODINGS: &[Encoding] = &[
-    Encoding::Base32,
-    Encoding::Base36,
-    Encoding::Base64,
-    Encoding::Z85,
-    Encoding::Base91,
-];
 
 #[derive(Debug, Clone, Copy)]
 enum KeyMutation {
@@ -46,7 +29,7 @@ const ALL_KEY_MUTATIONS: &[KeyMutation] = &[
 #[derive(Debug, Clone)]
 enum Operation {
     Decrypt,
-    Decode(Encoding),
+    Decode(usize), // Opaque index into the v-table
     ToString,
 }
 
@@ -62,7 +45,37 @@ struct DataState {
     dtype: DataType,
 }
 
-fn generate_pipeline(rng: &mut impl Rng) -> Vec<Operation> {
+struct Decoder {
+    encode: fn(&[u8]) -> String,
+    decode: TokenStream2,
+}
+
+fn get_decoders() -> Vec<Decoder> {
+    vec![
+        Decoder {
+            encode: |b| base32::encode(base32::Alphabet::RFC4648 { padding: false }, b),
+            decode: quote! { base32::decode(base32::Alphabet::RFC4648 { padding: false }, std::str::from_utf8(s).expect("VTable: Invalid UTF-8 for Base32")).expect("VTable: Base32 decoding failed") },
+        },
+        Decoder {
+            encode: |b| base36::encode(b),
+            decode: quote! { base36::decode(std::str::from_utf8(s).expect("VTable: Invalid UTF-8 for Base36")).expect("VTable: Base36 decoding failed") },
+        },
+        Decoder {
+            encode: |b| base64::engine::general_purpose::STANDARD.encode(b),
+            decode: quote! { base64::engine::general_purpose::STANDARD.decode(s).expect("VTable: Base64 decoding failed") },
+        },
+        Decoder {
+            encode: |b| z85::encode(b),
+            decode: quote! { z85::decode(s).expect("VTable: Z85 decoding failed") },
+        },
+        Decoder {
+            encode: |b| String::from_utf8(base91::slice_encode(b)).expect("Compile-time Base91 encode failed"),
+            decode: quote! { base91::slice_decode(s) },
+        },
+    ]
+}
+
+fn generate_pipeline(rng: &mut impl Rng, num_decoders: usize) -> Vec<Operation> {
     let mut pipeline = Vec::new();
     let num_layers = rng.gen_range(3..=5);
     let mut current_type = DataType::Bytes;
@@ -73,15 +86,12 @@ fn generate_pipeline(rng: &mut impl Rng) -> Vec<Operation> {
 
         if current_type == DataType::Bytes {
             possible_ops.push(Operation::Decrypt);
-            // We can only convert to a string if the bytes are valid UTF-8.
-            // This is not the case after a decryption operation.
             if !last_op_was_decrypt {
                 possible_ops.push(Operation::ToString);
             }
         } else { // String
-            // Data is a string, so it must be decoded to get bytes.
-            let encoding = *ALL_ENCODINGS.choose(rng).unwrap();
-            possible_ops.push(Operation::Decode(encoding));
+            let decoder_index = rng.gen_range(0..num_decoders);
+            possible_ops.push(Operation::Decode(decoder_index));
         }
 
         let op = possible_ops.choose(rng).unwrap().clone();
@@ -89,45 +99,35 @@ fn generate_pipeline(rng: &mut impl Rng) -> Vec<Operation> {
         last_op_was_decrypt = matches!(op, Operation::Decrypt);
 
         match &op {
-            Operation::Decrypt => current_type = DataType::Bytes,
-            Operation::Decode(_) => current_type = DataType::Bytes,
+            Operation::Decrypt | Operation::Decode(_) => current_type = DataType::Bytes,
             Operation::ToString => current_type = DataType::String,
         }
         pipeline.push(op);
     }
 
-    // The final result must be bytes to be converted to the final string.
     if current_type == DataType::String {
-        // If the last operation resulted in a string, we need to decode it to get bytes.
-        let encoding = *ALL_ENCODINGS.choose(rng).unwrap();
-        pipeline.push(Operation::Decode(encoding));
+        let decoder_index = rng.gen_range(0..num_decoders);
+        pipeline.push(Operation::Decode(decoder_index));
     }
 
     pipeline.reverse();
     pipeline
 }
 
-fn generate_decoder_vtables(rng: &mut impl Rng) -> (Ident, TokenStream2, HashMap<Encoding, usize>) {
-    let mut shuffled_encodings = ALL_ENCODINGS.to_vec();
-    shuffled_encodings.shuffle(rng);
+fn generate_decoder_vtables(rng: &mut impl Rng, decoders: &mut [Decoder]) -> (Ident, TokenStream2, Vec<usize>) {
+    decoders.shuffle(rng);
+    let mut vtable_indices = (0..decoders.len()).collect::<Vec<_>>();
+    vtable_indices.shuffle(rng);
 
-    let mut decoder_map = HashMap::new();
     let mut fn_defs = Vec::new();
     let mut fn_names = Vec::new();
 
     let vtable_name = Ident::new(&format!("DECODER_VTABLE_{}", rng.gen::<u32>()), Span::call_site());
 
-    for (i, &encoding) in shuffled_encodings.iter().enumerate() {
-        decoder_map.insert(encoding, i);
+    for &i in &vtable_indices {
+        let decoder = &decoders[i];
         let fn_name = Ident::new(&format!("decode_fn_{}_{}", i, rng.gen::<u32>()), Span::call_site());
-
-        let decoder_logic = match encoding {
-            Encoding::Base32 => quote! { base32::decode(base32::Alphabet::RFC4648 { padding: false }, std::str::from_utf8(s).expect("VTable: Invalid UTF-8 for Base32")).expect("VTable: Base32 decoding failed") },
-            Encoding::Base36 => quote! { base36::decode(std::str::from_utf8(s).expect("VTable: Invalid UTF-8 for Base36")).expect("VTable: Base36 decoding failed") },
-            Encoding::Base64 => quote! { base64::engine::general_purpose::STANDARD.decode(s).expect("VTable: Base64 decoding failed") },
-            Encoding::Z85 => quote! { z85::decode(s).expect("VTable: Z85 decoding failed") },
-            Encoding::Base91 => quote! { base91::slice_decode(s) },
-        };
+        let decoder_logic = &decoder.decode;
 
         fn_defs.push(quote! {
             fn #fn_name(s: &[u8]) -> Vec<u8> {
@@ -144,7 +144,7 @@ fn generate_decoder_vtables(rng: &mut impl Rng) -> (Ident, TokenStream2, HashMap
         static #vtable_name: [fn(&[u8]) -> Vec<u8>; #vtable_len] = [ #(#fn_names),* ];
     };
 
-    (vtable_name, vtable_code, decoder_map)
+    (vtable_name, vtable_code, vtable_indices)
 }
 
 fn apply_pipeline_transform(
@@ -152,48 +152,32 @@ fn apply_pipeline_transform(
     pipeline: &[Operation],
     decryption_key: u8,
     key_mutation: &KeyMutation,
-    decoder_map: &HashMap<Encoding, usize>,
-) -> (Vec<u8>, Vec<usize>) {
+    decoders: &[Decoder],
+) -> Vec<u8> {
     let mut current_state = DataState {
         value: initial_string.as_bytes().to_vec(),
         dtype: DataType::Bytes,
     };
-    let mut vtable_indices = Vec::new();
 
     for op in pipeline.iter().rev() {
         current_state = match op {
             Operation::Decrypt => {
-                // Inverse is encryption. Takes raw bytes, produces raw bytes.
                 let encrypted = encrypt_bytes(&current_state.value, decryption_key, key_mutation);
                 DataState { value: encrypted, dtype: DataType::Bytes }
             }
-            Operation::Decode(encoding) => {
-                // Inverse is encoding. Takes raw bytes, produces a string.
-                let encoded = encode_bytes(&current_state.value, *encoding);
-                vtable_indices.push(decoder_map[encoding]);
+            Operation::Decode(decoder_index) => {
+                let decoder = &decoders[*decoder_index];
+                let encoded = (decoder.encode)(&current_state.value);
                 DataState { value: encoded.into_bytes(), dtype: DataType::String }
             }
             Operation::ToString => {
-                // Inverse is to treat the current value (a string) as bytes.
-                // This requires a UTF-8 conversion at compile time.
                 let s = String::from_utf8(current_state.value.clone())
                     .expect("Compile-time UTF-8 conversion for ToString inverse failed");
                 DataState { value: s.into_bytes(), dtype: DataType::Bytes }
             }
         };
     }
-    vtable_indices.reverse();
-    (current_state.value, vtable_indices)
-}
-
-fn encode_bytes(bytes: &[u8], encoding: Encoding) -> String {
-    match encoding {
-        Encoding::Base32 => base32::encode(base32::Alphabet::RFC4648 { padding: false }, bytes),
-        Encoding::Base36 => base36::encode(bytes),
-        Encoding::Base64 => base64::engine::general_purpose::STANDARD.encode(bytes),
-        Encoding::Z85 => z85::encode(bytes),
-        Encoding::Base91 => String::from_utf8(base91::slice_encode(bytes)).expect("Compile-time Base91 encode failed"),
-    }
+    current_state.value
 }
 
 fn generate_false_dependencies(data_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
@@ -255,12 +239,8 @@ fn generate_linear_logic(
     rng: &mut impl Rng,
 ) -> TokenStream2 {
     let mut logic = Vec::new();
-    let data_var = Ident::new("current_data", Span::call_site());
+    let data_var = Ident::new("data", Span::call_site());
     let mut vtable_idx_counter = 0;
-
-    logic.push(quote! {
-        let mut #data_var = self.data.to_vec();
-    });
 
     for (i, op) in pipeline.iter().enumerate() {
         // Add false dependency logic before every other operation
@@ -272,14 +252,14 @@ fn generate_linear_logic(
             Operation::Decrypt => {
                 let decrypt_fn_call = generate_decrypt_function_call(decryption_key, key_mutation);
                 quote! {
-                    #data_var = #decrypt_fn_call(&#data_var);
+                    data = #decrypt_fn_call(&data);
                 }
             }
             Operation::Decode(_) => {
                 let vtable_index = vtable_indices[vtable_idx_counter];
                 vtable_idx_counter += 1;
                 quote! {
-                    #data_var = (#vtable_name[#vtable_index])(&#data_var);
+                    data = (#vtable_name[#vtable_index])(&data);
                 }
             }
             Operation::ToString => {
@@ -300,64 +280,196 @@ fn generate_linear_logic(
     }
 }
 
+fn generate_nested_block_logic(
+    pipeline: &[Operation],
+    vtable_name: &Ident,
+    vtable_indices: &[usize],
+    decryption_key: u8,
+    key_mutation: &KeyMutation,
+    rng: &mut impl Rng,
+) -> TokenStream2 {
+    let data_var = Ident::new("data", Span::call_site());
+    let mut vtable_idx_counter = 0;
+
+    // Start with the innermost expression
+    let final_assembly = generate_fragmented_assembly(&data_var, rng);
+    let mut nested_logic = quote! { #final_assembly };
+
+    for op in pipeline.iter().rev() {
+        let previous_data_var = data_var.clone();
+
+        let false_dependency = generate_false_dependencies(&previous_data_var, rng);
+
+        nested_logic = match op {
+            Operation::Decrypt => {
+                let decrypt_fn_call = generate_decrypt_function_call(decryption_key, key_mutation);
+                quote! {
+                    {
+                        let #data_var = #decrypt_fn_call(&#previous_data_var);
+                        #false_dependency
+                        #nested_logic
+                    }
+                }
+            }
+            Operation::Decode(_) => {
+                let vtable_index = vtable_indices[vtable_indices.len() - 1 - vtable_idx_counter];
+                vtable_idx_counter += 1;
+                quote! {
+                    {
+                        let #data_var = (#vtable_name[#vtable_index])(&#previous_data_var);
+                        #false_dependency
+                        #nested_logic
+                    }
+                }
+            }
+            Operation::ToString => {
+                // Type transition, just pass the data through in the next block
+                quote! {
+                    {
+                        let #data_var = #previous_data_var.to_vec();
+                        #false_dependency
+                        #nested_logic
+                    }
+                }
+            }
+        };
+    }
+
+    quote! {
+        let #data_var = data;
+        #nested_logic
+    }
+}
+
+fn generate_state_machine_logic(
+    pipeline: &[Operation],
+    vtable_name: &Ident,
+    vtable_indices: &[usize],
+    decryption_key: u8,
+    key_mutation: &KeyMutation,
+    rng: &mut impl Rng,
+) -> TokenStream2 {
+    let state_var = Ident::new("state", Span::call_site());
+    let data_var = Ident::new("data", Span::call_site());
+    let mut arms = Vec::new();
+    let mut vtable_idx_counter = 0;
+
+    for (i, op) in pipeline.iter().enumerate() {
+        let current_state_num = i;
+        let next_state_num = i + 1;
+
+        let false_dependency = if i % 2 != 0 {
+            generate_false_dependencies(&data_var, rng)
+        } else {
+            quote! {}
+        };
+
+        let op_logic = match op {
+            Operation::Decrypt => {
+                let decrypt_fn_call = generate_decrypt_function_call(decryption_key, key_mutation);
+                quote! { data = #decrypt_fn_call(&data); }
+            }
+            Operation::Decode(_) => {
+                let vtable_index = vtable_indices[vtable_idx_counter];
+                vtable_idx_counter += 1;
+                quote! { data = (#vtable_name[#vtable_index])(&data); }
+            }
+            Operation::ToString => quote! { /* Type transition, no-op */ },
+        };
+
+        arms.push(quote! {
+            #current_state_num => {
+                #false_dependency
+                #op_logic
+                #state_var = #next_state_num;
+            }
+        });
+    }
+
+    // Final state
+    let final_state_num = pipeline.len();
+    let final_assembly = generate_fragmented_assembly(&Ident::new("data", Span::call_site()), rng);
+    arms.push(quote! {
+        #final_state_num => {
+            break #final_assembly;
+        }
+    });
+
+    // Default arm
+    arms.push(quote!{ _ => { break String::new(); } });
+
+    quote! {
+        let mut #state_var = 0;
+        loop {
+            match #state_var {
+                #(#arms)*
+            }
+        }
+    }
+}
+
 #[proc_macro]
 pub fn str_obf(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as LitStr);
     let input_str = input.value();
 
     let mut rng = rand::rngs::StdRng::from_entropy();
-    let decryption_key: u8 = rng.gen();
-    let key_mutation = *ALL_KEY_MUTATIONS.choose(&mut rng).unwrap();
 
-    let pipeline = generate_pipeline(&mut rng);
-    let (vtable_name, vtable_code, decoder_map) = generate_decoder_vtables(&mut rng);
+    let (final_encoded_bytes, runtime_logic, vtable_code) = if rng.gen_bool(0.5) {
+        // Table-driven semantic family
+        let (key, fragments) = apply_table_driven_transform(&input_str, &mut rng);
+        let logic = generate_table_driven_logic(&fragments, &mut rng);
+        (key, logic, quote! {})
+    } else {
+        // Pipeline-based semantic family
+        let decryption_key: u8 = rng.gen();
+        let key_mutation = *ALL_KEY_MUTATIONS.choose(&mut rng).unwrap();
+        let mut decoders = get_decoders();
+        let pipeline = generate_pipeline(&mut rng, decoders.len());
+        let (vtable_name, vtable, vtable_indices) = generate_decoder_vtables(&mut rng, &mut decoders);
 
-    let (final_encoded_bytes, vtable_indices) = apply_pipeline_transform(
-        &input_str,
-        &pipeline,
-        decryption_key,
-        &key_mutation,
-        &decoder_map,
-    );
+        let bytes = apply_pipeline_transform(
+            &input_str,
+            &pipeline,
+            decryption_key,
+            &key_mutation,
+            &decoders,
+        );
 
-    let runtime_logic = generate_linear_logic(
-        &pipeline,
-        &vtable_name,
-        &vtable_indices,
-        decryption_key,
-        &key_mutation,
-        &mut rng,
-    );
+        let logic = match rng.gen_range(0..3) {
+            0 => generate_linear_logic(&pipeline, &vtable_name, &vtable_indices, decryption_key, &key_mutation, &mut rng),
+            1 => generate_nested_block_logic(&pipeline, &vtable_name, &vtable_indices, decryption_key, &key_mutation, &mut rng),
+            _ => generate_state_machine_logic(&pipeline, &vtable_name, &vtable_indices, decryption_key, &key_mutation, &mut rng),
+        };
+        (bytes, logic, vtable)
+    };
 
     let struct_name = Ident::new(&format!("ObfuscatedStringHolder_{}", rng.gen::<u32>()), Span::call_site());
 
     let output = quote! {
         {
-            use base64::Engine as _; // Ensure engine is in scope for generated code if needed
+            use base64::Engine as _;
 
             #vtable_code
 
             struct #struct_name {
-                data: &'static [u8],
+                key: &'static [u8],
             }
 
             impl #struct_name {
                 fn deobfuscate(&self) -> String {
-                    let data_vec = self.data.to_vec();
+                    let key = self.key.to_vec();
+                    let mut data = self.key.to_vec(); // For pipeline compatibility
                     #runtime_logic
                 }
             }
 
             let instance = #struct_name {
-                data: &[#(#final_encoded_bytes),*],
+                key: &[#(#final_encoded_bytes),*],
             };
             instance.deobfuscate()
         }
     };
-
-    // For debugging:
-    // eprintln!("Generated pipeline: {:?}", pipeline);
-    // eprintln!("Generated code: {}", output.to_string());
 
     TokenStream::from(output)
 }
@@ -369,6 +481,47 @@ fn encrypt_bytes(bytes: &[u8], key: u8, mutation: &KeyMutation) -> Vec<u8> {
         new_key = mutate_key(new_key, mutation);
         encrypted_byte
     }).collect()
+}
+
+fn apply_table_driven_transform(
+    initial_string: &str,
+    rng: &mut impl Rng,
+) -> (Vec<u8>, Vec<Vec<u8>>) {
+    let mut fragments = Vec::new();
+    let mut key = Vec::new();
+    let string_bytes = initial_string.as_bytes().to_vec();
+
+    let fragment_size = rng.gen_range(2..5);
+    for (i, chunk) in string_bytes.chunks(fragment_size).enumerate() {
+        fragments.push(chunk.to_vec());
+        key.push(i as u8);
+    }
+
+    key.shuffle(rng);
+    (key, fragments)
+}
+
+fn generate_table_driven_logic(
+    fragments: &[Vec<u8>],
+    rng: &mut impl Rng,
+) -> TokenStream2 {
+    let table_var = Ident::new(&format!("LOOKUP_TABLE_{}", rng.gen::<u32>()), Span::call_site());
+    let key_var = Ident::new("key", Span::call_site());
+    let result_var = Ident::new("result", Span::call_site());
+
+    let num_fragments = fragments.len();
+    let fragment_lits = fragments.iter().map(|f| quote!(&[#(#f),*]));
+
+    quote! {
+        {
+            static #table_var: [&[u8]; #num_fragments] = [#(#fragment_lits),*];
+            let mut #result_var = Vec::new();
+            for &index in #key_var.iter() {
+                #result_var.extend_from_slice(#table_var[index as usize]);
+            }
+            String::from_utf8(#result_var).expect("Table-driven assembly failed")
+        }
+    }
 }
 
 fn mutate_key(key: u8, mutation: &KeyMutation) -> u8 {
