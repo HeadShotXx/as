@@ -165,6 +165,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rand",
+ "rand_chacha",
  "syn 2.0.114",
  "z85",
 ]
