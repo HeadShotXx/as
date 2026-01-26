@@ -246,7 +246,7 @@ fn generate_fragmented_assembly(bytes_var: &Ident, rng: &mut impl Rng) -> TokenS
     }
 }
 
-fn generate_runtime_logic(
+fn generate_linear_logic(
     pipeline: &[Operation],
     vtable_name: &Ident,
     vtable_indices: &[usize],
@@ -320,7 +320,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         &decoder_map,
     );
 
-    let runtime_logic = generate_runtime_logic(
+    let runtime_logic = generate_linear_logic(
         &pipeline,
         &vtable_name,
         &vtable_indices,
