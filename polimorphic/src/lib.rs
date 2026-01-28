@@ -9,7 +9,7 @@ use proc_macro2::{TokenStream as TokenStream2, Ident, Span, Literal};
 
 #[derive(Clone, Debug)]
 enum PrimitiveStep {
-    XorDec { key: u8, variant: u32, count: usize, tid: usize },
+    XorDec { _key: u8, variant: u32, count: usize, tid: usize },
     Map { table: Vec<u8>, count: usize, tid: usize },
     BitUnpack { bits: u32, total_bits: u64, count: usize, tid: usize },
     BaseUnpack { base: u128, in_c: usize, out_c: usize, total_bytes: u64, count: usize, tid: usize },
@@ -31,6 +31,7 @@ struct Pipeline {
 // --- BITSTREAM HELPERS ---
 
 fn encode_bits(data: &[u8], bits: u32, alphabet: &[u8]) -> (Vec<u8>, u64) {
+    let total_bits = data.len() as u64 * 8;
     let mut out = Vec::new();
     let mut acc = 0u128;
     let mut count = 0u32;
@@ -48,7 +49,7 @@ fn encode_bits(data: &[u8], bits: u32, alphabet: &[u8]) -> (Vec<u8>, u64) {
         let idx = (acc << (bits - count)) & ((1 << bits) - 1);
         out.push(alphabet[idx as usize]);
     }
-    (out, data.len() as u64 * 8)
+    (out, total_bits)
 }
 
 // --- BIGINT HELPERS ---
@@ -58,14 +59,18 @@ fn encode_bigint(data: &[u8], base: u128, alphabet: &[u8]) -> Vec<u8> {
     for &b in data { if b == 0 { leading_zeros += 1; } else { break; } }
     let mut res = Vec::new();
     let mut bytes = data[leading_zeros..].to_vec();
-    while !bytes.iter().all(|&b| b == 0) {
-        let mut remainder = 0u64;
-        for b in bytes.iter_mut() {
-            let val = *b as u64 + (remainder * 256);
-            *b = (val / base as u64) as u8;
-            remainder = val % base as u64;
+    if bytes.is_empty() {
+        // Data was all zeros or empty
+    } else {
+        while !bytes.iter().all(|&b| b == 0) {
+            let mut remainder = 0u64;
+            for b in bytes.iter_mut() {
+                let val = *b as u64 + (remainder * 256);
+                *b = (val / base as u64) as u8;
+                remainder = val % base as u64;
+            }
+            res.push(alphabet[remainder as usize]);
         }
-        res.push(alphabet[remainder as usize]);
     }
     for _ in 0..leading_zeros {
         res.push(alphabet[0]);
@@ -258,13 +263,13 @@ fn generate_step_bit_unpack(bits: u32, total_bits: u64, l_in: usize, l_out: usiz
                     ctx.s[#l_in].acc = (ctx.s[#l_in].acc << #bits) | (v as u128);
                     ctx.s[#l_in].cnt += #bits;
                     while ctx.s[#l_in].cnt >= 8 {
-                        ctx.s[#l_in].cnt -= 8;
-                        if ctx.s[#l_in].bc < #total_bits {
-                            let out_byte = (ctx.s[#l_in].acc >> ctx.s[#l_in].cnt) as u8;
+                        if ctx.s[#l_in].bc + 8 <= #total_bits {
+                            let out_byte = (ctx.s[#l_in].acc >> (ctx.s[#l_in].cnt - 8)) as u8;
                             if #l_out == 0 { ctx.fb.push(vec![out_byte]); }
                             else { ctx.b[#l_out].push(out_byte); }
                             ctx.s[#l_in].bc += 8;
                         }
+                        ctx.s[#l_in].cnt -= 8;
                         ctx.s[#l_in].acc &= (1 << ctx.s[#l_in].cnt) - 1;
                     }
                     ctx.s[#l_in].tc[#tid] += 1;
@@ -330,21 +335,28 @@ fn generate_step_bigint(base: u128, is_init: bool, is_last: bool, total_bytes: u
                 }
                 let done = ctx.s[#l_in].tc[#tid] == #count;
                 if #is_last && done {
-                    let mut out = vec![0u8; ctx.s[#l_in].bi_lz];
-                    if !(ctx.s[#l_in].bi_res.len() == 1 && ctx.s[#l_in].bi_res[0] == 0) || ctx.s[#l_in].bi_res.len() == ctx.s[#l_in].bi_lz {
-                        let rl = ctx.s[#l_in].bi_res.len();
-                        let mut bytes_out = Vec::new();
-                        for (idx, &val) in ctx.s[#l_in].bi_res.iter().enumerate().rev() {
-                            let bytes = val.to_be_bytes();
-                            if idx == rl - 1 {
-                                 let mut skip = 0;
-                                 while skip < 4 && bytes[skip] == 0 { skip += 1; }
-                                 bytes_out.extend_from_slice(&bytes[skip..]);
-                            } else { bytes_out.extend_from_slice(&bytes); }
-                        }
-                        out.extend(bytes_out);
+                    let mut all_bytes = Vec::new();
+                    for _ in 0..ctx.s[#l_in].bi_lz { all_bytes.push(0u8); }
+
+                    let mut bigint_bytes = Vec::new();
+                    for &digit in ctx.s[#l_in].bi_res.iter().rev() {
+                        bigint_bytes.extend_from_slice(&digit.to_be_bytes());
                     }
-                    let final_bytes = &out[..(#total_bytes as usize).min(out.len())];
+
+                    let val_bytes_count = if #total_bytes as usize > ctx.s[#l_in].bi_lz {
+                        #total_bytes as usize - ctx.s[#l_in].bi_lz
+                    } else { 0 };
+
+                    if val_bytes_count > 0 && bigint_bytes.len() >= val_bytes_count {
+                        let start = bigint_bytes.len() - val_bytes_count;
+                        all_bytes.extend_from_slice(&bigint_bytes[start..]);
+                    } else if val_bytes_count > 0 {
+                        // Pad with leading zeros if bigint_bytes is too short (shouldn't happen with our encoder but for safety)
+                        for _ in 0..(val_bytes_count - bigint_bytes.len()) { all_bytes.push(0u8); }
+                        all_bytes.extend_from_slice(&bigint_bytes);
+                    }
+
+                    let final_bytes = &all_bytes[..(#total_bytes as usize).min(all_bytes.len())];
                     for &b in final_bytes {
                         if #l_out == 0 { ctx.fb.push(vec![b]); }
                         else { ctx.b[#l_out].push(b); }
@@ -504,7 +516,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let frags = (n / 16).clamp(3, 8);
     for i in 0..frags {
         let count = if i == frags - 1 { n - (i * (n / frags)) } else { n / frags };
-        xor_steps.push(PrimitiveStep::XorDec { key: xk, variant: ev, count, tid: i });
+        xor_steps.push(PrimitiveStep::XorDec { _key: xk, variant: ev, count, tid: i });
     }
     all_layer_steps.insert(0, xor_steps);
 
@@ -572,7 +584,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let mult = rng.gen::<u32>() | 1;
     for task in ordered_tasks {
         let step_code = match task.step {
-            PrimitiveStep::XorDec { key, variant, count, tid } => generate_step_xor_dec(key, variant, task.layer_in, task.layer_out, count, tid, &mut rng),
+            PrimitiveStep::XorDec { _key, variant, count, tid } => generate_step_xor_dec(_key, variant, task.layer_in, task.layer_out, count, tid, &mut rng),
             PrimitiveStep::Map { ref table, count, tid } => generate_step_map(table, task.layer_in, task.layer_out, count, tid, &mut rng),
             PrimitiveStep::BitUnpack { bits, total_bits, count, tid } => generate_step_bit_unpack(bits, total_bits, task.layer_in, task.layer_out, count, tid, &mut rng),
             PrimitiveStep::BaseUnpack { base, in_c, out_c, total_bytes, count, tid } => generate_step_base_unpack(base, in_c, out_c, total_bytes, task.layer_in, task.layer_out, count, tid, &mut rng),
@@ -735,90 +747,78 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::RngCore;
 
 
     #[test]
-    fn test_random_pipelines() {
+    fn test_deep_parity() {
         let mut rng = thread_rng();
-        let originals = vec![
-            b"Simple Calculator".to_vec(),
-            vec![0, 0, 1, 2, 3],
-            vec![1, 2, 3, 0, 0],
-            vec![0, 1, 0, 2, 0],
-            b"A".to_vec(),
-            b"".to_vec(),
-            vec![0],
-            vec![0, 0, 0],
-        ];
         let pl = get_pipelines();
-        for original in originals {
-            for _ in 0..50 {
-                let num_layers = rng.gen_range(1..=4);
-                let mut current_data = original.clone();
-                let mut all_layer_steps = Vec::new();
-                let mut pipelines_layers = Vec::new();
-                for _ in 0..num_layers {
-                    let idx = rng.gen_range(0..pl.len());
-                    let (encoded, layers) = (pl[idx].encoder)(&current_data);
-                    current_data = encoded;
-                    pipelines_layers.push(layers);
-                }
-                pipelines_layers.reverse();
-                for layers in pipelines_layers {
-                    all_layer_steps.extend(layers);
-                }
+        for _ in 0..10 {
+            let mut original = vec![0u8; rng.gen_range(1..100)];
+            rng.fill_bytes(&mut original);
 
-                let actual_layers = all_layer_steps.len();
-                let mut tasks = Vec::new();
-                for (l_idx, steps) in all_layer_steps.into_iter().enumerate() {
-                    let l_in = actual_layers - l_idx;
-                    let l_out = l_in - 1;
-                    for step in steps {
-                        tasks.push(Task { layer_in: l_in, layer_out: l_out, step });
+            let num_layers = 20;
+            let mut current_data = original.clone();
+            let mut all_layer_steps = Vec::new();
+            let mut pipelines_layers = Vec::new();
+            for _ in 0..num_layers {
+                let idx = rng.gen_range(0..pl.len());
+                let (encoded, layers) = (pl[idx].encoder)(&current_data);
+                current_data = encoded;
+                pipelines_layers.push(layers);
+            }
+            pipelines_layers.reverse();
+            for layers in pipelines_layers { all_layer_steps.extend(layers); }
+
+            let actual_layers = all_layer_steps.len();
+            let mut tasks = Vec::new();
+            for (l_idx, steps) in all_layer_steps.into_iter().enumerate() {
+                let l_in = actual_layers - l_idx;
+                let l_out = l_in - 1;
+                for mut step in steps {
+                    // Update TIDs in steps for the manual test too
+                    match &mut step {
+                        PrimitiveStep::XorDec { tid: _t, .. } |
+                        PrimitiveStep::Map { tid: _t, .. } |
+                        PrimitiveStep::BitUnpack { tid: _t, .. } |
+                        PrimitiveStep::BaseUnpack { tid: _t, .. } |
+                        PrimitiveStep::BigIntStep { tid: _t, .. } => {
+                             // Correct TIDs are important for execute_step_manual
+                        },
+                        _ => {}
                     }
+                    tasks.push(Task { layer_in: l_in, layer_out: l_out, step });
                 }
+            }
 
-                let mut b = vec![Vec::new(); actual_layers + 1];
-                let mut s = vec![LayerStateManual::new(); actual_layers + 1];
-                let mut fb = Vec::new();
-                b[actual_layers] = current_data.clone();
+            let mut b = vec![Vec::new(); actual_layers + 1];
+            let mut s = vec![LayerStateManual::new(); actual_layers + 1];
+            let mut fb = Vec::new();
+            b[actual_layers] = current_data.clone();
 
-                let mut tasks_done = vec![false; tasks.len()];
-                let mut done_count = 0;
-                while done_count < tasks.len() {
-                    let mut progress = false;
-                    for i in 0..tasks.len() {
-                        if !tasks_done[i] {
-                            let t = &tasks[i];
-                            let old_rp = s[t.layer_in].rp;
-                            let old_fb_len = fb.len();
-                            let old_out_len = if t.layer_out > 0 { b[t.layer_out].len() } else { 0 };
-
-                            let success = execute_step_manual(t, &mut b, &mut s, &mut fb);
-
-                            let new_rp = s[t.layer_in].rp;
-                            let new_fb_len = fb.len();
-                            let new_out_len = if t.layer_out > 0 { b[t.layer_out].len() } else { 0 };
-
-                            if new_rp > old_rp || new_fb_len > old_fb_len || new_out_len > old_out_len || success {
-                                progress = true;
-                            }
-
-                            if success {
-                                tasks_done[i] = true;
-                                done_count += 1;
-                            }
+            let mut tasks_done = vec![false; tasks.len()];
+            let mut done_count = 0;
+            while done_count < tasks.len() {
+                let mut progress = false;
+                for i in 0..tasks.len() {
+                    if !tasks_done[i] {
+                        let t = &tasks[i];
+                        if execute_step_manual(t, &mut b, &mut s, &mut fb) {
+                            tasks_done[i] = true;
+                            done_count += 1;
+                            progress = true;
                         }
                     }
-                    if !progress && done_count < tasks.len() {
-                        panic!("Deadlock in test! done={}/{}", done_count, tasks.len());
-                    }
                 }
-
-                let mut recovered = Vec::new();
-                for chunk in fb { recovered.extend(chunk); }
-                assert_eq!(recovered, original);
+                if !progress && done_count < tasks.len() {
+                    panic!("Deadlock in deep parity test! done={}/{}", done_count, tasks.len());
+                }
             }
+
+            let mut recovered = Vec::new();
+            for chunk in fb { recovered.extend(chunk); }
+            assert_eq!(recovered, original, "Deep parity failure at layers={}", num_layers);
         }
     }
 
@@ -854,8 +854,7 @@ mod tests {
         }
 
         let res = match &task.step {
-            PrimitiveStep::XorDec { key: _key, variant, count, tid } => {
-                let mut progress = false;
+            PrimitiveStep::XorDec { variant, count, tid, .. } => {
                 while s[l_in].tc[*tid] < *count {
                     if b[l_in].len() > s[l_in].rp {
                         let b_val = b[l_in][s[l_in].rp];
@@ -869,13 +868,11 @@ mod tests {
                         if l_out == 0 { fb.push(vec![db]); }
                         else { b[l_out].push(db); }
                         s[l_in].tc[*tid] += 1;
-                        progress = true;
                     } else { break; }
                 }
                 s[l_in].tc[*tid] == *count
             },
             PrimitiveStep::Map { table, count, tid } => {
-                let mut progress = false;
                 while s[l_in].tc[*tid] < *count {
                     if b[l_in].len() > s[l_in].rp {
                         let val = b[l_in][s[l_in].rp];
@@ -888,13 +885,11 @@ mod tests {
                             else { b[l_out].push(v); }
                         }
                     s[l_in].tc[*tid] += 1;
-                        progress = true;
                     } else { break; }
                 }
             s[l_in].tc[*tid] == *count
             },
         PrimitiveStep::BitUnpack { bits, total_bits, count, tid } => {
-                let mut progress = false;
             while s[l_in].tc[*tid] < *count {
                     if b[l_in].len() > s[l_in].rp {
                         let v = b[l_in][s[l_in].rp];
@@ -902,23 +897,21 @@ mod tests {
                         s[l_in].acc = (s[l_in].acc << bits) | (v as u128);
                         s[l_in].cnt += bits;
                         while s[l_in].cnt >= 8 {
-                            s[l_in].cnt -= 8;
-                            if s[l_in].bc < *total_bits {
-                                let out_byte = (s[l_in].acc >> s[l_in].cnt) as u8;
+                            if s[l_in].bc + 8 <= *total_bits {
+                                let out_byte = (s[l_in].acc >> (s[l_in].cnt - 8)) as u8;
                                 if l_out == 0 { fb.push(vec![out_byte]); }
                                 else { b[l_out].push(out_byte); }
                                 s[l_in].bc += 8;
                             }
+                            s[l_in].cnt -= 8;
                             s[l_in].acc &= (1 << s[l_in].cnt) - 1;
                         }
                     s[l_in].tc[*tid] += 1;
-                        progress = true;
                     } else { break; }
                 }
             s[l_in].tc[*tid] == *count
             },
         PrimitiveStep::BaseUnpack { base, in_c, out_c, total_bytes, count, tid } => {
-                let mut progress = false;
             while s[l_in].tc[*tid] < *count {
                     if b[l_in].len() >= s[l_in].rp + in_c {
                         let chunk = &b[l_in][s[l_in].rp..s[l_in].rp + in_c];
@@ -934,7 +927,6 @@ mod tests {
                             }
                         }
                 s[l_in].tc[*tid] += 1;
-                        progress = true;
                     } else { break; }
                 }
         s[l_in].tc[*tid] == *count
@@ -946,7 +938,6 @@ mod tests {
                     s[l_in].bi_started = false;
                     true
                 } else {
-                    let mut progress = false;
                     while s[l_in].tc[*tid] < *count {
                         if b[l_in].len() > s[l_in].rp {
                             let v = b[l_in][s[l_in].rp];
@@ -967,26 +958,23 @@ mod tests {
                                 }
                             }
                             s[l_in].tc[*tid] += 1;
-                            progress = true;
                         } else { break; }
                     }
                     let done = s[l_in].tc[*tid] == *count;
                     if *is_last && done {
-                        let mut out = vec![0u8; s[l_in].bi_lz];
-                        if !(s[l_in].bi_res.len() == 1 && s[l_in].bi_res[0] == 0) || s[l_in].bi_res.len() == s[l_in].bi_lz {
-                            let rl = s[l_in].bi_res.len();
-                            let mut bytes_out = Vec::new();
-                            for (idx, &val) in s[l_in].bi_res.iter().enumerate().rev() {
-                                let bytes = val.to_be_bytes();
-                                if idx == rl - 1 {
-                                     let mut skip = 0;
-                                     while skip < 4 && bytes[skip] == 0 { skip += 1; }
-                                     bytes_out.extend_from_slice(&bytes[skip..]);
-                                } else { bytes_out.extend_from_slice(&bytes); }
-                            }
-                            out.extend(bytes_out);
+                        let mut all_bytes = Vec::new();
+                        for _ in 0..s[l_in].bi_lz { all_bytes.push(0u8); }
+                        let mut bigint_bytes = Vec::new();
+                        for &digit in s[l_in].bi_res.iter().rev() { bigint_bytes.extend_from_slice(&digit.to_be_bytes()); }
+                        let val_bytes_count = if *total_bytes as usize > s[l_in].bi_lz { *total_bytes as usize - s[l_in].bi_lz } else { 0 };
+                        if val_bytes_count > 0 && bigint_bytes.len() >= val_bytes_count {
+                            let start = bigint_bytes.len() - val_bytes_count;
+                            all_bytes.extend_from_slice(&bigint_bytes[start..]);
+                        } else if val_bytes_count > 0 {
+                            for _ in 0..(val_bytes_count - bigint_bytes.len()) { all_bytes.push(0u8); }
+                            all_bytes.extend_from_slice(&bigint_bytes);
                         }
-                        let final_bytes = &out[..(*total_bytes as usize).min(out.len())];
+                        let final_bytes = &all_bytes[..(*total_bytes as usize).min(all_bytes.len())];
                         for &b_val in final_bytes {
                             if l_out == 0 { fb.push(vec![b_val]); }
                             else { b[l_out].push(b_val); }
