@@ -10,8 +10,8 @@ use proc_macro2::{TokenStream as TokenStream2, Ident, Span, Literal};
 #[derive(Clone, Debug)]
 enum Primitive {
     Map(Vec<u8>),
-    BitUnpack { bits: u32, remainder: u32 },
-    BaseUnpack { base: u128, in_c: usize, out_c: usize, padding: usize },
+    BitUnpack { bits: u32, total_bits: u64 },
+    BaseUnpack { base: u128, in_c: usize, out_c: usize, total_bytes: u64 },
     BigInt { base: u128 },
 }
 
@@ -21,7 +21,7 @@ struct Pipeline {
 
 // --- BITSTREAM HELPERS ---
 
-fn encode_bits(data: &[u8], bits: u32, alphabet: &[u8]) -> (Vec<u8>, u32) {
+fn encode_bits(data: &[u8], bits: u32, alphabet: &[u8]) -> (Vec<u8>, u64) {
     let mut out = Vec::new();
     let mut acc = 0u128;
     let mut count = 0u32;
@@ -38,10 +38,8 @@ fn encode_bits(data: &[u8], bits: u32, alphabet: &[u8]) -> (Vec<u8>, u32) {
     if count > 0 {
         let idx = (acc << (bits - count)) & ((1 << bits) - 1);
         out.push(alphabet[idx as usize]);
-        (out, count)
-    } else {
-        (out, bits)
     }
+    (out, data.len() as u64 * 8)
 }
 
 // --- BIGINT HELPERS ---
@@ -69,12 +67,10 @@ fn encode_bigint(data: &[u8], base: u128, alphabet: &[u8]) -> Vec<u8> {
 
 // --- Z85 HELPERS ---
 
-fn encode_z85_custom(data: &[u8], alphabet: &[u8]) -> (Vec<u8>, usize) {
+fn encode_z85_custom(data: &[u8], alphabet: &[u8]) -> (Vec<u8>, u64) {
     let mut d = data.to_vec();
-    let mut padding = 0;
     while d.len() % 4 != 0 {
         d.push(0);
-        padding += 1;
     }
     let mut out = Vec::new();
     for chunk in d.chunks(4) {
@@ -88,7 +84,7 @@ fn encode_z85_custom(data: &[u8], alphabet: &[u8]) -> (Vec<u8>, usize) {
         res.reverse();
         out.extend(res);
     }
-    (out, padding)
+    (out, data.len() as u64)
 }
 
 fn get_pipelines() -> Vec<Pipeline> {
@@ -106,8 +102,8 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = b32_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
-                let (out, rem) = encode_bits(data, 5, &alpha);
-                (out, vec![Primitive::Map(alpha.clone()), Primitive::BitUnpack { bits: 5, remainder: rem }])
+                let (out, total_bits) = encode_bits(data, 5, &alpha);
+                (out, vec![Primitive::Map(alpha.clone()), Primitive::BitUnpack { bits: 5, total_bits }])
             }),
         }
     };
@@ -124,8 +120,8 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = b64_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
-                let (out, rem) = encode_bits(data, 6, &alpha);
-                (out, vec![Primitive::Map(alpha.clone()), Primitive::BitUnpack { bits: 6, remainder: rem }])
+                let (out, total_bits) = encode_bits(data, 6, &alpha);
+                (out, vec![Primitive::Map(alpha.clone()), Primitive::BitUnpack { bits: 6, total_bits }])
             }),
         }
     };
@@ -133,8 +129,8 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = z85_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
-                let (out, pad) = encode_z85_custom(data, &alpha);
-                (out, vec![Primitive::Map(alpha.clone()), Primitive::BaseUnpack { base: 85, in_c: 5, out_c: 4, padding: pad }])
+                let (out, total_bytes) = encode_z85_custom(data, &alpha);
+                (out, vec![Primitive::Map(alpha.clone()), Primitive::BaseUnpack { base: 85, in_c: 5, out_c: 4, total_bytes }])
             }),
         }
     };
@@ -171,25 +167,25 @@ fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 
     }
 }
 
-fn generate_obfuscated_bit_unpack(bits: u32, remainder: u32, rng: &mut impl Rng) -> TokenStream2 {
+fn generate_obfuscated_bit_unpack(bits: u32, total_bits: u64, rng: &mut impl Rng) -> TokenStream2 {
     let a_n = Ident::new(&format!("a_{}", rng.gen::<u32>()), Span::call_site());
     let c_n = Ident::new(&format!("c_{}", rng.gen::<u32>()), Span::call_site());
-    let t_n = Ident::new(&format!("t_{}", rng.gen::<u32>()), Span::call_site());
     let bc_n = Ident::new(&format!("bc_{}", rng.gen::<u32>()), Span::call_site());
     quote! {
         {
             let mut out = Vec::new();
             let mut #a_n = 0u128;
             let mut #c_n = 0u32;
-            let #t_n = (data.len() as u32).saturating_sub(1) * #bits + #remainder;
-            let mut #bc_n = 0u32;
+            let mut #bc_n = 0u64;
             for &v in &data {
                 #a_n = (#a_n << #bits) | (v as u128);
                 #c_n += #bits;
-                while #c_n >= 8 && #bc_n + 8 <= #t_n {
+                while #c_n >= 8 {
                     #c_n -= 8;
-                    out.push((#a_n >> #c_n) as u8);
-                    #bc_n += 8;
+                    if #bc_n < #total_bits {
+                        out.push((#a_n >> #c_n) as u8);
+                        #bc_n += 8;
+                    }
                     #a_n &= (1 << #c_n) - 1;
                 }
             }
@@ -198,11 +194,13 @@ fn generate_obfuscated_bit_unpack(bits: u32, remainder: u32, rng: &mut impl Rng)
     }
 }
 
-fn generate_obfuscated_base_unpack(base: u128, in_c: usize, out_c: usize, padding: usize, rng: &mut impl Rng) -> TokenStream2 {
+fn generate_obfuscated_base_unpack(base: u128, in_c: usize, out_c: usize, total_bytes: u64, rng: &mut impl Rng) -> TokenStream2 {
     let v_n = Ident::new(&format!("v_{}", rng.gen::<u32>()), Span::call_site());
+    let len_v = Ident::new(&format!("len_{}", rng.gen::<u32>()), Span::call_site());
     quote! {
         {
             let mut out = Vec::new();
+            let mut #len_v = 0u64;
             for chunk in data.chunks(#in_c) {
                 if chunk.len() < #in_c { continue; }
                 let mut #v_n = 0u128;
@@ -210,11 +208,11 @@ fn generate_obfuscated_base_unpack(base: u128, in_c: usize, out_c: usize, paddin
                     #v_n = #v_n * #base + (c as u128);
                 }
                 for i in (0..#out_c).rev() {
-                    out.push(((#v_n >> (i * 8)) & 0xff) as u8);
+                    if #len_v < #total_bytes {
+                        out.push(((#v_n >> (i * 8)) & 0xff) as u8);
+                        #len_v += 1;
+                    }
                 }
-            }
-            if out.len() >= #padding {
-                out.truncate(out.len() - #padding);
             }
             out
         }
@@ -263,7 +261,7 @@ fn generate_obfuscated_bigint_unpack(base: u128, rng: &mut impl Rng) -> TokenStr
     }
 }
 
-fn generate_junk_logic(rng: &mut impl Rng, real_var: Option<&Ident>) -> TokenStream2 {
+fn generate_junk_logic(rng: &mut impl Rng, real_var: Option<&Ident>, rs_var: Option<&Ident>) -> TokenStream2 {
     let j_v = Ident::new(&format!("j_{}", rng.gen::<u32>()), Span::call_site());
     let j_val = rng.gen::<u32>();
     let base_junk = match rng.gen_range(0..3) {
@@ -271,22 +269,33 @@ fn generate_junk_logic(rng: &mut impl Rng, real_var: Option<&Ident>) -> TokenStr
         1 => quote! { let mut #j_v = #j_val; for i in 0..3 { #j_v = #j_v.wrapping_add(i); } },
         _ => quote! { let #j_v = #j_val; let _ = #j_v ^ 0x55; },
     };
-    if let Some(rv) = real_var {
-        if rng.gen_bool(0.3) {
+
+    let mut final_junk = base_junk;
+
+    if let (Some(rv), Some(rsv)) = (real_var, rs_var) {
+        if rng.gen_bool(0.4) {
             let magic = rng.gen::<u32>();
-            quote! {
-                #base_junk
-                if #j_v == #magic { #rv.push(0); }
-            }
-        } else {
-            base_junk
+            final_junk = quote! {
+                #final_junk
+                if (#rsv.wrapping_mul(#j_v) == #magic) {
+                    #rv.push((#rsv & 0xff) as u8);
+                    #rsv = #rsv.wrapping_add(1);
+                }
+            };
         }
-    } else {
-        base_junk
+    } else if let Some(rsv) = rs_var {
+        final_junk = quote! {
+            #final_junk
+            if #j_v > #j_val {
+                #rsv = #rsv.wrapping_add(#j_v);
+            }
+        };
     }
+
+    final_junk
 }
 
-fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rng: &mut impl Rng, variant: u32) -> TokenStream2 {
+fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_var: &Ident, rng: &mut impl Rng, variant: u32) -> TokenStream2 {
     let k_n = Ident::new(&format!("k_{}", rng.gen::<u32>()), Span::call_site());
     let b_n = Ident::new(&format!("b_{}", rng.gen::<u32>()), Span::call_site());
     let br_n = Ident::new(&format!("br_{}", rng.gen::<u32>()), Span::call_site());
@@ -295,7 +304,7 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rng
         1 => quote! { #k_n = #k_n.wrapping_sub(#b_n); },
         _ => quote! { #k_n = #k_n.rotate_left(3); },
     };
-    let junk = generate_junk_logic(rng, Some(output_var));
+    let junk = generate_junk_logic(rng, Some(output_var), Some(rs_var));
     match rng.gen_range(0..3) {
         0 => quote! {
             let mut #k_n = self.key;
@@ -332,11 +341,27 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rng
     }
 }
 
-fn generate_final_assembly(bytes_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
-    match rng.gen_range(0..3) {
-        0 => quote! { String::from_utf8(#bytes_var.to_vec()).expect("F") },
-        1 => quote! { #bytes_var.iter().map(|b| *b as char).collect::<String>() },
-        _ => quote! { { let mut s = String::new(); for b in #bytes_var.iter() { s.push(*b as char); } s } }
+fn generate_fragmented_string_recovery(bytes_var: &Ident, rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
+    let s_n = Ident::new("final_str", Span::call_site());
+    let chunk_size = rng.gen_range(2usize..=5usize);
+
+    quote! {
+        {
+            let mut #s_n = String::with_capacity(#bytes_var.len());
+            let mut chunks = #bytes_var.chunks(#chunk_size);
+            let mut step = || {
+                if let Some(chunk) = chunks.next() {
+                    let part = chunk.iter().map(|&b| b as char).collect::<String>();
+                    return Some(part);
+                }
+                None
+            };
+            while let Some(p) = step() {
+                #s_n.push_str(&p);
+                #rs_var = #rs_var.wrapping_add(p.len() as u32);
+            }
+            #s_n
+        }
     }
 }
 
@@ -353,10 +378,11 @@ fn generate_polymorphic_decode_chain(
             let s_n = Ident::new("s", Span::call_site());
             let m_n = Ident::new("m", Span::call_site());
             for (i, &id) in transform_ids.iter().enumerate() {
-                let junk = generate_junk_logic(rng, Some(&m_n));
+                let junk = generate_junk_logic(rng, Some(&m_n), Some(&rs_n));
+                let i_u = i as usize;
                 if i < transform_ids.len() - 1 {
                     arms.push(quote! {
-                        #i => {
+                        #i_u => {
                             let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n);
                             #m_n = res_data;
                             #rs_n = next_rs;
@@ -366,12 +392,12 @@ fn generate_polymorphic_decode_chain(
                     });
                 } else {
                     let fb_n = Ident::new("fb", Span::call_site());
-                    let fa = generate_final_assembly(&fb_n, rng);
+                    let fr = generate_fragmented_string_recovery(&fb_n, &rs_n, rng);
                     arms.push(quote! {
-                        #i => {
+                        #i_u => {
                             let (res_data, _) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n);
                             let #fb_n = res_data;
-                            let fv = #fa;
+                            let fv = #fr;
                             break fv;
                         }
                     });
@@ -379,7 +405,7 @@ fn generate_polymorphic_decode_chain(
             }
             arms.push(quote! { _ => break String::new(), });
             quote! {
-                let mut #s_n = 0;
+                let mut #s_n = 0usize;
                 let mut #m_n = #initial_input_var.clone();
                 let mut #rs_n = 0u32;
                 loop { match #s_n { #(#arms)* } }
@@ -391,15 +417,15 @@ fn generate_polymorphic_decode_chain(
             let last_id = transform_ids[last_idx];
             let last_input = Ident::new(&format!("nd_{}", last_idx), Span::call_site());
             let last_bytes = Ident::new("lb", Span::call_site());
-            let fa = generate_final_assembly(&last_bytes, rng);
-            let mut nl = quote! { { let (res_data, _) = #dispatch_name(#last_id ^ #rs_n, &#last_input, #rs_n); let #last_bytes = res_data; #fa } };
+            let fr = generate_fragmented_string_recovery(&last_bytes, &rs_n, rng);
+            let mut nl = quote! { { let (res_data, _) = #dispatch_name(#last_id ^ #rs_n, &#last_input, #rs_n); let #last_bytes = res_data; #fr } };
             for i in (0..last_idx).rev() {
                 let id = transform_ids[i];
                 let ci = Ident::new(&format!("nd_{}", i), Span::call_site());
                 let ni = Ident::new(&format!("nd_{}", i + 1), Span::call_site());
                 let ob = Ident::new(&format!("nb_{}", i), Span::call_site());
-                let junk = generate_junk_logic(rng, Some(&ci));
-                nl = quote! { { let (res_data, next_rs_val) = #dispatch_name(#id ^ #rs_n, &#ci, #rs_n); let #rs_n = next_rs_val; let #ob = res_data; #junk let mut #ni = #ob; #nl } };
+                let junk = generate_junk_logic(rng, Some(&ci), Some(&rs_n));
+                nl = quote! { { let (res_data, next_rs_val) = #dispatch_name(#id ^ #rs_n, &#ci, #rs_n); let mut #rs_n = next_rs_val; let #ob = res_data; #junk let mut #ni = #ob; #nl } };
             }
             let fv = Ident::new("nd_0", Span::call_site());
             quote! { { let mut #fv = #initial_input_var.clone(); let mut #rs_n = 0u32; #nl } }
@@ -414,15 +440,15 @@ fn generate_polymorphic_decode_chain(
                 let rd_v = Ident::new(&format!("rd_{}", i), Span::call_site());
                 let nr_v = Ident::new(&format!("nr_{}", i), Span::call_site());
                 st.push(quote! { let (#rd_v, #nr_v) = #dispatch_name(#id ^ #rs_n, &#cv, #rs_n); let #nb = #rd_v; #rs_n = #nr_v; });
-                let junk = generate_junk_logic(rng, Some(&cv));
+                let junk = generate_junk_logic(rng, Some(&cv), Some(&rs_n));
                 st.push(quote! { #junk });
                 if i < transform_ids.len() - 1 {
                     st.push(quote! { #cv = #nb; });
                 } else {
                      let fvb = Ident::new("fv", Span::call_site());
                      st.push(quote! { let mut #fvb = #nb; });
-                     let fa = generate_final_assembly(&fvb, rng);
-                     st.push(quote! { let frs = #fa; });
+                     let fr = generate_fragmented_string_recovery(&fvb, &rs_n, rng);
+                     st.push(quote! { let frs = #fr; });
                 }
             }
             quote! { { #(#st)* frs } }
@@ -471,19 +497,20 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         for p in primitives {
             let step_code = match p {
                 Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
-                Primitive::BitUnpack { bits, remainder } => generate_obfuscated_bit_unpack(bits, remainder, &mut rng),
-                Primitive::BaseUnpack { base, in_c, out_c, padding } => generate_obfuscated_base_unpack(base, in_c, out_c, padding, &mut rng),
+                Primitive::BitUnpack { bits, total_bits } => generate_obfuscated_bit_unpack(bits, total_bits, &mut rng),
+                Primitive::BaseUnpack { base, in_c, out_c, total_bytes } => generate_obfuscated_base_unpack(base, in_c, out_c, total_bytes, &mut rng),
                 Primitive::BigInt { base } => generate_obfuscated_bigint_unpack(base, &mut rng),
             };
             layer_code = quote! { #layer_code data = #step_code; };
         }
         let id_val = rng.gen::<u32>();
         let next_rs = rs.wrapping_add(id_val).rotate_left(5) ^ rng.gen::<u32>();
-        let junk = generate_junk_logic(&mut rng, None);
+        let junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())));
         let arm_key = (id_val ^ rs).wrapping_mul(mult) ^ salt;
         vt_c.push(quote! {
             #arm_key => {
                 let mut data = data.to_vec();
+                let mut rs = rs_in;
                 #layer_code
                 #junk
                 (data, #next_rs)
@@ -496,7 +523,6 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let s_n = Ident::new(&format!("O_{}", rng.gen::<u32>()), Span::call_site());
     let m_n = Ident::new(&format!("r_{}", rng.gen::<u32>()), Span::call_site());
     let d_n = Ident::new(&format!("d_{}", rng.gen::<u32>()), Span::call_site());
-    let rs_v = Ident::new("rs", Span::call_site());
     let i_v = Ident::new("ds", Span::call_site());
     let dc = generate_polymorphic_decode_chain(&rids, &i_v, &d_n, &mut rng);
     let (df, di, rl) = match rng.gen_range(0..3) {
@@ -530,24 +556,25 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         }
     };
     let d_b_i = Ident::new("db", Span::call_site());
-    let dl_c = generate_obfuscated_decrypt(quote! { rd }, &d_b_i, &mut rng, ev);
+    let dl_c = generate_obfuscated_decrypt(quote! { rd }, &d_b_i, &Ident::new("rs_junk", Span::call_site()), &mut rng, ev);
     let expanded = quote! {{
         struct #s_n<'a> { #df key: u8, }
         impl<'a> #s_n<'a> {
-            fn #m_n(&self) -> String {
-                let mut #d_n = |id: u32, data: &[u8], #rs_v: u32| -> (Vec<u8>, u32) {
+            fn #m_n(&mut self) -> String {
+                let mut #d_n = |id: u32, data: &[u8], rs_in: u32| -> (Vec<u8>, u32) {
                     match (id.wrapping_mul(#mult) ^ #salt) {
                         #(#vt_c)*
-                        _ => (data.to_vec(), #rs_v)
+                        _ => (data.to_vec(), rs_in)
                     }
                 };
+                let mut rs_junk = 0u32;
                 let mut #d_b_i = { #rl #dl_c db };
                 let mut #i_v = #d_b_i;
                 #dc
             }
         }
-        let instance = #s_n { #di key: #xk, };
-        instance.#m_n()
+        let mut inst = #s_n { #di key: #xk, };
+        inst.#m_n()
     }};
     TokenStream::from(expanded)
 }
@@ -556,19 +583,20 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
 mod tests {
     use super::*;
 
-    fn decode_bits_manual(data: &[u8], bits: u32, remainder: u32) -> Vec<u8> {
+    fn decode_bits_manual(data: &[u8], bits: u32, total_bits: u64) -> Vec<u8> {
         let mut out = Vec::new();
         let mut acc = 0u128;
         let mut count = 0u32;
-        let total_bits = (data.len() as u32).saturating_sub(1) * bits + remainder;
-        let mut bc = 0u32;
+        let mut bc = 0u64;
         for &v in data {
             acc = (acc << bits) | (v as u128);
             count += bits;
-            while count >= 8 && bc + 8 <= total_bits {
+            while count >= 8 {
                 count -= 8;
-                out.push((acc >> count) as u8);
-                bc += 8;
+                if bc < total_bits {
+                    out.push((acc >> count) as u8);
+                    bc += 8;
+                }
                 acc &= (1 << count) - 1;
             }
         }
@@ -613,8 +641,9 @@ mod tests {
         out
     }
 
-    fn decode_z85_manual(data: &[u8], base: u128, in_c: usize, out_c: usize, padding: usize) -> Vec<u8> {
+    fn decode_z85_manual(data: &[u8], base: u128, in_c: usize, out_c: usize, total_bytes: u64) -> Vec<u8> {
         let mut out = Vec::new();
+        let mut len_v = 0u64;
         for chunk in data.chunks(in_c) {
             if chunk.len() < in_c { continue; }
             let mut val = 0u128;
@@ -622,11 +651,11 @@ mod tests {
                 val = val * base + (c as u128);
             }
             for i in (0..out_c).rev() {
-                out.push(((val >> (i * 8)) & 0xff) as u8);
+                if len_v < total_bytes {
+                    out.push(((val >> (i * 8)) & 0xff) as u8);
+                    len_v += 1;
+                }
             }
-        }
-        if out.len() >= padding {
-            out.truncate(out.len() - padding);
         }
         out
     }
@@ -668,8 +697,8 @@ mod tests {
                                 for &b in &b_data { let v = map[b as usize]; if v != 255 { out.push(v); } }
                                 out
                             },
-                            Primitive::BitUnpack { bits, remainder } => decode_bits_manual(&b_data, bits, remainder),
-                            Primitive::BaseUnpack { base, in_c, out_c, padding } => decode_z85_manual(&b_data, base, in_c, out_c, padding),
+                            Primitive::BitUnpack { bits, total_bits } => decode_bits_manual(&b_data, bits, total_bits),
+                            Primitive::BaseUnpack { base, in_c, out_c, total_bytes } => decode_z85_manual(&b_data, base, in_c, out_c, total_bytes),
                             Primitive::BigInt { base } => decode_bigint_manual(&b_data, base),
                         };
                     }
