@@ -25,6 +25,84 @@ struct Pipeline {
     encoder: Box<dyn Fn(&[u8]) -> (Vec<u8>, Vec<Primitive>)>,
 }
 
+struct TransformationChain {
+    stages: Vec<Vec<Primitive>>,
+    encoded_data: Vec<u8>,
+}
+
+impl TransformationChain {
+    fn new(input: &[u8], pipelines: &[Pipeline], rng: &mut impl Rng) -> Self {
+        let mut data = input.to_vec();
+        let mut stages = Vec::new();
+        for _ in 0..rng.gen_range(2..=4) {
+            let p = pipelines.choose(rng).expect("No pipelines available");
+            let (encoded, primitives) = (p.encoder)(&data);
+            data = encoded;
+            stages.push(primitives);
+        }
+        Self {
+            stages,
+            encoded_data: data,
+        }
+    }
+
+    fn generate_obfuscated_vtable(
+        &self,
+        mult: u32,
+        salt: u32,
+        junk_density: u32,
+        rng: &mut impl Rng,
+    ) -> (Vec<TokenStream2>, Vec<u32>) {
+        let mut vt_c = Vec::new();
+        let mut rids = Vec::new();
+        let mut rs_compile = 0u32;
+
+        for primitives in self.stages.iter().rev() {
+            let mut layer_code = quote! { let mut data = data; };
+            for _ in 0..(junk_density / 2) {
+                let val = rng.gen::<u32>();
+                layer_code = quote! { #layer_code let _ = #val ^ rs; };
+            }
+            for p in primitives {
+                let step_code = match p {
+                    Primitive::Map(table) => generate_obfuscated_map(table, rng),
+                    Primitive::BitLoad { bits } => generate_bit_load(*bits, rng),
+                    Primitive::BitEmit { bits, total_bits } => generate_bit_emit(*bits, *total_bits, rng),
+                    Primitive::BaseLoad { base, in_c } => generate_base_load(*base, *in_c, rng),
+                    Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(*base, *in_c, *out_c, *total_bytes, rng),
+                    Primitive::BigIntInit => generate_bigint_init(rng),
+                    Primitive::BigIntPush { base } => generate_bigint_push(*base, rng),
+                    Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(*total_bytes, rng),
+                    Primitive::Noop { val } => quote! { let _ = #val; },
+                    Primitive::Sync => quote! { let mut data = data; },
+                };
+                layer_code = quote! { #layer_code #step_code };
+            }
+            let id_val = rng.gen::<u32>();
+            let next_rs_val = rs_compile.wrapping_add(id_val).rotate_left(5) ^ rng.gen::<u32>();
+            let junk = generate_junk_logic(rng, None, Some(&Ident::new("rs", Span::call_site())));
+            let arm_key = (id_val ^ rs_compile).wrapping_mul(mult) ^ salt;
+            vt_c.push(quote! {
+                #arm_key => {
+                    let mut data = data.to_vec();
+                    let mut rs = rs_in;
+                    let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
+                    for b in data.iter_mut() { *b ^= lock_in; }
+                    #layer_code
+                    #junk
+                    let rs_out = #next_rs_val;
+                    let lock_out = (rs_out ^ (rs_out >> 13) ^ (rs_out >> 21)) as u8;
+                    for b in data.iter_mut() { *b ^= lock_out; }
+                    (data, rs_out)
+                }
+            });
+            rids.push(id_val);
+            rs_compile = next_rs_val;
+        }
+        (vt_c, rids)
+    }
+}
+
 // --- BITSTREAM HELPERS ---
 
 fn encode_bits(data: &[u8], bits: u32, alphabet: &[u8]) -> (Vec<u8>, u64) {
@@ -554,17 +632,9 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let entropy = compute_entropy(os.as_bytes());
     let mut rng = thread_rng();
     let pl = get_pipelines();
+    let chain = TransformationChain::new(os.as_bytes(), &pl, &mut rng);
+    let cd = chain.encoded_data.clone();
     let junk_density = (entropy % 5) + 3;
-    let mut cd = os.clone().into_bytes();
-    let mut stages = Vec::new();
-
-    for _ in 0..rng.gen_range(2..=4) {
-        let p = pl.choose(&mut rng).expect("No pipelines available");
-        let (encoded, primitives) = (p.encoder)(&cd);
-        cd = encoded;
-        stages.push(primitives);
-    }
-    stages.reverse();
 
     let xk = rng.gen::<u8>();
     let ev = rng.gen_range(0..3u32);
@@ -580,63 +650,9 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         };
     }
 
-    let mut vt_c = Vec::new();
-    let mut rids = Vec::new();
     let salt = rng.gen::<u32>();
     let mult = rng.gen::<u32>() | 1;
-    let mut rs_compile = 0u32;
-
-    for primitives in stages {
-        let mut layer_code = quote! { let mut data = data; };
-
-        // Inject random semantic no-ops
-        for _ in 0..(junk_density / 2) {
-            let val = rng.gen::<u32>();
-            layer_code = quote! { #layer_code let _ = #val ^ rs; };
-        }
-
-        for p in primitives {
-            let step_code = match p {
-                Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
-                Primitive::BitLoad { bits } => generate_bit_load(bits, &mut rng),
-                Primitive::BitEmit { bits, total_bits } => generate_bit_emit(bits, total_bits, &mut rng),
-                Primitive::BaseLoad { base, in_c } => generate_base_load(base, in_c, &mut rng),
-                Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(base, in_c, out_c, total_bytes, &mut rng),
-                Primitive::BigIntInit => generate_bigint_init(&mut rng),
-                Primitive::BigIntPush { base } => generate_bigint_push(base, &mut rng),
-                Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(total_bytes, &mut rng),
-                Primitive::Noop { val } => quote! { let _ = #val; },
-                Primitive::Sync => quote! { let mut data = data; },
-            };
-            layer_code = quote! { #layer_code #step_code };
-        }
-        let id_val = rng.gen::<u32>();
-        let next_rs_val = rs_compile.wrapping_add(id_val).rotate_left(5) ^ rng.gen::<u32>();
-        let junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())));
-        let arm_key = (id_val ^ rs_compile).wrapping_mul(mult) ^ salt;
-        vt_c.push(quote! {
-            #arm_key => {
-                let mut data = data.to_vec();
-                let mut rs = rs_in;
-
-                // UNLOCK
-                let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
-                for b in data.iter_mut() { *b ^= lock_in; }
-
-                #layer_code
-                #junk
-
-                // LOCK
-                let rs_out = #next_rs_val;
-                let lock_out = (rs_out ^ (rs_out >> 13) ^ (rs_out >> 21)) as u8;
-                for b in data.iter_mut() { *b ^= lock_out; }
-
-                (data, rs_out)
-            }
-        });
-        rids.push(id_val);
-        rs_compile = next_rs_val;
-    }
+    let (vt_c, rids) = chain.generate_obfuscated_vtable(mult, salt, junk_density, &mut rng);
 
     let s_n = Ident::new(&format!("O_{}", rng.gen::<u32>()), Span::call_site());
     let m_n = Ident::new(&format!("r_{}", rng.gen::<u32>()), Span::call_site());
