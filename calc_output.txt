@@ -1,0 +1,1745 @@
+warning: variant `XorRedundant` is never constructed
+  --> polimorphic/src/lib.rs:17:5
+   |
+11 | enum PrimitiveStep {
+   |      ------------- variant in this enum
+...
+17 |     XorRedundant { layer: usize, val: u8 },
+   |     ^^^^^^^^^^^^
+   |
+   = note: `PrimitiveStep` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `polimorphic` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `target/debug/calculator`
+Simple Calculator
+-----------------
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
+Please enter the first number:
+Invalid input. Please enter a number.
