@@ -554,7 +554,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let entropy = compute_entropy(os.as_bytes());
     let mut rng = thread_rng();
     let pl = get_pipelines();
-    let num_layers = ((entropy % 3) + 4) as usize; // 4 to 6 layers
+    let num_layers = rng.gen_range(2..=4);
     let junk_density = (entropy % 5) + 3;
     let mut cd = os.clone().into_bytes();
     let mut layer_primitives = Vec::new();
@@ -565,6 +565,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         layer_primitives.push(primitives);
     }
     layer_primitives.reverse();
+    let all_primitives: Vec<Primitive> = layer_primitives.into_iter().flatten().collect();
 
     let xk = rng.gen::<u8>();
     let ev = rng.gen_range(0..3u32);
@@ -584,58 +585,56 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let mut rids = Vec::new();
     let salt = rng.gen::<u32>();
     let mult = rng.gen::<u32>() | 1;
-    let mut rs = 0u32;
-    for primitives in layer_primitives {
-        let mut layer_code = quote! { let mut data = data; };
+    let rs = 0u32;
 
-        // Inject random semantic no-ops
-        for _ in 0..(junk_density / 2) {
-            let val = rng.gen::<u32>();
-            layer_code = quote! { #layer_code let _ = #val ^ rs; };
-        }
+    let mut layer_code = quote! { let mut data = data; };
 
-        for p in primitives {
-            let step_code = match p {
-                Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
-                Primitive::BitLoad { bits } => generate_bit_load(bits, &mut rng),
-                Primitive::BitEmit { bits, total_bits } => generate_bit_emit(bits, total_bits, &mut rng),
-                Primitive::BaseLoad { base, in_c } => generate_base_load(base, in_c, &mut rng),
-                Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(base, in_c, out_c, total_bytes, &mut rng),
-                Primitive::BigIntInit => generate_bigint_init(&mut rng),
-                Primitive::BigIntPush { base } => generate_bigint_push(base, &mut rng),
-                Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(total_bytes, &mut rng),
-                Primitive::Noop { val } => quote! { let _ = #val; },
-                Primitive::Sync => quote! { let mut data = data; },
-            };
-            layer_code = quote! { #layer_code #step_code };
-        }
-        let id_val = rng.gen::<u32>();
-        let next_rs = rs.wrapping_add(id_val).rotate_left(5) ^ rng.gen::<u32>();
-        let junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())));
-        let arm_key = (id_val ^ rs).wrapping_mul(mult) ^ salt;
-        vt_c.push(quote! {
-            #arm_key => {
-                let mut data = data.to_vec();
-                let mut rs = rs_in;
-
-                // UNLOCK
-                let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
-                for b in data.iter_mut() { *b ^= lock_in; }
-
-                #layer_code
-                #junk
-
-                // LOCK
-                let rs_out = #next_rs;
-                let lock_out = (rs_out ^ (rs_out >> 13) ^ (rs_out >> 21)) as u8;
-                for b in data.iter_mut() { *b ^= lock_out; }
-
-                (data, rs_out)
-            }
-        });
-        rids.push(id_val);
-        rs = next_rs;
+    // Inject random semantic no-ops
+    for _ in 0..(junk_density / 2) {
+        let val = rng.gen::<u32>();
+        layer_code = quote! { #layer_code let _ = #val ^ rs; };
     }
+
+    for p in all_primitives {
+        let step_code = match p {
+            Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
+            Primitive::BitLoad { bits } => generate_bit_load(bits, &mut rng),
+            Primitive::BitEmit { bits, total_bits } => generate_bit_emit(bits, total_bits, &mut rng),
+            Primitive::BaseLoad { base, in_c } => generate_base_load(base, in_c, &mut rng),
+            Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(base, in_c, out_c, total_bytes, &mut rng),
+            Primitive::BigIntInit => generate_bigint_init(&mut rng),
+            Primitive::BigIntPush { base } => generate_bigint_push(base, &mut rng),
+            Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(total_bytes, &mut rng),
+            Primitive::Noop { val } => quote! { let _ = #val; },
+            Primitive::Sync => quote! { let mut data = data; },
+        };
+        layer_code = quote! { #layer_code #step_code };
+    }
+    let id_val = rng.gen::<u32>();
+    let next_rs = rs.wrapping_add(id_val).rotate_left(5) ^ rng.gen::<u32>();
+    let junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())));
+    let arm_key = (id_val ^ rs).wrapping_mul(mult) ^ salt;
+    vt_c.push(quote! {
+        #arm_key => {
+            let mut data = data.to_vec();
+            let mut rs = rs_in;
+
+            // UNLOCK
+            let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
+            for b in data.iter_mut() { *b ^= lock_in; }
+
+            #layer_code
+            #junk
+
+            // LOCK
+            let rs_out = #next_rs;
+            let lock_out = (rs_out ^ (rs_out >> 13) ^ (rs_out >> 21)) as u8;
+            for b in data.iter_mut() { *b ^= lock_out; }
+
+            (data, rs_out)
+        }
+    });
+    rids.push(id_val);
 
     let s_n = Ident::new(&format!("O_{}", rng.gen::<u32>()), Span::call_site());
     let m_n = Ident::new(&format!("r_{}", rng.gen::<u32>()), Span::call_site());
