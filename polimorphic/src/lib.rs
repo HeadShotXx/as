@@ -6,46 +6,53 @@ use quote::quote;
 use syn::{parse_macro_input, LitStr};
 use rand::{Rng, thread_rng, seq::SliceRandom};
 use proc_macro2::{TokenStream as TokenStream2, Ident, Span, Literal};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Encoding {
-    Base32,
-    Base36,
-    Base64,
-    Base85,
-    Base91,
+struct Transformation {
+    encoder: fn(&[u8]) -> String,
+    decoder_gen: fn(&Ident, &Ident) -> TokenStream2,
 }
 
-const ALL_ENCODINGS: &[Encoding] = &[
-    Encoding::Base32,
-    Encoding::Base36,
-    Encoding::Base64,
-    Encoding::Base85,
-    Encoding::Base91,
-];
-
-fn encode_b32(data: &[u8]) -> String { base32::encode(base32::Alphabet::RFC4648 { padding: false }, data).to_lowercase() }
-fn encode_b36(data: &[u8]) -> String { base36::encode(data) }
-fn encode_b64(data: &[u8]) -> String { BASE64_STANDARD.encode(data) }
-fn encode_b85(data: &[u8]) -> String { z85::encode(data) }
-fn encode_b91(data: &[u8]) -> String { base91::slice_encode(data).into_iter().map(|b| b as char).collect() }
-
-fn generate_decoder(encoding: Encoding, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
-    let core_decode_logic = match encoding {
-        Encoding::Base32 => quote! { base32::decode(base32::Alphabet::RFC4648 { padding: false }, &#input_var).expect("Base32 decoding failed") },
-        Encoding::Base36 => quote! { base36::decode(&#input_var).expect("Base36 decoding failed") },
-        Encoding::Base64 => quote! { BASE64_STANDARD.decode(&#input_var).expect("Base64 decoding failed") },
-        Encoding::Base85 => quote! { z85::decode(&#input_var).expect("Base85 decoding failed") },
-        Encoding::Base91 => quote! { base91::slice_decode(#input_var.as_bytes()) },
-    };
-    quote! { let #output_var = #core_decode_logic; }
+fn get_transformations() -> Vec<Transformation> {
+    vec![
+        Transformation {
+            encoder: |data| base32::encode(base32::Alphabet::RFC4648 { padding: false }, data).to_lowercase(),
+            decoder_gen: |input, output| quote! { let #output = base32::decode(base32::Alphabet::RFC4648 { padding: false }, &#input).expect("E1"); },
+        },
+        Transformation {
+            encoder: |data| base36::encode(data),
+            decoder_gen: |input, output| quote! { let #output = base36::decode(&#input).expect("E2"); },
+        },
+        Transformation {
+            encoder: |data| {
+                use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+                BASE64_STANDARD.encode(data)
+            },
+            decoder_gen: |input, output| quote! {
+                let #output = {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::STANDARD.decode(&#input).expect("E3")
+                };
+            },
+        },
+        Transformation {
+            encoder: |data| z85::encode(data),
+            decoder_gen: |input, output| quote! { let #output = z85::decode(&#input).expect("E4"); },
+        },
+        Transformation {
+            encoder: |data| base91::slice_encode(data).into_iter().map(|b| b as char).collect(),
+            decoder_gen: |input, output| quote! { let #output = base91::slice_decode(#input.as_bytes()); },
+        },
+    ]
 }
 
-fn generate_dead_decoder(encoding: Encoding, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
-    let decoder_logic = generate_decoder(encoding, input_var, output_var);
+fn generate_decoder(transformation: &Transformation, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
+    (transformation.decoder_gen)(input_var, output_var)
+}
+
+fn generate_dead_decoder(transformation: &Transformation, input_var: &Ident, output_var: &Ident) -> TokenStream2 {
+    let decoder_logic = generate_decoder(transformation, input_var, output_var);
     quote! {
-        if std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("System time is before UNIX EPOCH").as_nanos() % 100 == 101 {
+        if std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("T").as_nanos() % 100 == 101 {
             let #input_var = "decoy";
             #decoder_logic
             let _ = #output_var.len();
@@ -99,7 +106,7 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rng
 
 fn generate_final_assembly(bytes_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
     match rng.gen_range(0..3) {
-        0 => quote! { String::from_utf8(#bytes_var.to_vec()).expect("Final assembly from UTF-8 failed") },
+        0 => quote! { String::from_utf8(#bytes_var.to_vec()).expect("F") },
         1 => quote! {
             #bytes_var.iter().map(|b| *b as char).collect::<String>()
         },
@@ -116,7 +123,7 @@ fn generate_final_assembly(bytes_var: &Ident, rng: &mut impl Rng) -> TokenStream
 }
 
 fn generate_polymorphic_decode_chain(
-    encoding_layers: &[Encoding],
+    transformations: &[&Transformation],
     initial_input_var: &Ident,
     _final_output_var: &Ident,
     rng: &mut impl Rng,
@@ -127,15 +134,15 @@ fn generate_polymorphic_decode_chain(
             let state_var = Ident::new("decode_state", Span::call_site());
             let machine_var = Ident::new("machine_data", Span::call_site());
 
-            for (i, encoding) in encoding_layers.iter().enumerate() {
+            for (i, transformation) in transformations.iter().enumerate() {
                 let next_bytes = Ident::new(&format!("b_{}_{}", i, rng.gen::<u32>()), Span::call_site());
-                let decoder_call = generate_decoder(*encoding, &machine_var, &next_bytes);
+                let decoder_call = generate_decoder(transformation, &machine_var, &next_bytes);
 
-                if i < encoding_layers.len() - 1 {
+                if i < transformations.len() - 1 {
                     arms.push(quote! {
                         #i => {
                             #decoder_call
-                            let next_str = String::from_utf8(#next_bytes).expect("State machine UTF-8 conversion failed");
+                            let next_str = String::from_utf8(#next_bytes).expect("S");
                             #machine_var = next_str;
                             #state_var += 1;
                         }
@@ -164,20 +171,22 @@ fn generate_polymorphic_decode_chain(
             }
         },
         1 => { // Nested blocks
-            if encoding_layers.is_empty() {
+            if transformations.is_empty() {
                 return quote! { String::new() };
             }
 
             // Start with the innermost expression: the final decoding and assembly.
-            let last_layer_idx = encoding_layers.len() - 1;
+            let last_layer_idx = transformations.len() - 1;
             let last_layer_input = Ident::new(&format!("nested_data_{}", last_layer_idx), Span::call_site());
             let last_layer_output_bytes = Ident::new(&format!("nested_bytes_{}", last_layer_idx), Span::call_site());
-            let last_decoder_call = generate_decoder(encoding_layers[last_layer_idx], &last_layer_input, &last_layer_output_bytes);
+            let last_decoder_call = generate_decoder(transformations[last_layer_idx], &last_layer_input, &last_layer_output_bytes);
             let final_assembly = generate_final_assembly(&last_layer_output_bytes, rng);
 
             let mut nested_logic = quote! {
-                #last_decoder_call
-                #final_assembly
+                {
+                    #last_decoder_call
+                    #final_assembly
+                }
             };
 
             // Wrap the logic with the outer layers.
@@ -185,12 +194,12 @@ fn generate_polymorphic_decode_chain(
                 let current_input = Ident::new(&format!("nested_data_{}", i), Span::call_site());
                 let next_input = Ident::new(&format!("nested_data_{}", i + 1), Span::call_site());
                 let output_bytes = Ident::new(&format!("nested_bytes_{}", i), Span::call_site());
-                let decoder_call = generate_decoder(encoding_layers[i], &current_input, &output_bytes);
+                let decoder_call = generate_decoder(transformations[i], &current_input, &output_bytes);
 
                 nested_logic = quote! {
                     {
                         #decoder_call
-                        let #next_input = String::from_utf8(#output_bytes).expect("Nested block UTF-8 conversion failed");
+                        let #next_input = String::from_utf8(#output_bytes).expect("S");
                         #nested_logic
                     }
                 };
@@ -199,22 +208,24 @@ fn generate_polymorphic_decode_chain(
             // Define the first input variable to kick off the chain.
             let first_data_var = Ident::new("nested_data_0", Span::call_site());
             quote! {
-                let #first_data_var = #initial_input_var.clone();
-                #nested_logic
+                {
+                    let #first_data_var = #initial_input_var.clone();
+                    #nested_logic
+                }
             }
         },
         _ => { // Linear
             let mut statements = Vec::new();
             let mut current_var = initial_input_var.clone();
 
-            for (i, encoding) in encoding_layers.iter().enumerate() {
+            for (i, transformation) in transformations.iter().enumerate() {
                 let next_bytes = Ident::new(&format!("b_{}_{}", i, rng.gen::<u32>()), Span::call_site());
-                let decoder_call = generate_decoder(*encoding, &current_var, &next_bytes);
+                let decoder_call = generate_decoder(transformation, &current_var, &next_bytes);
                 statements.push(decoder_call);
 
-                if i < encoding_layers.len() - 1 {
+                if i < transformations.len() - 1 {
                     let next_str = Ident::new(&format!("s_{}_{}", i, rng.gen::<u32>()), Span::call_site());
-                    statements.push(quote! { let #next_str = String::from_utf8(#next_bytes).expect("Linear chain UTF-8 conversion failed"); });
+                    statements.push(quote! { let #next_str = String::from_utf8(#next_bytes).expect("S"); });
                     current_var = next_str;
                 } else {
                      let final_assembly = generate_final_assembly(&next_bytes, rng);
@@ -223,8 +234,10 @@ fn generate_polymorphic_decode_chain(
             }
 
             quote! {
-                #(#statements)*
-                final_val
+                {
+                    #(#statements)*
+                    final_val
+                }
             }
         }
     }
@@ -235,23 +248,19 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let lit_str = parse_macro_input!(input as LitStr);
     let original_string = lit_str.value();
     let mut rng = thread_rng();
+    let transformations = get_transformations();
 
     // Encoding
     let num_layers = rng.gen_range(3..=7);
-    let mut encoding_layers = Vec::new();
+    let mut selected_transformations = Vec::new();
     let mut current_data = original_string.clone();
     for _ in 0..num_layers {
-        let encoding = *ALL_ENCODINGS.choose(&mut rng).expect("Failed to choose an encoding");
-        encoding_layers.push(encoding);
-        current_data = match encoding {
-            Encoding::Base32 => encode_b32(current_data.as_bytes()),
-            Encoding::Base36 => encode_b36(current_data.as_bytes()),
-            Encoding::Base64 => encode_b64(current_data.as_bytes()),
-            Encoding::Base85 => encode_b85(current_data.as_bytes()),
-            Encoding::Base91 => encode_b91(current_data.as_bytes()),
-        };
+        let idx = rng.gen_range(0..transformations.len());
+        let transformation = &transformations[idx];
+        selected_transformations.push(transformation);
+        current_data = (transformation.encoder)(current_data.as_bytes());
     }
-    encoding_layers.reverse();
+    selected_transformations.reverse();
 
     // Encryption
     let xor_key = rng.gen::<u8>();
@@ -276,7 +285,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let initial_input_var = Ident::new("decrypted_str", Span::call_site());
     let final_output_var = Ident::new("final_result", Span::call_site());
     let decode_chain = generate_polymorphic_decode_chain(
-        &encoding_layers,
+        &selected_transformations,
         &initial_input_var,
         &final_output_var,
         &mut rng,
@@ -336,14 +345,15 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     for i in 0..num_decoys {
         let decoy_in = Ident::new(&format!("di_{}", i), Span::call_site());
         let decoy_out = Ident::new(&format!("do_{}", i), Span::call_site());
-        decoy_blocks.push(generate_dead_decoder(*ALL_ENCODINGS.choose(&mut rng).expect("Failed to choose decoy encoding"), &decoy_in, &decoy_out));
+        let trans_idx = rng.gen_range(0..transformations.len());
+        decoy_blocks.push(generate_dead_decoder(&transformations[trans_idx], &decoy_in, &decoy_out));
     }
 
     // Final Expansion
     let real_logic_block = quote! {{
         #reassembly_logic
         #decryption_logic
-        let #initial_input_var = String::from_utf8(decrypted_bytes).expect("Initial UTF-8 conversion after decryption failed");
+        let #initial_input_var = String::from_utf8(decrypted_bytes).expect("I");
         #decode_chain
     }};
 
@@ -353,8 +363,6 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     all_blocks.shuffle(&mut rng);
 
     let expanded = quote! {{
-        use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-
         struct #struct_name<'a> {
             #data_fields
             key: u8,
