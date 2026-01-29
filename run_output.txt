@@ -1,0 +1,9 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/calculator`
+Simple Calculator
+-----------------
+Please enter the first number:
+Please enter the operator (+, -, *, /):
+Please enter the second number:
+1 + 2 = 3
+Do you want to perform another calculation? (yes/no)
