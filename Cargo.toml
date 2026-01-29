@@ -11,3 +11,7 @@ edition = "2021"
 
 [dependencies]
 polimorphic = { path = "polimorphic" }
+
+[[bin]]
+name = "test_obf"
+path = "test_obf.rs"
