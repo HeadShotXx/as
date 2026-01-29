@@ -335,48 +335,50 @@ fn generate_bigint_emit(_total_bytes: u64, _rng: &mut impl Rng) -> TokenStream2 
 }
 
 // Enhanced junk logic that is semantically required
-fn generate_junk_logic(rng: &mut impl Rng, real_var: Option<&Ident>, rs_var: Option<&Ident>) -> TokenStream2 {
-    let j_v = Ident::new(&format!("j_{}", rng.gen::<u32>()), Span::call_site());
-    let j_val = rng.gen::<u32>();
-    
-    // Generate base junk computation
-    let base_junk = match rng.gen_range(0..3) {
-        0 => quote! { let mut #j_v = #j_val; if #j_v % 2 == 0 { #j_v = #j_v.wrapping_add(1); } else { #j_v = #j_v.wrapping_sub(1); } },
-        1 => quote! { let mut #j_v = #j_val; for i in 0..3 { #j_v = #j_v.wrapping_add(i); } },
-        _ => quote! { let #j_v = #j_val; let _ = #j_v ^ 0x55; },
-    };
+fn generate_junk_logic(rng: &mut impl Rng, _real_var: Option<&Ident>, rs_var: Option<&Ident>, rs_compile: &mut u32) -> TokenStream2 {
+    let mut code = Vec::new();
+    if let Some(rsv) = rs_var {
+        for _ in 0..rng.gen_range(1..=2) {
+             match rng.gen_range(0..3) {
+                0 => {
+                    let val = rng.gen::<u32>();
+                    *rs_compile = rs_compile.wrapping_add(val);
+                    code.push(quote! { #rsv = #rsv.wrapping_add(#val); });
+                },
+                1 => {
+                    let val = rng.gen_range(1..31);
+                    *rs_compile = rs_compile.rotate_left(val);
+                    code.push(quote! { #rsv = #rsv.rotate_left(#val); });
+                },
+                _ => {
+                    let val = rng.gen::<u32>();
+                    *rs_compile ^= val;
+                    code.push(quote! { #rsv ^= #val; });
+                }
+            }
+        }
+    }
 
-    // Only add complex junk if we have the required variables in scope
-    if real_var.is_some() && rs_var.is_some() && rng.gen_bool(0.4) {
-        let rv = real_var.unwrap();
-        let rsv = rs_var.unwrap();
-        let magic = rng.gen::<u32>();
-        quote! {
-            #base_junk
-            if (#rsv.wrapping_mul(#j_v) == #magic) {
-                #rv.push((#rsv & 0xff) as u8);
-                #rsv = #rsv.wrapping_add(1);
-            }
-        }
-    } else if rs_var.is_some() {
-        let rsv = rs_var.unwrap();
-        quote! {
-            #base_junk
-            if #j_v > #j_val {
-                #rsv = #rsv.wrapping_add(#j_v);
-            }
-        }
+    if code.is_empty() {
+        let j_v = Ident::new(&format!("j_{}", rng.gen::<u32>()), Span::call_site());
+        let j_val = rng.gen::<u32>();
+        quote! { let #j_v = #j_val; }
     } else {
-        // No variables available, just return simple junk
-        base_junk
+        quote! { #(#code)* }
+    }
+}
+
+fn apply_state_corruption_compile(data: &mut Vec<u8>, seed: u32, mask: u8) {
+    let offset = seed.wrapping_mul(0x9E3779B9);
+    for (i, b) in data.iter_mut().enumerate() {
+        let idx_mask = ((i as u32).wrapping_add(offset) & 0x7) as u8;
+        *b = b.wrapping_add(idx_mask ^ mask); // Use addition to reverse the subtraction in decoder
     }
 }
 
 // Generate semantically required state modifiers
-fn generate_state_corruption(rng: &mut impl Rng) -> (TokenStream2, TokenStream2) {
+fn generate_state_corruption(seed: u32, mask: u8, rng: &mut impl Rng) -> (TokenStream2, TokenStream2) {
     let offset_var = Ident::new(&format!("offset_{}", rng.gen::<u32>()), Span::call_site());
-    let seed = rng.gen::<u32>();
-    let mask = rng.gen::<u8>();
     
     // State initialization
     let init = quote! {
@@ -394,37 +396,58 @@ fn generate_state_corruption(rng: &mut impl Rng) -> (TokenStream2, TokenStream2)
     (init, apply)
 }
 
+fn apply_scramble_compile(data: &mut Vec<u8>, seed: u32) {
+    let mut scramble_idx = seed;
+    for b in data.iter_mut() {
+        scramble_idx = scramble_idx.wrapping_mul(1103515245).wrapping_add(12345);
+        let offset = (scramble_idx & 0x3) as u8;
+        *b = b.wrapping_add(offset);
+    }
+}
+
+fn apply_unscramble_compile(data: &mut Vec<u8>, seed: u32) {
+    let mut scramble_idx = seed;
+    for b in data.iter_mut() {
+        scramble_idx = scramble_idx.wrapping_mul(1103515245).wrapping_add(12345);
+        let offset = (scramble_idx & 0x3) as u8;
+        *b = b.wrapping_sub(offset);
+    }
+}
+
 // Generate index scrambling that must be reversed
-fn generate_index_scrambler(rng: &mut impl Rng) -> (TokenStream2, TokenStream2) {
-    let scramble_seed = rng.gen::<u32>();
-    let temp_var = Ident::new(&format!("temp_{}", rng.gen::<u32>()), Span::call_site());
+fn generate_index_scrambler(seed: u32, _rng: &mut impl Rng) -> (TokenStream2, TokenStream2) {
+    let scramble_seed = seed;
     
     let scramble = quote! {
-        let mut #temp_var = Vec::with_capacity(data.len());
-        let mut scramble_idx = #scramble_seed;
-        for &b in data.iter() {
-            scramble_idx = scramble_idx.wrapping_mul(1103515245).wrapping_add(12345);
-            let offset = (scramble_idx & 0x3) as u8;
-            #temp_var.push(b.wrapping_add(offset));
+        {
+            let mut out_sc = Vec::with_capacity(data.len());
+            let mut scramble_idx = #scramble_seed;
+            for &b in data.iter() {
+                scramble_idx = scramble_idx.wrapping_mul(1103515245).wrapping_add(12345);
+                let offset = (scramble_idx & 0x3) as u8;
+                out_sc.push(b.wrapping_add(offset));
+            }
+            data = out_sc;
         }
-        data = #temp_var;
     };
     
     let unscramble = quote! {
-        let mut #temp_var = Vec::with_capacity(data.len());
-        let mut scramble_idx = #scramble_seed;
-        for &b in data.iter() {
-            scramble_idx = scramble_idx.wrapping_mul(1103515245).wrapping_add(12345);
-            let offset = (scramble_idx & 0x3) as u8;
-            #temp_var.push(b.wrapping_sub(offset));
+        {
+            let mut out_un = Vec::with_capacity(data.len());
+            let mut scramble_idx = #scramble_seed;
+            for &b in data.iter() {
+                scramble_idx = scramble_idx.wrapping_mul(1103515245).wrapping_add(12345);
+                let offset = (scramble_idx & 0x3) as u8;
+                out_un.push(b.wrapping_sub(offset));
+            }
+            data = out_un;
         }
-        data = #temp_var;
     };
     
     (scramble, unscramble)
 }
 
-fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_var: &Ident, rng: &mut impl Rng, variant: u32) -> TokenStream2 {
+fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_var: &Ident, rs_compile: &mut u32, rng: &mut impl Rng, variant: u32) -> TokenStream2 {
     let k_n = Ident::new(&format!("k_{}", rng.gen::<u32>()), Span::call_site());
     let b_n = Ident::new(&format!("b_{}", rng.gen::<u32>()), Span::call_site());
     let br_n = Ident::new(&format!("br_{}", rng.gen::<u32>()), Span::call_site());
@@ -435,7 +458,7 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
         _ => quote! { #k_n = #k_n.rotate_left(3); },
     };
     
-    let junk = generate_junk_logic(rng, Some(output_var), Some(rs_var));
+    let junk = generate_junk_logic(rng, Some(output_var), Some(rs_var), rs_compile);
     
     let core = match rng.gen_range(0..3) {
         0 => quote! {
@@ -445,8 +468,8 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
                 let #b_n = *byte;
                 #output_var.push(#b_n ^ #k_n);
                 #u_l
-                #junk
             }
+            #junk
         },
         1 => quote! {
             let mut #k_n = self.key;
@@ -456,9 +479,9 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
                 let #b_n = #input_expr[i];
                 #output_var.push(#b_n ^ #k_n);
                 #u_l
-                #junk
                 i += 1;
             }
+            #junk
         },
         _ => quote! {
             let mut #k_n = self.key;
@@ -474,8 +497,8 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
     
     quote! {
         #core
-        let lock_init = (0u32 ^ (0u32 >> 13) ^ (0u32 >> 21)) as u8;
-        for b in #output_var.iter_mut() { *b ^= lock_init; }
+        let lock_out_junk = (#rs_var ^ (#rs_var >> 13) ^ (#rs_var >> 21)) as u8;
+        for b in #output_var.iter_mut() { *b ^= lock_out_junk; }
     }
 }
 
@@ -509,6 +532,7 @@ fn generate_fragmented_string_recovery(bytes_var: &Ident, rs_var: &Ident, rng: &
 
 fn generate_polymorphic_decode_chain(
     transform_ids: &[u32],
+    junk_tokens: &[TokenStream2],
     initial_input_var: &Ident,
     dispatch_name: &Ident,
     aux_var: &Ident,
@@ -523,7 +547,7 @@ fn generate_polymorphic_decode_chain(
             let m_n = Ident::new("m", Span::call_site());
             
             for (i, &id) in transform_ids.iter().enumerate() {
-                let junk = generate_junk_logic(rng, Some(&m_n), Some(&rs_n));
+                let junk = &junk_tokens[i];
                 let i_u = i as usize;
                 
                 if i < transform_ids.len() - 1 {
@@ -564,6 +588,7 @@ fn generate_polymorphic_decode_chain(
             if transform_ids.is_empty() { return quote! { String::new() }; }
             
             let last_idx = transform_ids.len() - 1;
+
             let last_id = transform_ids[last_idx];
             let last_input = Ident::new(&format!("nd_{}", last_idx), Span::call_site());
             let last_bytes = Ident::new("lb", Span::call_site());
@@ -584,7 +609,7 @@ fn generate_polymorphic_decode_chain(
                 let ci = Ident::new(&format!("nd_{}", i), Span::call_site());
                 let ni = Ident::new(&format!("nd_{}", i + 1), Span::call_site());
                 let ob = Ident::new(&format!("nb_{}", i), Span::call_site());
-                let junk = generate_junk_logic(rng, Some(&ci), Some(&rs_n));
+                let junk = &junk_tokens[i];
                 
                 nl = quote! { 
                     { 
@@ -619,7 +644,7 @@ fn generate_polymorphic_decode_chain(
                     #rs_n = #nr_v; 
                 });
                 
-                let junk = generate_junk_logic(rng, Some(&cv), Some(&rs_n));
+                let junk = &junk_tokens[i];
                 st.push(quote! { #junk });
                 
                 if i < transform_ids.len() - 1 {
@@ -647,23 +672,37 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let num_layers = ((entropy % 3) + 4) as usize; // 4 to 6 layers
     
     let mut cd = os.clone().into_bytes();
-    let mut layer_primitives = Vec::new();
+    let mut layers_data = Vec::new();
     
     for _ in 0..num_layers {
+        let seed_sc = rng.gen::<u32>();
+        let seed_corr = rng.gen::<u32>();
+        let mask_corr = rng.gen::<u8>();
+
+        apply_scramble_compile(&mut cd, seed_sc);
+        apply_state_corruption_compile(&mut cd, seed_corr, mask_corr);
+
         let idx = rng.gen_range(0..pl.len());
         let (encoded, primitives) = (pl[idx].encoder)(&cd);
         cd = encoded;
-        layer_primitives.push(primitives);
+
+        apply_unscramble_compile(&mut cd, seed_sc);
+        layers_data.push((seed_sc, seed_corr, mask_corr, primitives));
     }
-    layer_primitives.reverse();
+    layers_data.reverse();
 
     let xk = rng.gen::<u8>();
     let ev = rng.gen_range(0..3u32);
     let mut key = xk;
-    let mut eb = Vec::with_capacity(cd.len());
     
+    let mut rs_junk_compile = 0u32;
+    let d_b_i = Ident::new("db", Span::call_site());
+    let dl_c = generate_obfuscated_decrypt(quote! { rd }, &d_b_i, &Ident::new("rs_junk", Span::call_site()), &mut rs_junk_compile, &mut rng, ev);
+    let lock_junk = (rs_junk_compile ^ (rs_junk_compile >> 13) ^ (rs_junk_compile >> 21)) as u8;
+
+    let mut eb = Vec::with_capacity(cd.len());
     for &ob in &cd {
-        let eb_b = ob ^ key;
+        let eb_b = (ob ^ lock_junk) ^ key;
         eb.push(eb_b);
         match ev {
             0 => key = key.wrapping_add(eb_b),
@@ -674,15 +713,16 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
 
     let mut vt_c = Vec::new();
     let mut rids = Vec::new();
+    let mut dc_junks = Vec::new();
     let salt = rng.gen::<u32>();
     let mult = rng.gen::<u32>() | 1;
     let mut rs = 0u32;
     
-    for primitives in layer_primitives {
+    for (seed_sc, seed_corr, mask_corr, primitives) in layers_data {
         let mut layer_code = quote! { let mut data = data; };
 
-        // Generate semantically required scrambling
-        let (scramble, unscramble) = generate_index_scrambler(&mut rng);
+        let (scramble, unscramble) = generate_index_scrambler(seed_sc, &mut rng);
+        let (init_corr, apply_corr) = generate_state_corruption(seed_corr, mask_corr, &mut rng);
         
         layer_code = quote! { 
             #layer_code 
@@ -705,48 +745,49 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             layer_code = quote! { #layer_code #step_code };
         }
         
-        // Apply unscrambling - REQUIRED for correct decode
         layer_code = quote! { 
             #layer_code 
+            #init_corr
+            #apply_corr
             #unscramble 
         };
         
         let id_val = rng.gen::<u32>();
-        let next_rs = rs.wrapping_add(id_val).rotate_left(5) ^ rng.gen::<u32>();
+        let mut arm_rs = rs;
+        let rs_salt = rng.gen::<u32>();
+        arm_rs = arm_rs.wrapping_add(id_val).rotate_left(5) ^ rs_salt;
         
-        // Simple junk that doesn't reference external variables
-        let j_v = Ident::new(&format!("j_{}", rng.gen::<u32>()), Span::call_site());
-        let j_val = rng.gen::<u32>();
-        let simple_junk = quote! { 
-            let mut #j_v = #j_val; 
-            if #j_v % 2 == 0 { #j_v = #j_v.wrapping_add(1); } 
+        let core_rs_update = quote! {
+            rs = rs.wrapping_add(#id_val).rotate_left(5) ^ #rs_salt;
         };
         
+        // Mandatory junk INSIDE the v-table arm
+        let arm_junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())), &mut arm_rs);
+
         let arm_key = (id_val ^ rs).wrapping_mul(mult) ^ salt;
         
         vt_c.push(quote! {
             #arm_key => {
                 let mut data = data.to_vec();
                 let mut rs = rs_in;
-
-                // UNLOCK
                 let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
                 for b in data.iter_mut() { *b ^= lock_in; }
-
                 #layer_code
-                #simple_junk
-
-                // LOCK
-                let rs_out = #next_rs;
-                let lock_out = (rs_out ^ (rs_out >> 13) ^ (rs_out >> 21)) as u8;
+                #core_rs_update
+                #arm_junk
+                let lock_out = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
                 for b in data.iter_mut() { *b ^= lock_out; }
-
-                (data, rs_out)
+                (data, rs)
             }
         });
         
+        // Decorative junk for the decode chain (doesn't modify rs)
+        let mut dummy_rs = 0u32;
+        let dc_junk = generate_junk_logic(&mut rng, None, None, &mut dummy_rs);
+        dc_junks.push(dc_junk);
+
         rids.push(id_val);
-        rs = next_rs;
+        rs = arm_rs;
     }
 
     let s_n = Ident::new(&format!("O_{}", rng.gen::<u32>()), Span::call_site());
@@ -755,7 +796,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let i_v = Ident::new("ds", Span::call_site());
     let a_v = Ident::new("aux", Span::call_site());
     
-    let dc = generate_polymorphic_decode_chain(&rids, &i_v, &d_n, &a_v, &mut rng);
+    let dc = generate_polymorphic_decode_chain(&rids, &dc_junks, &i_v, &d_n, &a_v, &mut rng);
     
     let (df, di, rl) = match rng.gen_range(0..3) {
         0 => {
@@ -787,9 +828,6 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             (quote! { j: &'a [u8], }, quote! { j: #dl, }, quote! { let mut rd: Vec<u8> = self.j.iter().step_by(2).cloned().collect(); })
         }
     };
-    
-    let d_b_i = Ident::new("db", Span::call_site());
-    let dl_c = generate_obfuscated_decrypt(quote! { rd }, &d_b_i, &Ident::new("rs_junk", Span::call_site()), &mut rng, ev);
     
     let expanded = quote! {{
         struct #s_n<'a> { #df key: u8, }
