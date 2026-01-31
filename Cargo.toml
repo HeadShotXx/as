@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    ".",
+    "polimorphic",
+]
+
+[package]
+name = "calculator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+polimorphic = { path = "polimorphic" }
