@@ -11,11 +11,13 @@ enum Primitive {
     Map(Vec<u8>),
     BitLoad { bits: u32 },
     BitEmit { bits: u32, total_bits: u64 },
+    BitUnpack { bits: u32, total_bits: u64 },
     BaseLoad { base: u128, in_c: usize },
     BaseEmit { base: u128, in_c: usize, out_c: usize, total_bytes: u64 },
     BigIntInit,
-    BigIntPush { base: u128 },
-    BigIntEmit { total_bytes: u64 },
+    BigIntPush { base: u128, use_be: bool },
+    BigIntEmit { total_bytes: u64, use_be: bool },
+    BigIntDecode { base: u128, total_bytes: u64 },
     Noop { val: u32 },
     Sync,
 }
@@ -107,13 +109,22 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = b32_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
                 let (out, total_bits) = encode_bits(data, 5, &alpha);
-                (out, vec![
-                    Primitive::Map(alpha.clone()),
-                    Primitive::BitLoad { bits: 5 },
-                    Primitive::Noop { val: 0x32 },
-                    Primitive::BitEmit { bits: 5, total_bits }
-                ])
+                let primitives = if rng.gen_bool(0.5) {
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BitLoad { bits: 5 },
+                        Primitive::Noop { val: rng.gen() },
+                        Primitive::BitEmit { bits: 5, total_bits }
+                    ]
+                } else {
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BitUnpack { bits: 5, total_bits }
+                    ]
+                };
+                (out, primitives)
             }),
         }
     };
@@ -121,13 +132,23 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = b36_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
                 let out = encode_bigint(data, 36, &alpha);
-                (out, vec![
-                    Primitive::Map(alpha.clone()),
-                    Primitive::BigIntInit,
-                    Primitive::BigIntPush { base: 36 },
-                    Primitive::BigIntEmit { total_bytes: data.len() as u64 }
-                ])
+                let primitives = if rng.gen_bool(0.5) {
+                    let use_be = rng.gen_bool(0.5);
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BigIntInit,
+                        Primitive::BigIntPush { base: 36, use_be },
+                        Primitive::BigIntEmit { total_bytes: data.len() as u64, use_be }
+                    ]
+                } else {
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BigIntDecode { base: 36, total_bytes: data.len() as u64 }
+                    ]
+                };
+                (out, primitives)
             }),
         }
     };
@@ -135,12 +156,21 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = b64_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
                 let (out, total_bits) = encode_bits(data, 6, &alpha);
-                (out, vec![
-                    Primitive::Map(alpha.clone()),
-                    Primitive::BitLoad { bits: 6 },
-                    Primitive::BitEmit { bits: 6, total_bits }
-                ])
+                let primitives = if rng.gen_bool(0.5) {
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BitLoad { bits: 6 },
+                        Primitive::BitEmit { bits: 6, total_bits }
+                    ]
+                } else {
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BitUnpack { bits: 6, total_bits }
+                    ]
+                };
+                (out, primitives)
             }),
         }
     };
@@ -162,13 +192,23 @@ fn get_pipelines() -> Vec<Pipeline> {
         let alpha = b91_alpha.clone();
         Pipeline {
             encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
                 let out = encode_bigint(data, 91, &alpha);
-                (out, vec![
-                    Primitive::Map(alpha.clone()),
-                    Primitive::BigIntInit,
-                    Primitive::BigIntPush { base: 91 },
-                    Primitive::BigIntEmit { total_bytes: data.len() as u64 }
-                ])
+                let primitives = if rng.gen_bool(0.5) {
+                    let use_be = rng.gen_bool(0.5);
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BigIntInit,
+                        Primitive::BigIntPush { base: 91, use_be },
+                        Primitive::BigIntEmit { total_bytes: data.len() as u64, use_be }
+                    ]
+                } else {
+                    vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BigIntDecode { base: 91, total_bytes: data.len() as u64 }
+                    ]
+                };
+                (out, primitives)
             }),
         }
     };
@@ -186,17 +226,61 @@ fn compute_entropy(data: &[u8]) -> u32 {
 
 // --- GENERATORS ---
 
-fn generate_obfuscated_map(alphabet: &[u8], _rng: &mut impl Rng) -> TokenStream2 {
+fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 {
     let mut map = vec![255u8; 256];
     for (i, &c) in alphabet.iter().enumerate() { map[c as usize] = i as u8; }
-    let map_lit = Literal::byte_string(&map);
-    quote! {
-        let mut out = Vec::with_capacity(data.len());
-        for &b in &data {
-            let v = (#map_lit)[b as usize];
-            if v != 255 { out.push(v); }
+
+    match rng.gen_range(0..3) {
+        0 => {
+            let map_lit = Literal::byte_string(&map);
+            quote! {
+                let mut out = Vec::with_capacity(data.len());
+                for &b in &data {
+                    let v = (#map_lit)[b as usize];
+                    if v != 255 { out.push(v); }
+                }
+                data = out;
+            }
+        },
+        1 => {
+            let mut arms = Vec::new();
+            for (i, &c) in alphabet.iter().enumerate() {
+                let cu = c as usize;
+                let iu = i as u8;
+                arms.push(quote! { #cu => out.push(#iu), });
+            }
+            quote! {
+                let mut out = Vec::with_capacity(data.len());
+                for &b in &data {
+                    match b as usize {
+                        #(#arms)*
+                        _ => {}
+                    }
+                }
+                data = out;
+            }
+        },
+        _ => {
+            let xor_key = rng.gen::<u8>();
+            let mut xored_map = vec![0u8; 256];
+            let mut found = vec![0u8; 256];
+            for (i, &c) in alphabet.iter().enumerate() {
+                xored_map[c as usize] = (i as u8) ^ xor_key;
+                found[c as usize] = 1;
+            }
+            let map_lit = Literal::byte_string(&xored_map);
+            let found_lit = Literal::byte_string(&found);
+            quote! {
+                let mut out = Vec::with_capacity(data.len());
+                for &b in &data {
+                    if (#found_lit)[b as usize] != 0 {
+                        let v = (#map_lit)[b as usize];
+                        out.push(v ^ #xor_key);
+                    }
+                }
+                data = out;
+            }
         }
-        data = out;
     }
 }
 
@@ -207,26 +291,95 @@ fn generate_bit_load(_bits: u32, _rng: &mut impl Rng) -> TokenStream2 {
     }
 }
 
-fn generate_bit_emit(bits: u32, total_bits: u64, _rng: &mut impl Rng) -> TokenStream2 {
-    quote! {
-        let mut out = Vec::new();
-        let mut acc = 0u128;
-        let mut count = 0u32;
-        let mut bc = 0u64;
-        for &v in aux.iter() {
-            acc = (acc << #bits) | (v as u128);
-            count += #bits;
-            while count >= 8 {
-                count -= 8;
-                if bc < #total_bits {
-                    out.push((acc >> count) as u8);
-                    bc += 8;
+fn generate_bit_emit(bits: u32, total_bits: u64, rng: &mut impl Rng) -> TokenStream2 {
+    match rng.gen_range(0..2) {
+        0 => quote! {
+            let mut out = Vec::new();
+            let mut acc = 0u128;
+            let mut count = 0u32;
+            let mut bc = 0u64;
+            for &v in aux.iter() {
+                acc = (acc << #bits) | (v as u128);
+                count += #bits;
+                while count >= 8 {
+                    count -= 8;
+                    if bc < #total_bits {
+                        out.push((acc >> count) as u8);
+                        bc += 8;
+                    }
+                    acc &= (1 << count) - 1;
                 }
-                acc &= (1 << count) - 1;
             }
+            data = out;
+            aux.clear();
+        },
+        _ => quote! {
+            let mut out = Vec::new();
+            let mut acc = 0u128;
+            let mut count = 0u32;
+            let mut bc = 0u64;
+            let mut i = 0;
+            while i < aux.len() {
+                let v = aux[i];
+                acc = (acc << #bits) | (v as u128);
+                count += #bits;
+                while count >= 8 {
+                    count -= 8;
+                    if bc < #total_bits {
+                        out.push((acc >> count) as u8);
+                        bc += 8;
+                    }
+                    acc &= (1 << count) - 1;
+                }
+                i += 1;
+            }
+            data = out;
+            aux.clear();
         }
-        data = out;
-        aux.clear();
+    }
+}
+
+fn generate_bit_unpack(bits: u32, total_bits: u64, rng: &mut impl Rng) -> TokenStream2 {
+    match rng.gen_range(0..2) {
+        0 => quote! {
+            let mut out = Vec::new();
+            let mut acc = 0u128;
+            let mut count = 0u32;
+            let mut bc = 0u64;
+            for &v in data.iter() {
+                acc = (acc << #bits) | (v as u128);
+                count += #bits;
+                while count >= 8 {
+                    count -= 8;
+                    if bc < #total_bits {
+                        out.push((acc >> count) as u8);
+                        bc += 8;
+                    }
+                    acc &= (1 << count) - 1;
+                }
+            }
+            data = out;
+        },
+        _ => quote! {
+            let mut out = Vec::with_capacity(data.len());
+            let mut acc = 0u128;
+            let mut count = 0u32;
+            let mut bc = 0u64;
+            let mut it = data.iter();
+            while let Some(&v) = it.next() {
+                acc = (acc << #bits) | (v as u128);
+                count += #bits;
+                while count >= 8 {
+                    count -= 8;
+                    if bc < #total_bits {
+                        out.push((acc >> count) as u8);
+                        bc += 8;
+                    }
+                    acc &= (1 << count) - 1;
+                }
+            }
+            data = out;
+        }
     }
 }
 
@@ -264,7 +417,18 @@ fn generate_bigint_init(_rng: &mut impl Rng) -> TokenStream2 {
     }
 }
 
-fn generate_bigint_push(base: u128, _rng: &mut impl Rng) -> TokenStream2 {
+fn generate_bigint_push(base: u128, use_be: bool, _rng: &mut impl Rng) -> TokenStream2 {
+    let push_digit = if use_be {
+        quote! { for val in res { aux.extend_from_slice(&val.to_be_bytes()); } }
+    } else {
+        quote! { for val in res { aux.extend_from_slice(&val.to_ne_bytes()); } }
+    };
+    let read_digit = if use_be {
+        quote! { u32::from_be_bytes(bytes) }
+    } else {
+        quote! { u32::from_ne_bytes(bytes) }
+    };
+
     quote! {
         let mut leading_zeros = 0;
         for &v in &data { if v == 0 { leading_zeros += 1; } else { break; } }
@@ -272,7 +436,7 @@ fn generate_bigint_push(base: u128, _rng: &mut impl Rng) -> TokenStream2 {
         for chunk in aux.chunks_exact(4) {
             let mut bytes = [0u8; 4];
             bytes.copy_from_slice(chunk);
-            res.push(u32::from_ne_bytes(bytes));
+            res.push(#read_digit);
         }
 
         for &v in &data[leading_zeros..] {
@@ -289,7 +453,7 @@ fn generate_bigint_push(base: u128, _rng: &mut impl Rng) -> TokenStream2 {
         }
 
         aux.clear();
-        for val in res { aux.extend_from_slice(&val.to_ne_bytes()); }
+        #push_digit
         let lz = leading_zeros as u64;
         let mut next_aux = lz.to_ne_bytes().to_vec();
         next_aux.extend_from_slice(&aux);
@@ -298,7 +462,13 @@ fn generate_bigint_push(base: u128, _rng: &mut impl Rng) -> TokenStream2 {
     }
 }
 
-fn generate_bigint_emit(_total_bytes: u64, _rng: &mut impl Rng) -> TokenStream2 {
+fn generate_bigint_emit(_total_bytes: u64, use_be: bool, _rng: &mut impl Rng) -> TokenStream2 {
+    let read_digit = if use_be {
+        quote! { u32::from_be_bytes(bytes) }
+    } else {
+        quote! { u32::from_ne_bytes(bytes) }
+    };
+
     quote! {
         if aux.len() >= 8 {
             let mut lz_bytes = [0u8; 8];
@@ -309,7 +479,7 @@ fn generate_bigint_emit(_total_bytes: u64, _rng: &mut impl Rng) -> TokenStream2 
             for chunk in aux[8..].chunks_exact(4) {
                 let mut bytes = [0u8; 4];
                 bytes.copy_from_slice(chunk);
-                res.push(u32::from_ne_bytes(bytes));
+                res.push(#read_digit);
             }
 
             let mut out = vec![0u8; lz];
@@ -334,12 +504,72 @@ fn generate_bigint_emit(_total_bytes: u64, _rng: &mut impl Rng) -> TokenStream2 
     }
 }
 
+fn generate_bigint_decode(base: u128, _total_bytes: u64, rng: &mut impl Rng) -> TokenStream2 {
+    let loop_style = rng.gen_range(0..2);
+    let core = if loop_style == 0 {
+        quote! {
+            for &v in &data[leading_zeros..] {
+                let mut carry = v as u64;
+                for digit in res.iter_mut() {
+                    let prod = (*digit as u64) * (#base as u64) + carry;
+                    *digit = prod as u32;
+                    carry = prod >> 32;
+                }
+                while carry > 0 {
+                    res.push(carry as u32);
+                    carry >>= 32;
+                }
+            }
+        }
+    } else {
+        quote! {
+            let mut i = leading_zeros;
+            while i < data.len() {
+                let v = data[i];
+                let mut carry = v as u64;
+                let mut j = 0;
+                while j < res.len() {
+                    let prod = (res[j] as u64) * (#base as u64) + carry;
+                    res[j] = prod as u32;
+                    carry = prod >> 32;
+                    j += 1;
+                }
+                while carry > 0 {
+                    res.push(carry as u32);
+                    carry >>= 32;
+                }
+                i += 1;
+            }
+        }
+    };
+
+    quote! {
+        let mut leading_zeros = 0;
+        for &v in &data { if v == 0 { leading_zeros += 1; } else { break; } }
+        let mut res = vec![0u32; 0];
+        #core
+        let mut out = vec![0u8; leading_zeros];
+        let rl = res.len();
+        if rl > 0 {
+            for (idx, &val) in res.iter().enumerate().rev() {
+                let bytes = val.to_be_bytes();
+                if idx == rl - 1 {
+                     let mut skip = 0;
+                     while skip < 4 && bytes[skip] == 0 { skip += 1; }
+                     out.extend_from_slice(&bytes[skip..]);
+                } else { out.extend_from_slice(&bytes); }
+            }
+        }
+        data = out;
+    }
+}
+
 // Enhanced junk logic that is semantically required
 fn generate_junk_logic(rng: &mut impl Rng, _real_var: Option<&Ident>, rs_var: Option<&Ident>, rs_compile: &mut u32) -> TokenStream2 {
     let mut code = Vec::new();
     if let Some(rsv) = rs_var {
-        for _ in 0..rng.gen_range(1..=2) {
-             match rng.gen_range(0..3) {
+        for _ in 0..rng.gen_range(2..=4) {
+             match rng.gen_range(0..5) {
                 0 => {
                     let val = rng.gen::<u32>();
                     *rs_compile = rs_compile.wrapping_add(val);
@@ -350,10 +580,20 @@ fn generate_junk_logic(rng: &mut impl Rng, _real_var: Option<&Ident>, rs_var: Op
                     *rs_compile = rs_compile.rotate_left(val);
                     code.push(quote! { #rsv = #rsv.rotate_left(#val); });
                 },
-                _ => {
+                2 => {
                     let val = rng.gen::<u32>();
                     *rs_compile ^= val;
                     code.push(quote! { #rsv ^= #val; });
+                },
+                3 => {
+                    let val = rng.gen::<u32>();
+                    *rs_compile = rs_compile.wrapping_mul(val | 1);
+                    code.push(quote! { #rsv = #rsv.wrapping_mul(#val | 1); });
+                },
+                _ => {
+                    let val = rng.gen::<u32>();
+                    *rs_compile = rs_compile.wrapping_sub(val);
+                    code.push(quote! { #rsv = #rsv.wrapping_sub(#val); });
                 }
             }
         }
@@ -717,41 +957,66 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let salt = rng.gen::<u32>();
     let mult = rng.gen::<u32>() | 1;
     let mut rs = 0u32;
-    
+
+    #[derive(Clone, Debug)]
+    enum TaskInternal {
+        Scramble(u32),
+        Unscramble(u32),
+        StateCorruption(u32, u8),
+        Primitive(Primitive),
+    }
+
+    let mut all_tasks = Vec::new();
     for (seed_sc, seed_corr, mask_corr, primitives) in layers_data {
-        let mut layer_code = quote! { let mut data = data; };
-
-        let (scramble, unscramble) = generate_index_scrambler(seed_sc, &mut rng);
-        let (init_corr, apply_corr) = generate_state_corruption(seed_corr, mask_corr, &mut rng);
-        
-        layer_code = quote! { 
-            #layer_code 
-            #scramble 
-        };
-
+        all_tasks.push(TaskInternal::Scramble(seed_sc));
         for p in primitives {
-            let step_code = match p {
-                Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
-                Primitive::BitLoad { bits } => generate_bit_load(bits, &mut rng),
-                Primitive::BitEmit { bits, total_bits } => generate_bit_emit(bits, total_bits, &mut rng),
-                Primitive::BaseLoad { base, in_c } => generate_base_load(base, in_c, &mut rng),
-                Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(base, in_c, out_c, total_bytes, &mut rng),
-                Primitive::BigIntInit => generate_bigint_init(&mut rng),
-                Primitive::BigIntPush { base } => generate_bigint_push(base, &mut rng),
-                Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(total_bytes, &mut rng),
-                Primitive::Noop { val } => quote! { let _ = #val; },
-                Primitive::Sync => quote! { let mut data = data; },
-            };
-            layer_code = quote! { #layer_code #step_code };
+            all_tasks.push(TaskInternal::Primitive(p));
         }
-        
-        layer_code = quote! { 
-            #layer_code 
-            #init_corr
-            #apply_corr
-            #unscramble 
-        };
-        
+        all_tasks.push(TaskInternal::StateCorruption(seed_corr, mask_corr));
+        all_tasks.push(TaskInternal::Unscramble(seed_sc));
+    }
+
+    let mut task_idx = 0;
+    while task_idx < all_tasks.len() {
+        let n = rng.gen_range(1..=3);
+        let group = &all_tasks[task_idx..std::cmp::min(task_idx + n, all_tasks.len())];
+        task_idx += n;
+
+        let mut group_code = Vec::new();
+        for task in group {
+            let task_code = match task {
+                TaskInternal::Scramble(seed) => {
+                    let (scramble, _) = generate_index_scrambler(*seed, &mut rng);
+                    quote! { #scramble }
+                },
+                TaskInternal::Unscramble(seed) => {
+                    let (_, unscramble) = generate_index_scrambler(*seed, &mut rng);
+                    quote! { #unscramble }
+                },
+                TaskInternal::StateCorruption(seed, mask) => {
+                    let (init, apply) = generate_state_corruption(*seed, *mask, &mut rng);
+                    quote! { #init #apply }
+                },
+                TaskInternal::Primitive(p) => {
+                    match p {
+                        Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
+                        Primitive::BitLoad { bits } => generate_bit_load(*bits, &mut rng),
+                        Primitive::BitEmit { bits, total_bits } => generate_bit_emit(*bits, *total_bits, &mut rng),
+                        Primitive::BitUnpack { bits, total_bits } => generate_bit_unpack(*bits, *total_bits, &mut rng),
+                        Primitive::BaseLoad { base, in_c } => generate_base_load(*base, *in_c, &mut rng),
+                        Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(*base, *in_c, *out_c, *total_bytes, &mut rng),
+                        Primitive::BigIntInit => generate_bigint_init(&mut rng),
+                        Primitive::BigIntPush { base, use_be } => generate_bigint_push(*base, *use_be, &mut rng),
+                        Primitive::BigIntEmit { total_bytes, use_be } => generate_bigint_emit(*total_bytes, *use_be, &mut rng),
+                        Primitive::BigIntDecode { base, total_bytes } => generate_bigint_decode(*base, *total_bytes, &mut rng),
+                        Primitive::Noop { val } => quote! { let _ = #val; },
+                        Primitive::Sync => quote! {  },
+                    }
+                }
+            };
+            group_code.push(task_code);
+        }
+
         let id_val = rng.gen::<u32>();
         let mut arm_rs = rs;
         let rs_salt = rng.gen::<u32>();
@@ -761,9 +1026,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             rs = rs.wrapping_add(#id_val).rotate_left(5) ^ #rs_salt;
         };
         
-        // Mandatory junk INSIDE the v-table arm
         let arm_junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())), &mut arm_rs);
-
         let arm_key = (id_val ^ rs).wrapping_mul(mult) ^ salt;
         
         vt_c.push(quote! {
@@ -772,7 +1035,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                 let mut rs = rs_in;
                 let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
                 for b in data.iter_mut() { *b ^= lock_in; }
-                #layer_code
+                #(#group_code)*
                 #core_rs_update
                 #arm_junk
                 let lock_out = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
@@ -781,7 +1044,6 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             }
         });
         
-        // Decorative junk for the decode chain (doesn't modify rs)
         let mut dummy_rs = 0u32;
         let dc_junk = generate_junk_logic(&mut rng, None, None, &mut dummy_rs);
         dc_junks.push(dc_junk);
@@ -968,6 +1230,9 @@ mod tests {
                                 b_data = decode_bits_manual(&aux, bits, total_bits);
                                 aux.clear();
                             },
+                            Primitive::BitUnpack { bits, total_bits } => {
+                                b_data = decode_bits_manual(&b_data, bits, total_bits);
+                            },
                             Primitive::BaseEmit { base, in_c, out_c, total_bytes } => {
                                 b_data = decode_z85_manual(&aux, base, in_c, out_c, total_bytes);
                                 aux.clear();
@@ -976,20 +1241,20 @@ mod tests {
                                 aux.clear();
                                 aux.extend_from_slice(&0u32.to_ne_bytes());
                             },
-                            Primitive::BigIntPush { base } => {
+                            Primitive::BigIntPush { base, use_be } => {
                                 let mut res = Vec::new();
                                 let mut lz = 0;
                                 if aux.len() >= 8 {
                                     for chunk in aux[8..].chunks_exact(4) {
                                         let mut bytes = [0u8; 4];
                                         bytes.copy_from_slice(chunk);
-                                        res.push(u32::from_ne_bytes(bytes));
+                                        res.push(if use_be { u32::from_be_bytes(bytes) } else { u32::from_ne_bytes(bytes) });
                                     }
                                 } else {
                                     for chunk in aux.chunks_exact(4) {
                                         let mut bytes = [0u8; 4];
                                         bytes.copy_from_slice(chunk);
-                                        res.push(u32::from_ne_bytes(bytes));
+                                        res.push(if use_be { u32::from_be_bytes(bytes) } else { u32::from_ne_bytes(bytes) });
                                     }
                                 }
                                 for &v in &b_data { if v == 0 { lz += 1; } else { break; } }
@@ -1004,11 +1269,66 @@ mod tests {
                                 }
                                 aux.clear();
                                 aux.extend_from_slice(&(lz as u64).to_ne_bytes());
-                                for val in res { aux.extend_from_slice(&val.to_ne_bytes()); }
+                                for val in res {
+                                    let b = if use_be { val.to_be_bytes() } else { val.to_ne_bytes() };
+                                    aux.extend_from_slice(&b);
+                                }
                             },
-                            Primitive::BigIntEmit { .. } => {
-                                b_data = decode_bigint_manual_from_aux(&aux);
+                            Primitive::BigIntEmit { use_be, .. } => {
+                                if aux.len() >= 8 {
+                                    let mut lz_bytes = [0u8; 8];
+                                    lz_bytes.copy_from_slice(&aux[0..8]);
+                                    let lz = u64::from_ne_bytes(lz_bytes) as usize;
+                                    let mut res = Vec::new();
+                                    for chunk in aux[8..].chunks_exact(4) {
+                                        let mut bytes = [0u8; 4];
+                                        bytes.copy_from_slice(chunk);
+                                        res.push(if use_be { u32::from_be_bytes(bytes) } else { u32::from_ne_bytes(bytes) });
+                                    }
+                                    let mut out = vec![0u8; lz];
+                                    let rl = res.len();
+                                    if !(res.len() == 1 && res[0] == 0) || (aux.len() - 8) / 4 == lz {
+                                        let mut bytes_out = Vec::new();
+                                        for (idx, &val) in res.iter().enumerate().rev() {
+                                            let bytes = val.to_be_bytes();
+                                            if idx == rl - 1 {
+                                                 let mut skip = 0;
+                                                 while skip < 4 && bytes[skip] == 0 { skip += 1; }
+                                                 bytes_out.extend_from_slice(&bytes[skip..]);
+                                            } else { bytes_out.extend_from_slice(&bytes); }
+                                        }
+                                        out.extend(bytes_out);
+                                    }
+                                    b_data = out;
+                                } else { b_data = Vec::new(); }
                                 aux.clear();
+                            },
+                            Primitive::BigIntDecode { base, .. } => {
+                                let mut res = vec![0u32; 0];
+                                let mut lz = 0;
+                                for &v in &b_data { if v == 0 { lz += 1; } else { break; } }
+                                for &v in &b_data[lz..] {
+                                    let mut carry = v as u64;
+                                    for digit in res.iter_mut() {
+                                        let prod = (*digit as u64) * (base as u64) + carry;
+                                        *digit = prod as u32;
+                                        carry = prod >> 32;
+                                    }
+                                    while carry > 0 { res.push(carry as u32); carry >>= 32; }
+                                }
+                                let mut out = vec![0u8; lz];
+                                let rl = res.len();
+                                if rl > 0 {
+                                    for (idx, &val) in res.iter().enumerate().rev() {
+                                        let bytes = val.to_be_bytes();
+                                        if idx == rl - 1 {
+                                             let mut skip = 0;
+                                             while skip < 4 && bytes[skip] == 0 { skip += 1; }
+                                             out.extend_from_slice(&bytes[skip..]);
+                                        } else { out.extend_from_slice(&bytes); }
+                                    }
+                                }
+                                b_data = out;
                             },
                             _ => {}
                         }
