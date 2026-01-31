@@ -1087,7 +1087,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let entropy = compute_entropy(os.as_bytes());
     let mut rng = thread_rng();
     let pl = get_pipelines();
-    let num_layers = ((entropy % 3) + 4) as usize; // 4 to 6 layers
+    let num_layers = ((entropy % 5) + 8) as usize; // 8 to 12 layers
     
     let mut cd = os.clone().into_bytes();
     let mut layers_data = Vec::new();
@@ -1381,7 +1381,7 @@ mod tests {
         let pl = get_pipelines();
         for original in originals {
             for _ in 0..100 {
-                let num_layers = rng.gen_range(1..=5);
+                let num_layers = rng.gen_range(1..=12);
                 let mut data = original.clone();
                 let mut layer_prims = Vec::new();
                 for _ in 0..num_layers {
