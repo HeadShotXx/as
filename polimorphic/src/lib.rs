@@ -18,6 +18,9 @@ enum Primitive {
     BigIntPush { base: u128, use_be: bool },
     BigIntEmit { total_bytes: u64, use_be: bool },
     BigIntDecode { base: u128, total_bytes: u64 },
+    BitFsm { bits: u32, total_bits: u64 },
+    BigIntPoly { base: u128, total_bytes: u64 },
+    MapConv { alphabet: Vec<u8>, key: u8 },
     Noop { val: u32 },
     Sync,
 }
@@ -111,17 +114,20 @@ fn get_pipelines() -> Vec<Pipeline> {
             encoder: Box::new(move |data| {
                 let mut rng = thread_rng();
                 let (out, total_bits) = encode_bits(data, 5, &alpha);
-                let primitives = if rng.gen_bool(0.5) {
-                    vec![
+                let primitives = match rng.gen_range(0..3) {
+                    0 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitLoad { bits: 5 },
                         Primitive::Noop { val: rng.gen() },
                         Primitive::BitEmit { bits: 5, total_bits }
-                    ]
-                } else {
-                    vec![
+                    ],
+                    1 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitUnpack { bits: 5, total_bits }
+                    ],
+                    _ => vec![
+                        Primitive::MapConv { alphabet: alpha.clone(), key: rng.gen() },
+                        Primitive::BitFsm { bits: 5, total_bits }
                     ]
                 };
                 (out, primitives)
@@ -134,18 +140,23 @@ fn get_pipelines() -> Vec<Pipeline> {
             encoder: Box::new(move |data| {
                 let mut rng = thread_rng();
                 let out = encode_bigint(data, 36, &alpha);
-                let primitives = if rng.gen_bool(0.5) {
-                    let use_be = rng.gen_bool(0.5);
-                    vec![
-                        Primitive::Map(alpha.clone()),
-                        Primitive::BigIntInit,
-                        Primitive::BigIntPush { base: 36, use_be },
-                        Primitive::BigIntEmit { total_bytes: data.len() as u64, use_be }
-                    ]
-                } else {
-                    vec![
+                let primitives = match rng.gen_range(0..3) {
+                    0 => {
+                        let use_be = rng.gen_bool(0.5);
+                        vec![
+                            Primitive::Map(alpha.clone()),
+                            Primitive::BigIntInit,
+                            Primitive::BigIntPush { base: 36, use_be },
+                            Primitive::BigIntEmit { total_bytes: data.len() as u64, use_be }
+                        ]
+                    },
+                    1 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BigIntDecode { base: 36, total_bytes: data.len() as u64 }
+                    ],
+                    _ => vec![
+                        Primitive::MapConv { alphabet: alpha.clone(), key: rng.gen() },
+                        Primitive::BigIntPoly { base: 36, total_bytes: data.len() as u64 }
                     ]
                 };
                 (out, primitives)
@@ -158,16 +169,19 @@ fn get_pipelines() -> Vec<Pipeline> {
             encoder: Box::new(move |data| {
                 let mut rng = thread_rng();
                 let (out, total_bits) = encode_bits(data, 6, &alpha);
-                let primitives = if rng.gen_bool(0.5) {
-                    vec![
+                let primitives = match rng.gen_range(0..3) {
+                    0 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitLoad { bits: 6 },
                         Primitive::BitEmit { bits: 6, total_bits }
-                    ]
-                } else {
-                    vec![
+                    ],
+                    1 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitUnpack { bits: 6, total_bits }
+                    ],
+                    _ => vec![
+                        Primitive::MapConv { alphabet: alpha.clone(), key: rng.gen() },
+                        Primitive::BitFsm { bits: 6, total_bits }
                     ]
                 };
                 (out, primitives)
@@ -194,18 +208,23 @@ fn get_pipelines() -> Vec<Pipeline> {
             encoder: Box::new(move |data| {
                 let mut rng = thread_rng();
                 let out = encode_bigint(data, 91, &alpha);
-                let primitives = if rng.gen_bool(0.5) {
-                    let use_be = rng.gen_bool(0.5);
-                    vec![
-                        Primitive::Map(alpha.clone()),
-                        Primitive::BigIntInit,
-                        Primitive::BigIntPush { base: 91, use_be },
-                        Primitive::BigIntEmit { total_bytes: data.len() as u64, use_be }
-                    ]
-                } else {
-                    vec![
+                let primitives = match rng.gen_range(0..3) {
+                    0 => {
+                        let use_be = rng.gen_bool(0.5);
+                        vec![
+                            Primitive::Map(alpha.clone()),
+                            Primitive::BigIntInit,
+                            Primitive::BigIntPush { base: 91, use_be },
+                            Primitive::BigIntEmit { total_bytes: data.len() as u64, use_be }
+                        ]
+                    },
+                    1 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BigIntDecode { base: 91, total_bytes: data.len() as u64 }
+                    ],
+                    _ => vec![
+                        Primitive::MapConv { alphabet: alpha.clone(), key: rng.gen() },
+                        Primitive::BigIntPoly { base: 91, total_bytes: data.len() as u64 }
                     ]
                 };
                 (out, primitives)
@@ -226,11 +245,35 @@ fn compute_entropy(data: &[u8]) -> u32 {
 
 // --- GENERATORS ---
 
+fn generate_map_conv(alphabet: &[u8], key: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut map = vec![0u8; 256];
+    let mut found = vec![0u8; 256];
+    for (i, &c) in alphabet.iter().enumerate() {
+        let idx = i as u8;
+        let convolved = (idx.wrapping_add(key) ^ 0x55).rotate_left(2);
+        map[c as usize] = convolved;
+        found[c as usize] = 1;
+    }
+    let map_lit = Literal::byte_string(&map);
+    let found_lit = Literal::byte_string(&found);
+    quote! {
+        let mut out = Vec::with_capacity(data.len());
+        for &b in &data {
+            if (#found_lit)[b as usize] != 0 {
+                let v = (#map_lit)[b as usize];
+                let de_convolved = v.rotate_right(2) ^ 0x55;
+                out.push(de_convolved.wrapping_sub(#key));
+            }
+        }
+        data = out;
+    }
+}
+
 fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 {
     let mut map = vec![255u8; 256];
     for (i, &c) in alphabet.iter().enumerate() { map[c as usize] = i as u8; }
 
-    match rng.gen_range(0..3) {
+    match rng.gen_range(0..4) {
         0 => {
             let map_lit = Literal::byte_string(&map);
             quote! {
@@ -260,7 +303,7 @@ fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 
                 data = out;
             }
         },
-        _ => {
+        2 => {
             let xor_key = rng.gen::<u8>();
             let mut xored_map = vec![0u8; 256];
             let mut found = vec![0u8; 256];
@@ -280,6 +323,32 @@ fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 
                 }
                 data = out;
             }
+        },
+        _ => {
+            // Lookup-table expand (Bitplane variant)
+            let mut map_low = vec![0u8; 256];
+            let mut map_high = vec![0u8; 256];
+            let mut found = vec![0u8; 256];
+            for (i, &c) in alphabet.iter().enumerate() {
+                let idx = i as u8;
+                map_low[c as usize] = idx & 0x0F;
+                map_high[c as usize] = (idx & 0xF0) >> 4;
+                found[c as usize] = 1;
+            }
+            let map_low_lit = Literal::byte_string(&map_low);
+            let map_high_lit = Literal::byte_string(&map_high);
+            let found_lit = Literal::byte_string(&found);
+            quote! {
+                let mut out = Vec::with_capacity(data.len());
+                for &b in &data {
+                    if (#found_lit)[b as usize] != 0 {
+                        let l = (#map_low_lit)[b as usize];
+                        let h = (#map_high_lit)[b as usize];
+                        out.push((h << 4) | l);
+                    }
+                }
+                data = out;
+            }
         }
     }
 }
@@ -292,7 +361,7 @@ fn generate_bit_load(_bits: u32, _rng: &mut impl Rng) -> TokenStream2 {
 }
 
 fn generate_bit_emit(bits: u32, total_bits: u64, rng: &mut impl Rng) -> TokenStream2 {
-    match rng.gen_range(0..2) {
+    match rng.gen_range(0..3) {
         0 => quote! {
             let mut out = Vec::new();
             let mut acc = 0u128;
@@ -313,7 +382,7 @@ fn generate_bit_emit(bits: u32, total_bits: u64, rng: &mut impl Rng) -> TokenStr
             data = out;
             aux.clear();
         },
-        _ => quote! {
+        1 => quote! {
             let mut out = Vec::new();
             let mut acc = 0u128;
             let mut count = 0u32;
@@ -335,7 +404,55 @@ fn generate_bit_emit(bits: u32, total_bits: u64, rng: &mut impl Rng) -> TokenStr
             }
             data = out;
             aux.clear();
+        },
+        _ => quote! {
+            let mut out = Vec::new();
+            let mut acc = 0u128;
+            let mut count = 0u32;
+            let mut bc = 0u64;
+            // Split-word variant: process in dual-word chunks
+            for chunk in aux.chunks(2) {
+                for &v in chunk {
+                    acc = (acc << #bits) | (v as u128);
+                    count += #bits;
+                }
+                while count >= 8 {
+                    count -= 8;
+                    if bc < #total_bits {
+                        out.push((acc >> count) as u8);
+                        bc += 8;
+                    }
+                    acc &= (1 << count) - 1;
+                }
+            }
+            data = out;
+            aux.clear();
         }
+    }
+}
+
+fn generate_bit_fsm(bits: u32, total_bits: u64, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        let mut out = Vec::new();
+        let mut acc = 0u128;
+        let mut count = 0u32;
+        let mut bc = 0u64;
+        for &v in &data {
+            acc = (acc << #bits) | (v as u128);
+            count += #bits;
+            while count >= 8 {
+                let shift = count - 8;
+                let mask = 0xFFu128 << shift;
+                let byte = ((acc & mask) >> shift) as u8;
+                if bc < #total_bits {
+                    out.push(byte);
+                    bc += 8;
+                }
+                acc &= !mask;
+                count -= 8;
+            }
+        }
+        data = out;
     }
 }
 
@@ -417,7 +534,7 @@ fn generate_bigint_init(_rng: &mut impl Rng) -> TokenStream2 {
     }
 }
 
-fn generate_bigint_push(base: u128, use_be: bool, _rng: &mut impl Rng) -> TokenStream2 {
+fn generate_bigint_push(base: u128, use_be: bool, rng: &mut impl Rng) -> TokenStream2 {
     let push_digit = if use_be {
         quote! { for val in res { aux.extend_from_slice(&val.to_be_bytes()); } }
     } else {
@@ -427,6 +544,44 @@ fn generate_bigint_push(base: u128, use_be: bool, _rng: &mut impl Rng) -> TokenS
         quote! { u32::from_be_bytes(bytes) }
     } else {
         quote! { u32::from_ne_bytes(bytes) }
+    };
+
+    let core = if rng.gen_bool(0.5) {
+        // Standard carry chain
+        quote! {
+            for &v in &data[leading_zeros..] {
+                let mut carry = v as u64;
+                for digit in res.iter_mut() {
+                    let prod = (*digit as u64) * (#base as u64) + carry;
+                    *digit = prod as u32;
+                    carry = prod >> 32;
+                }
+                while carry > 0 {
+                    res.push(carry as u32);
+                    carry >>= 32;
+                }
+            }
+        }
+    } else {
+        // Arithmetic carry chain (while loop variant)
+        quote! {
+            let mut i = leading_zeros;
+            while i < data.len() {
+                let mut c = data[i] as u64;
+                let mut j = 0;
+                while j < res.len() {
+                    let p = (res[j] as u64) * (#base as u64) + c;
+                    res[j] = p as u32;
+                    c = p >> 32;
+                    j += 1;
+                }
+                while c > 0 {
+                    res.push(c as u32);
+                    c >>= 32;
+                }
+                i += 1;
+            }
+        }
     };
 
     quote! {
@@ -439,18 +594,7 @@ fn generate_bigint_push(base: u128, use_be: bool, _rng: &mut impl Rng) -> TokenS
             res.push(#read_digit);
         }
 
-        for &v in &data[leading_zeros..] {
-            let mut carry = v as u64;
-            for digit in res.iter_mut() {
-                let prod = (*digit as u64) * (#base as u64) + carry;
-                *digit = prod as u32;
-                carry = prod >> 32;
-            }
-            while carry > 0 {
-                res.push(carry as u32);
-                carry >>= 32;
-            }
-        }
+        #core
 
         aux.clear();
         #push_digit
@@ -501,6 +645,40 @@ fn generate_bigint_emit(_total_bytes: u64, use_be: bool, _rng: &mut impl Rng) ->
             data = Vec::new();
         }
         aux.clear();
+    }
+}
+
+fn generate_bigint_poly(base: u128, _total_bytes: u64, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        let mut lz = 0;
+        while lz < data.len() && data[lz] == 0 { lz += 1; }
+        let mut poly_acc = Vec::new();
+        let b = #base as u64;
+        for i in lz..data.len() {
+            let mut carry = data[i] as u64;
+            for j in 0..poly_acc.len() {
+                let val = (poly_acc[j] as u64) * b + carry;
+                poly_acc[j] = val as u32;
+                carry = val >> 32;
+            }
+            while carry > 0 {
+                poly_acc.push(carry as u32);
+                carry >>= 32;
+            }
+        }
+        let mut out = vec![0u8; lz];
+        let len = poly_acc.len();
+        for (idx, &v) in poly_acc.iter().enumerate().rev() {
+            let bytes = v.to_be_bytes();
+            if idx == len - 1 {
+                let mut s = 0;
+                while s < 4 && bytes[s] == 0 { s += 1; }
+                out.extend_from_slice(&bytes[s..]);
+            } else {
+                out.extend_from_slice(&bytes);
+            }
+        }
+        data = out;
     }
 }
 
@@ -1009,8 +1187,11 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                         Primitive::BigIntPush { base, use_be } => generate_bigint_push(*base, *use_be, &mut rng),
                         Primitive::BigIntEmit { total_bytes, use_be } => generate_bigint_emit(*total_bytes, *use_be, &mut rng),
                         Primitive::BigIntDecode { base, total_bytes } => generate_bigint_decode(*base, *total_bytes, &mut rng),
+                    Primitive::BitFsm { bits, total_bits } => generate_bit_fsm(*bits, *total_bits, &mut rng),
+                    Primitive::BigIntPoly { base, total_bytes } => generate_bigint_poly(*base, *total_bytes, &mut rng),
+                    Primitive::MapConv { alphabet, key } => generate_map_conv(alphabet, *key, &mut rng),
                         Primitive::Noop { val } => quote! { let _ = #val; },
-                        Primitive::Sync => quote! {  },
+                    Primitive::Sync => quote! { let mut data = data; },
                     }
                 }
             };
@@ -1230,7 +1411,7 @@ mod tests {
                                 b_data = decode_bits_manual(&aux, bits, total_bits);
                                 aux.clear();
                             },
-                            Primitive::BitUnpack { bits, total_bits } => {
+                            Primitive::BitUnpack { bits, total_bits } | Primitive::BitFsm { bits, total_bits } => {
                                 b_data = decode_bits_manual(&b_data, bits, total_bits);
                             },
                             Primitive::BaseEmit { base, in_c, out_c, total_bytes } => {
@@ -1303,7 +1484,7 @@ mod tests {
                                 } else { b_data = Vec::new(); }
                                 aux.clear();
                             },
-                            Primitive::BigIntDecode { base, .. } => {
+                            Primitive::BigIntDecode { base, .. } | Primitive::BigIntPoly { base, .. } => {
                                 let mut res = vec![0u32; 0];
                                 let mut lz = 0;
                                 for &v in &b_data { if v == 0 { lz += 1; } else { break; } }
@@ -1326,6 +1507,19 @@ mod tests {
                                              while skip < 4 && bytes[skip] == 0 { skip += 1; }
                                              out.extend_from_slice(&bytes[skip..]);
                                         } else { out.extend_from_slice(&bytes); }
+                                    }
+                                }
+                                b_data = out;
+                            },
+                            Primitive::MapConv { alphabet, key } => {
+                                let mut map = [255u8; 256];
+                                for (j, &c) in alphabet.iter().enumerate() { map[c as usize] = j as u8; }
+                                let mut out = Vec::new();
+                                for &b in &b_data {
+                                    let v = map[b as usize];
+                                    if v != 255 {
+                                        let _ = key;
+                                        out.push(v);
                                     }
                                 }
                                 b_data = out;
