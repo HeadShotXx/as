@@ -31,6 +31,11 @@ enum Primitive {
     Interleave { step: usize },
     Deinterleave { step: usize },
     BitArithmetic { bits: u32, total_bits: u64 },
+    RotateLeft { rot: u32 },
+    RotateRight { rot: u32 },
+    ArithmeticChain { ops: [u8; 4], kinds: u8 },
+    SwapBuffers,
+    Ghost { val: u8 },
 }
 
 struct Pipeline {
@@ -248,11 +253,25 @@ fn get_pipelines() -> Vec<Pipeline> {
                 } else {
                     data.iter().map(|&b| b.wrapping_sub(val)).collect()
                 };
-                let primitives = match (mode, rng.gen_range(0..2)) {
+                let primitives = match (mode, rng.gen_range(0..3)) {
                     (true, 0) => vec![Primitive::SubTransform { val }],
-                    (true, _) => vec![Primitive::MapSub { val }],
+                    (true, 1) => vec![Primitive::MapSub { val }],
+                    (true, _) => {
+                        let v1 = rng.gen::<u8>();
+                        let v2 = val.wrapping_sub(v1);
+                        let mut ops = [0u8; 4];
+                        ops[0] = v1; ops[1] = v2;
+                        vec![Primitive::ArithmeticChain { ops, kinds: 0x03 }] // sub v1, sub v2
+                    },
                     (false, 0) => vec![Primitive::AddTransform { val }],
-                    (false, _) => vec![Primitive::MapAdd { val }],
+                    (false, 1) => vec![Primitive::MapAdd { val }],
+                    (false, _) => {
+                        let v1 = rng.gen::<u8>();
+                        let v2 = val.wrapping_sub(v1);
+                        let mut ops = [0u8; 4];
+                        ops[0] = v1; ops[1] = v2;
+                        vec![Primitive::ArithmeticChain { ops, kinds: 0x00 }] // add v1, add v2
+                    },
                 };
                 (out, primitives)
             }),
@@ -287,7 +306,7 @@ fn get_pipelines() -> Vec<Pipeline> {
                 let mut rng = thread_rng();
                 let key = rng.gen::<u8>();
                 let out: Vec<u8> = data.iter().map(|&b| b ^ key).collect();
-                let primitives = match rng.gen_range(0..5) {
+                let primitives = match rng.gen_range(0..6) {
                     0 => vec![Primitive::XorTransform { key }],
                     1 => {
                         let k1 = rng.gen::<u8>();
@@ -605,6 +624,51 @@ fn generate_interleave(step: usize, _rng: &mut impl Rng) -> TokenStream2 {
                 }
             }
             data = out;
+        }
+    }
+}
+
+fn generate_rotate_left(rot: u32, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        for b in data.iter_mut() { *b = b.rotate_left(#rot); }
+    }
+}
+
+fn generate_rotate_right(rot: u32, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        for b in data.iter_mut() { *b = b.rotate_right(#rot); }
+    }
+}
+
+fn generate_arithmetic_chain(ops: [u8; 4], kinds: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut code = Vec::new();
+    for i in 0..4 {
+        let op = ops[i];
+        if (kinds >> i) & 1 == 0 {
+            code.push(quote! { *b = b.wrapping_add(#op); });
+        } else {
+            code.push(quote! { *b = b.wrapping_sub(#op); });
+        }
+    }
+    quote! {
+        for b in data.iter_mut() {
+            #(#code)*
+        }
+    }
+}
+
+fn generate_swap_buffers(_rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        ::std::mem::swap(&mut data, aux);
+    }
+}
+
+fn generate_ghost(val: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        {
+            let mut ghost = Vec::new();
+            ghost.push(#val);
+            let _ = ghost;
         }
     }
 }
@@ -1101,13 +1165,15 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         };
     }
 
-    let mut vt_c = Vec::new();
-    let mut rids = Vec::new();
-    let mut dc_junks = Vec::new();
-    let salt = rng.gen::<u32>();
-    let mult = rng.gen::<u32>() | 1;
-    let mut rs = 0u32;
-    
+    enum TaskInternal {
+        Scramble(u32),
+        Unscramble(u32),
+        Corruption(u32, u8),
+        Primitive(Primitive),
+        Ghost(u8),
+    }
+
+    let mut tasks = Vec::new();
     for (seed_sc, seed_corr, mask_corr, primitives) in layers_data {
         fn is_pos_indep(p: &Primitive) -> bool {
             match p {
@@ -1170,52 +1236,86 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
             }
         }
 
-        let mut layer_code = quote! { let mut data = data; };
-
-        let (scramble, unscramble) = generate_index_scrambler(seed_sc, &mut rng);
-        let (init_corr, apply_corr) = generate_state_corruption(seed_corr, mask_corr, &mut rng);
-        
-        layer_code = quote! { 
-            #layer_code 
-            #scramble 
-        };
-
-        for p in final_primitives {
-            let step_code = match p {
-                Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
-                Primitive::BitLoad { bits } => generate_bit_load(bits, &mut rng),
-                Primitive::BitEmit { bits, total_bits } => generate_bit_emit(bits, total_bits, &mut rng),
-                Primitive::BaseLoad { base, in_c } => generate_base_load(base, in_c, &mut rng),
-                Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(base, in_c, out_c, total_bytes, &mut rng),
-                Primitive::BigIntInit => generate_bigint_init(&mut rng),
-                Primitive::BigIntPush { base } => generate_bigint_push(base, &mut rng),
-                Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(total_bytes, &mut rng),
-                Primitive::Noop { val } => quote! { let _ = #val; },
-                Primitive::Sync => quote! { let mut data = data; },
-                Primitive::BitUnpack { bits, total_bits } => generate_bit_unpack(bits, total_bits, &mut rng),
-                Primitive::XorTransform { key } => generate_xor_transform(key, &mut rng),
-                Primitive::AddTransform { val } => generate_add_transform(val, &mut rng),
-                Primitive::SubTransform { val } => generate_sub_transform(val, &mut rng),
-                Primitive::Reverse => generate_reverse(&mut rng),
-                Primitive::BaseDirect { base, in_c, out_c, total_bytes } => generate_base_direct(base, in_c, out_c, total_bytes, &mut rng),
-                Primitive::BigIntDirect { base, total_bytes } => generate_bigint_direct(base, total_bytes, &mut rng),
-                Primitive::MapXor { key } => generate_map_xor(key, &mut rng),
-                Primitive::MapAdd { val } => generate_map_add(val, &mut rng),
-                Primitive::MapSub { val } => generate_map_sub(val, &mut rng),
-                Primitive::Interleave { step } => generate_interleave(step, &mut rng),
-                Primitive::Deinterleave { step } => generate_deinterleave(step, &mut rng),
-                Primitive::BitArithmetic { bits, total_bits } => generate_bit_arithmetic(bits, total_bits, &mut rng),
-            };
-            layer_code = quote! { #layer_code #step_code };
+        tasks.push(TaskInternal::Scramble(seed_sc));
+        if rng.gen_bool(0.2) {
+            match rng.gen_range(0..2) {
+                0 => {
+                    tasks.push(TaskInternal::Primitive(Primitive::SwapBuffers));
+                    tasks.push(TaskInternal::Primitive(Primitive::Ghost { val: rng.gen() }));
+                    tasks.push(TaskInternal::Primitive(Primitive::SwapBuffers));
+                },
+                _ => {
+                    let r = rng.gen_range(1..7);
+                    tasks.push(TaskInternal::Primitive(Primitive::RotateLeft { rot: r }));
+                    tasks.push(TaskInternal::Primitive(Primitive::Ghost { val: rng.gen() }));
+                    tasks.push(TaskInternal::Primitive(Primitive::RotateRight { rot: r }));
+                }
+            }
         }
-        
-        layer_code = quote! { 
-            #layer_code 
-            #init_corr
-            #apply_corr
-            #unscramble 
+        for p in final_primitives {
+            tasks.push(TaskInternal::Primitive(p));
+            if rng.gen_bool(0.1) { tasks.push(TaskInternal::Ghost(rng.gen())); }
+        }
+        tasks.push(TaskInternal::Corruption(seed_corr, mask_corr));
+        tasks.push(TaskInternal::Unscramble(seed_sc));
+    }
+
+    let mut vt_c = Vec::new();
+    let mut rids = Vec::new();
+    let mut dc_junks = Vec::new();
+    let salt = rng.gen::<u32>();
+    let mult = rng.gen::<u32>() | 1;
+    let mut rs = 0u32;
+
+    for task in tasks {
+        let task_code = match task {
+            TaskInternal::Scramble(seed) => {
+                let (sc, _) = generate_index_scrambler(seed, &mut rng);
+                sc
+            },
+            TaskInternal::Unscramble(seed) => {
+                let (_, un) = generate_index_scrambler(seed, &mut rng);
+                un
+            },
+            TaskInternal::Corruption(seed, mask) => {
+                let (init, apply) = generate_state_corruption(seed, mask, &mut rng);
+                quote! { #init #apply }
+            },
+            TaskInternal::Primitive(p) => {
+                match p {
+                    Primitive::Map(table) => generate_obfuscated_map(&table, &mut rng),
+                    Primitive::BitLoad { bits } => generate_bit_load(bits, &mut rng),
+                    Primitive::BitEmit { bits, total_bits } => generate_bit_emit(bits, total_bits, &mut rng),
+                    Primitive::BaseLoad { base, in_c } => generate_base_load(base, in_c, &mut rng),
+                    Primitive::BaseEmit { base, in_c, out_c, total_bytes } => generate_base_emit(base, in_c, out_c, total_bytes, &mut rng),
+                    Primitive::BigIntInit => generate_bigint_init(&mut rng),
+                    Primitive::BigIntPush { base } => generate_bigint_push(base, &mut rng),
+                    Primitive::BigIntEmit { total_bytes } => generate_bigint_emit(total_bytes, &mut rng),
+                    Primitive::Noop { val } => quote! { let _ = #val; },
+                    Primitive::Sync => quote! { let mut data = data; },
+                    Primitive::BitUnpack { bits, total_bits } => generate_bit_unpack(bits, total_bits, &mut rng),
+                    Primitive::XorTransform { key } => generate_xor_transform(key, &mut rng),
+                    Primitive::AddTransform { val } => generate_add_transform(val, &mut rng),
+                    Primitive::SubTransform { val } => generate_sub_transform(val, &mut rng),
+                    Primitive::Reverse => generate_reverse(&mut rng),
+                    Primitive::BaseDirect { base, in_c, out_c, total_bytes } => generate_base_direct(base, in_c, out_c, total_bytes, &mut rng),
+                    Primitive::BigIntDirect { base, total_bytes } => generate_bigint_direct(base, total_bytes, &mut rng),
+                    Primitive::MapXor { key } => generate_map_xor(key, &mut rng),
+                    Primitive::MapAdd { val } => generate_map_add(val, &mut rng),
+                    Primitive::MapSub { val } => generate_map_sub(val, &mut rng),
+                    Primitive::Interleave { step } => generate_interleave(step, &mut rng),
+                    Primitive::Deinterleave { step } => generate_deinterleave(step, &mut rng),
+                    Primitive::BitArithmetic { bits, total_bits } => generate_bit_arithmetic(bits, total_bits, &mut rng),
+                    Primitive::RotateLeft { rot } => generate_rotate_left(rot, &mut rng),
+                    Primitive::RotateRight { rot } => generate_rotate_right(rot, &mut rng),
+                    Primitive::ArithmeticChain { ops, kinds } => generate_arithmetic_chain(ops, kinds, &mut rng),
+                    Primitive::SwapBuffers => generate_swap_buffers(&mut rng),
+                    Primitive::Ghost { val } => generate_ghost(val, &mut rng),
+                }
+            },
+            TaskInternal::Ghost(val) => generate_ghost(val, &mut rng),
         };
-        
+
         let id_val = rng.gen::<u32>();
         let mut arm_rs = rs;
         let rs_salt = rng.gen::<u32>();
@@ -1228,7 +1328,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         // Mandatory junk INSIDE the v-table arm
         let arm_junk = generate_junk_logic(&mut rng, None, Some(&Ident::new("rs", Span::call_site())), &mut arm_rs);
 
-        let arm_key = (id_val ^ rs).wrapping_mul(mult) ^ salt;
+        let arm_key = id_val.wrapping_mul(mult) ^ salt ^ rs;
         
         vt_c.push(quote! {
             #arm_key => {
@@ -1236,7 +1336,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                 let mut rs = rs_in;
                 let lock_in = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
                 for b in data.iter_mut() { *b ^= lock_in; }
-                #layer_code
+                #task_code
                 #core_rs_update
                 #arm_junk
                 let lock_out = (rs ^ (rs >> 13) ^ (rs >> 21)) as u8;
@@ -1298,7 +1398,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         impl<'a> #s_n<'a> {
             fn #m_n(&mut self) -> String {
                 let mut #d_n = |id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>| -> (Vec<u8>, u32) {
-                    match (id.wrapping_mul(#mult) ^ #salt) {
+                    match ((id ^ rs_in).wrapping_mul(#mult) ^ #salt ^ rs_in) {
                         #(#vt_c)*
                         _ => (data.to_vec(), rs_in)
                     }
@@ -1573,6 +1673,25 @@ mod tests {
                             Primitive::BigIntDirect { base, total_bytes } => {
                                 b_data = decode_bigint_direct_manual(&b_data, base, total_bytes);
                             },
+                            Primitive::RotateLeft { rot } => {
+                                for b in b_data.iter_mut() { *b = b.rotate_left(rot); }
+                            },
+                            Primitive::RotateRight { rot } => {
+                                for b in b_data.iter_mut() { *b = b.rotate_right(rot); }
+                            },
+                            Primitive::ArithmeticChain { ops, kinds } => {
+                                for b in b_data.iter_mut() {
+                                    for i in 0..4 {
+                                        let op = ops[i];
+                                        if (kinds >> i) & 1 == 0 { *b = b.wrapping_add(op); }
+                                        else { *b = b.wrapping_sub(op); }
+                                    }
+                                }
+                            },
+                            Primitive::SwapBuffers => {
+                                ::std::mem::swap(&mut b_data, &mut aux);
+                            },
+                            Primitive::Ghost { .. } => {},
                             Primitive::MapXor { key } => {
                                 for b in b_data.iter_mut() { *b ^= key; }
                             },
