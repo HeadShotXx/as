@@ -25,6 +25,12 @@ enum Primitive {
     Reverse,
     BaseDirect { base: u128, in_c: usize, out_c: usize, total_bytes: u64 },
     BigIntDirect { base: u128, total_bytes: u64 },
+    MapXor { key: u8 },
+    MapAdd { val: u8 },
+    MapSub { val: u8 },
+    Interleave { step: usize },
+    Deinterleave { step: usize },
+    BitArithmetic { bits: u32, total_bits: u64 },
 }
 
 struct Pipeline {
@@ -116,18 +122,21 @@ fn get_pipelines() -> Vec<Pipeline> {
             encoder: Box::new(move |data| {
                 let (out, total_bits) = encode_bits(data, 5, &alpha);
                 let mut rng = thread_rng();
-                let primitives = if rng.gen_bool(0.5) {
-                    vec![
+                let primitives = match rng.gen_range(0..3) {
+                    0 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitLoad { bits: 5 },
                         Primitive::Noop { val: 0x32 },
                         Primitive::BitEmit { bits: 5, total_bits }
-                    ]
-                } else {
-                    vec![
+                    ],
+                    1 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitUnpack { bits: 5, total_bits }
-                    ]
+                    ],
+                    _ => vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BitArithmetic { bits: 5, total_bits }
+                    ],
                 };
                 (out, primitives)
             }),
@@ -162,17 +171,20 @@ fn get_pipelines() -> Vec<Pipeline> {
             encoder: Box::new(move |data| {
                 let (out, total_bits) = encode_bits(data, 6, &alpha);
                 let mut rng = thread_rng();
-                let primitives = if rng.gen_bool(0.5) {
-                    vec![
+                let primitives = match rng.gen_range(0..3) {
+                    0 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitLoad { bits: 6 },
                         Primitive::BitEmit { bits: 6, total_bits }
-                    ]
-                } else {
-                    vec![
+                    ],
+                    1 => vec![
                         Primitive::Map(alpha.clone()),
                         Primitive::BitUnpack { bits: 6, total_bits }
-                    ]
+                    ],
+                    _ => vec![
+                        Primitive::Map(alpha.clone()),
+                        Primitive::BitArithmetic { bits: 6, total_bits }
+                    ],
                 };
                 (out, primitives)
             }),
@@ -225,13 +237,57 @@ fn get_pipelines() -> Vec<Pipeline> {
         }
     };
 
+    let arith_p = || {
+        Pipeline {
+            encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
+                let val = rng.gen::<u8>();
+                let mode = rng.gen_bool(0.5); // true: Add, false: Sub
+                let out: Vec<u8> = if mode {
+                    data.iter().map(|&b| b.wrapping_add(val)).collect()
+                } else {
+                    data.iter().map(|&b| b.wrapping_sub(val)).collect()
+                };
+                let primitives = match (mode, rng.gen_range(0..2)) {
+                    (true, 0) => vec![Primitive::SubTransform { val }],
+                    (true, _) => vec![Primitive::MapSub { val }],
+                    (false, 0) => vec![Primitive::AddTransform { val }],
+                    (false, _) => vec![Primitive::MapAdd { val }],
+                };
+                (out, primitives)
+            }),
+        }
+    };
+
+    let perm_p = || {
+        Pipeline {
+            encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
+                let step = rng.gen_range(2..=5);
+                // Interleave for encoding
+                let mut out = Vec::with_capacity(data.len());
+                if data.len() > 0 {
+                    for i in 0..step {
+                        let mut j = i;
+                        while j < data.len() {
+                            out.push(data[j]);
+                            j += step;
+                        }
+                    }
+                }
+                let primitives = vec![Primitive::Deinterleave { step }];
+                (out, primitives)
+            }),
+        }
+    };
+
     let xor_p = || {
         Pipeline {
             encoder: Box::new(move |data| {
                 let mut rng = thread_rng();
                 let key = rng.gen::<u8>();
                 let out: Vec<u8> = data.iter().map(|&b| b ^ key).collect();
-                let primitives = match rng.gen_range(0..4) {
+                let primitives = match rng.gen_range(0..5) {
                     0 => vec![Primitive::XorTransform { key }],
                     1 => {
                         let k1 = rng.gen::<u8>();
@@ -239,20 +295,55 @@ fn get_pipelines() -> Vec<Pipeline> {
                         vec![Primitive::XorTransform { key: k1 }, Primitive::XorTransform { key: k2 }]
                     },
                     2 => vec![Primitive::Reverse, Primitive::XorTransform { key }, Primitive::Reverse],
-                    _ => {
+                    3 => {
                         let v = rng.gen::<u8>();
                         vec![Primitive::AddTransform { val: v }, Primitive::SubTransform { val: v }, Primitive::XorTransform { key }]
-                    }
+                    },
+                    _ => vec![Primitive::MapXor { key }]
                 };
                 (out, primitives)
             }),
         }
     };
 
-    vec![b32(), b36(), b64(), z85(), b91(), xor_p()]
+    vec![b32(), b36(), b64(), z85(), b91(), arith_p(), perm_p(), xor_p()]
 }
 
 // --- HELPERS ---
+
+enum MapSemantic {
+    None,
+    Xor(u8),
+    Add(u8),
+    Sub(u8),
+}
+
+fn identify_map_semantic(table: &[u8]) -> MapSemantic {
+    if table.len() != 256 { return MapSemantic::None; }
+
+    let k = table[0] ^ 0;
+    let mut is_xor = true;
+    for i in 0..256 {
+        if table[i] != (i as u8) ^ k { is_xor = false; break; }
+    }
+    if is_xor { return MapSemantic::Xor(k); }
+
+    let v = table[0].wrapping_sub(0);
+    let mut is_add = true;
+    for i in 0..256 {
+        if table[i] != (i as u8).wrapping_add(v) { is_add = false; break; }
+    }
+    if is_add { return MapSemantic::Add(v); }
+
+    let s = (0u8).wrapping_sub(table[0]);
+    let mut is_sub = true;
+    for i in 0..256 {
+        if table[i] != (i as u8).wrapping_sub(s) { is_sub = false; break; }
+    }
+    if is_sub { return MapSemantic::Sub(s); }
+
+    MapSemantic::None
+}
 
 fn compute_entropy(data: &[u8]) -> u32 {
     data.iter().fold(0u32, |acc, &b| {
@@ -472,6 +563,125 @@ fn generate_base_direct(base: u128, in_c: usize, out_c: usize, total_bytes: u64,
             }
         }
         data = out;
+    }
+}
+
+fn generate_map_xor(key: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut table = [0u8; 256];
+    for i in 0..256 { table[i] = (i as u8) ^ key; }
+    let table_lit = Literal::byte_string(&table);
+    quote! {
+        for b in data.iter_mut() { *b = (#table_lit)[*b as usize]; }
+    }
+}
+
+fn generate_map_add(val: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut table = [0u8; 256];
+    for i in 0..256 { table[i] = (i as u8).wrapping_add(val); }
+    let table_lit = Literal::byte_string(&table);
+    quote! {
+        for b in data.iter_mut() { *b = (#table_lit)[*b as usize]; }
+    }
+}
+
+fn generate_map_sub(val: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut table = [0u8; 256];
+    for i in 0..256 { table[i] = (i as u8).wrapping_sub(val); }
+    let table_lit = Literal::byte_string(&table);
+    quote! {
+        for b in data.iter_mut() { *b = (#table_lit)[*b as usize]; }
+    }
+}
+
+fn generate_interleave(step: usize, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        if data.len() > 0 {
+            let mut out = Vec::with_capacity(data.len());
+            for i in 0..#step {
+                let mut j = i;
+                while j < data.len() {
+                    out.push(data[j]);
+                    j += #step;
+                }
+            }
+            data = out;
+        }
+    }
+}
+
+fn generate_bit_arithmetic(bits: u32, total_bits: u64, _rng: &mut impl Rng) -> TokenStream2 {
+    match bits {
+        6 => quote! {
+            let mut out = Vec::new();
+            let mut bc = 0u64;
+            for chunk in data.chunks(4) {
+                let mut val = 0u64;
+                for (i, &idx) in chunk.iter().enumerate() {
+                    val |= (idx as u64) << (18 - i * 6);
+                }
+                for i in (0..3).rev() {
+                    if bc < #total_bits {
+                        out.push(((val >> (i * 8)) & 0xff) as u8);
+                        bc += 8;
+                    }
+                }
+            }
+            data = out;
+        },
+        5 => quote! {
+            let mut out = Vec::new();
+            let mut bc = 0u64;
+            for chunk in data.chunks(8) {
+                let mut val = 0u64;
+                for (i, &idx) in chunk.iter().enumerate() {
+                    val |= (idx as u64) << (35 - i * 5);
+                }
+                for i in (0..5).rev() {
+                    if bc < #total_bits {
+                        out.push(((val >> (i * 8)) & 0xff) as u8);
+                        bc += 8;
+                    }
+                }
+            }
+            data = out;
+        },
+        _ => quote! {
+            let mut out = Vec::new();
+            let mut acc = 0u128;
+            let mut count = 0u32;
+            let mut bc = 0u64;
+            for &v in data.iter() {
+                acc = (acc << #bits) | (v as u128);
+                count += #bits;
+                while count >= 8 {
+                    count -= 8;
+                    if bc < #total_bits {
+                        out.push((acc >> count) as u8);
+                        bc += 8;
+                    }
+                    acc &= (1 << count) - 1;
+                }
+            }
+            data = out;
+        }
+    }
+}
+
+fn generate_deinterleave(step: usize, _rng: &mut impl Rng) -> TokenStream2 {
+    quote! {
+        if data.len() > 0 {
+            let mut out = vec![0u8; data.len()];
+            let mut idx = 0;
+            for i in 0..#step {
+                let mut j = i;
+                while j < data.len() {
+                    out[j] = data[idx];
+                    idx += 1;
+                    j += #step;
+                }
+            }
+            data = out;
+        }
     }
 }
 
@@ -899,6 +1109,15 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
     let mut rs = 0u32;
     
     for (seed_sc, seed_corr, mask_corr, primitives) in layers_data {
+        fn is_pos_indep(p: &Primitive) -> bool {
+            match p {
+                Primitive::Map(_) | Primitive::XorTransform { .. } | Primitive::AddTransform { .. } |
+                Primitive::SubTransform { .. } | Primitive::MapXor { .. } | Primitive::MapAdd { .. } |
+                Primitive::MapSub { .. } | Primitive::Noop { .. } | Primitive::Sync => true,
+                _ => false,
+            }
+        }
+
         let mut final_primitives = Vec::new();
         for p in primitives {
             if rng.gen_bool(0.2) {
@@ -922,7 +1141,32 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                     _ => final_primitives.push(p),
                 }
             } else {
-                final_primitives.push(p);
+                match &p {
+                    Primitive::Map(table) => {
+                        match identify_map_semantic(table) {
+                            MapSemantic::Xor(k) => final_primitives.push(Primitive::MapXor { key: k }),
+                            MapSemantic::Add(v) => final_primitives.push(Primitive::MapAdd { val: v }),
+                            MapSemantic::Sub(s) => final_primitives.push(Primitive::MapSub { val: s }),
+                            _ => final_primitives.push(p),
+                        }
+                    },
+                    _ => final_primitives.push(p),
+                }
+            }
+        }
+
+        let all_pos_indep = final_primitives.iter().all(is_pos_indep);
+        if all_pos_indep && rng.gen_bool(0.3) {
+            match rng.gen_range(0..2) {
+                0 => {
+                    final_primitives.insert(0, Primitive::Reverse);
+                    final_primitives.push(Primitive::Reverse);
+                },
+                _ => {
+                    let step = rng.gen_range(2..=5);
+                    final_primitives.insert(0, Primitive::Interleave { step });
+                    final_primitives.push(Primitive::Deinterleave { step });
+                }
             }
         }
 
@@ -955,6 +1199,12 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                 Primitive::Reverse => generate_reverse(&mut rng),
                 Primitive::BaseDirect { base, in_c, out_c, total_bytes } => generate_base_direct(base, in_c, out_c, total_bytes, &mut rng),
                 Primitive::BigIntDirect { base, total_bytes } => generate_bigint_direct(base, total_bytes, &mut rng),
+                Primitive::MapXor { key } => generate_map_xor(key, &mut rng),
+                Primitive::MapAdd { val } => generate_map_add(val, &mut rng),
+                Primitive::MapSub { val } => generate_map_sub(val, &mut rng),
+                Primitive::Interleave { step } => generate_interleave(step, &mut rng),
+                Primitive::Deinterleave { step } => generate_deinterleave(step, &mut rng),
+                Primitive::BitArithmetic { bits, total_bits } => generate_bit_arithmetic(bits, total_bits, &mut rng),
             };
             layer_code = quote! { #layer_code #step_code };
         }
@@ -1167,6 +1417,34 @@ mod tests {
     }
 
     #[test]
+    fn test_cross_family_equivalence() {
+        let original = b"Polymorphic Test".to_vec();
+        let b64_alpha = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".to_vec();
+
+        // Encode using bit-based
+        let (encoded, total_bits) = encode_bits(&original, 6, &b64_alpha);
+
+        // Decoder A: BitUnpack
+        let mut map = [255u8; 256];
+        for (i, &c) in b64_alpha.iter().enumerate() { map[c as usize] = i as u8; }
+        let mut indices = Vec::new();
+        for &b in &encoded { indices.push(map[b as usize]); }
+
+        let decoded_a = decode_bits_manual(&indices, 6, total_bits);
+        assert_eq!(decoded_a, original);
+
+        // Decoder B: BitArithmetic
+        let mut decoded_b = Vec::new();
+        let mut bc = 0u64;
+        for chunk in indices.chunks(4) {
+            let mut val = 0u64;
+            for (i, &idx) in chunk.iter().enumerate() { val |= (idx as u64) << (18 - i * 6); }
+            for i in (0..3).rev() { if bc < total_bits { decoded_b.push(((val >> (i * 8)) & 0xff) as u8); bc += 8; } }
+        }
+        assert_eq!(decoded_b, original);
+    }
+
+    #[test]
     fn test_random_pipelines() {
         let mut rng = thread_rng();
         let originals = vec![
@@ -1257,6 +1535,26 @@ mod tests {
                             Primitive::BitUnpack { bits, total_bits } => {
                                 b_data = decode_bits_manual(&b_data, bits, total_bits);
                             },
+                            Primitive::BitArithmetic { bits, total_bits } => {
+                                let mut out = Vec::new();
+                                let mut bc = 0u64;
+                                if bits == 6 {
+                                    for chunk in b_data.chunks(4) {
+                                        let mut val = 0u64;
+                                        for (i, &idx) in chunk.iter().enumerate() { val |= (idx as u64) << (18 - i * 6); }
+                                        for i in (0..3).rev() { if bc < total_bits { out.push(((val >> (i * 8)) & 0xff) as u8); bc += 8; } }
+                                    }
+                                } else if bits == 5 {
+                                    for chunk in b_data.chunks(8) {
+                                        let mut val = 0u64;
+                                        for (i, &idx) in chunk.iter().enumerate() { val |= (idx as u64) << (35 - i * 5); }
+                                        for i in (0..5).rev() { if bc < total_bits { out.push(((val >> (i * 8)) & 0xff) as u8); bc += 8; } }
+                                    }
+                                } else {
+                                    out = decode_bits_manual(&b_data, bits, total_bits);
+                                }
+                                b_data = out;
+                            },
                             Primitive::XorTransform { key } => {
                                 for b in b_data.iter_mut() { *b ^= key; }
                             },
@@ -1274,6 +1572,43 @@ mod tests {
                             },
                             Primitive::BigIntDirect { base, total_bytes } => {
                                 b_data = decode_bigint_direct_manual(&b_data, base, total_bytes);
+                            },
+                            Primitive::MapXor { key } => {
+                                for b in b_data.iter_mut() { *b ^= key; }
+                            },
+                            Primitive::MapAdd { val } => {
+                                for b in b_data.iter_mut() { *b = b.wrapping_add(val); }
+                            },
+                            Primitive::MapSub { val } => {
+                                for b in b_data.iter_mut() { *b = b.wrapping_sub(val); }
+                            },
+                            Primitive::Interleave { step } => {
+                                let mut out = Vec::with_capacity(b_data.len());
+                                if b_data.len() > 0 {
+                                    for i in 0..step {
+                                        let mut j = i;
+                                        while j < b_data.len() {
+                                            out.push(b_data[j]);
+                                            j += step;
+                                        }
+                                    }
+                                }
+                                b_data = out;
+                            },
+                            Primitive::Deinterleave { step } => {
+                                if b_data.len() > 0 {
+                                    let mut out = vec![0u8; b_data.len()];
+                                    let mut idx = 0;
+                                    for i in 0..step {
+                                        let mut j = i;
+                                        while j < b_data.len() {
+                                            out[j] = b_data[idx];
+                                            idx += 1;
+                                            j += step;
+                                        }
+                                    }
+                                    b_data = out;
+                                }
                             },
                             _ => {}
                         }
