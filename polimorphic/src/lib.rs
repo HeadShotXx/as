@@ -1132,29 +1132,93 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
 }
 
 fn generate_fragmented_string_recovery(bytes_var: &Ident, rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
-    let s_n = Ident::new(&format!("S_{}", rng.gen::<u32>()), Span::call_site());
-    let chunk_size = rng.gen_range(3usize..=10usize);
+    let variant = rng.gen_range(0..5);
+    match variant {
+        0 => {
+            let s_n = Ident::new(&format!("S_{}", rng.gen::<u32>()), Span::call_site());
+            let chunk_size = rng.gen_range(3usize..=10usize);
 
-    quote! {
-        {
-            struct #s_n(Vec<u8>, u32);
-            impl ::std::fmt::Display for #s_n {
-                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                    let mut temp_rs = self.1;
-                    let lock = (temp_rs ^ (temp_rs >> 13) ^ (temp_rs >> 21)) as u8;
-                    let unlocked: Vec<u8> = self.0.iter().map(|&b| b ^ lock).collect();
-                    for chunk in unlocked.chunks(#chunk_size) {
-                        let s: String = chunk.iter().map(|&b| {
-                            temp_rs = temp_rs.wrapping_add(b as u32).rotate_left(3);
-                            b as char
-                        }).collect();
-                        f.write_str(&s)?;
+            quote! {
+                {
+                    struct #s_n(Vec<u8>, u32);
+                    impl ::std::fmt::Display for #s_n {
+                        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                            let mut temp_rs = self.1;
+                            let lock = (temp_rs ^ (temp_rs >> 13) ^ (temp_rs >> 21)) as u8;
+                            let unlocked: Vec<u8> = self.0.iter().map(|&b| b ^ lock).collect();
+                            for chunk in unlocked.chunks(#chunk_size) {
+                                let s: String = chunk.iter().map(|&b| {
+                                    temp_rs = temp_rs.wrapping_add(b as u32).rotate_left(3);
+                                    b as char
+                                }).collect();
+                                f.write_str(&s)?;
+                            }
+                            let _ = temp_rs;
+                            Ok(())
+                        }
                     }
-                    let _ = temp_rs;
-                    Ok(())
+                    #s_n(#bytes_var, #rs_var).to_string()
                 }
             }
-            #s_n(#bytes_var, #rs_var).to_string()
+        },
+        1 => {
+            quote! {
+                {
+                    let mut temp_rs = #rs_var;
+                    let lock = (temp_rs ^ (temp_rs >> 13) ^ (temp_rs >> 21)) as u8;
+                    #bytes_var.iter().map(|&b| {
+                        let db = b ^ lock;
+                        temp_rs = temp_rs.wrapping_add(db as u32).rotate_left(3);
+                        db as char
+                    }).collect::<String>()
+                }
+            }
+        },
+        2 => {
+            quote! {
+                {
+                    let mut temp_rs = #rs_var;
+                    let lock = (temp_rs ^ (temp_rs >> 13) ^ (temp_rs >> 21)) as u8;
+                    let mut s = String::with_capacity(#bytes_var.len());
+                    for &b in &#bytes_var {
+                        let db = b ^ lock;
+                        temp_rs = temp_rs.wrapping_add(db as u32).rotate_left(3);
+                        s.push(db as char);
+                    }
+                    s
+                }
+            }
+        },
+        3 => {
+            let f_n = Ident::new(&format!("f_{}", rng.gen::<u32>()), Span::call_site());
+            quote! {
+                {
+                    let mut #f_n = |data: &[u8], mut trs: u32| -> String {
+                        let lock = (trs ^ (trs >> 13) ^ (trs >> 21)) as u8;
+                        data.iter().map(|&b| {
+                            let db = b ^ lock;
+                            trs = trs.wrapping_add(db as u32).rotate_left(3);
+                            db as char
+                        }).collect()
+                    };
+                    #f_n(&#bytes_var, #rs_var)
+                }
+            }
+        },
+        _ => {
+            quote! {
+                {
+                    let mut temp_rs = #rs_var;
+                    let lock = (temp_rs ^ (temp_rs >> 13) ^ (temp_rs >> 21)) as u8;
+                    let mut unlocked = Vec::with_capacity(#bytes_var.len());
+                    for &b in &#bytes_var {
+                        let db = b ^ lock;
+                        temp_rs = temp_rs.wrapping_add(db as u32).rotate_left(3);
+                        unlocked.push(db);
+                    }
+                    String::from_utf8(unlocked).expect("UTF-8 recovery failed")
+                }
+            }
         }
     }
 }
@@ -1169,7 +1233,7 @@ fn generate_polymorphic_decode_chain(
 ) -> TokenStream2 {
     let rs_n = Ident::new("rs", Span::call_site());
     
-    match rng.gen_range(0..3) {
+    match rng.gen_range(0..4) {
         0 => { // State machine
             let mut arms = Vec::new();
             let s_n = Ident::new("s", Span::call_site());
@@ -1255,7 +1319,7 @@ fn generate_polymorphic_decode_chain(
             let fv = Ident::new("nd_0", Span::call_site());
             quote! { { let mut #fv = #initial_input_var.clone(); let mut #rs_n = 0u32; #nl } }
         },
-        _ => { // Linear
+        2 => { // Linear
             let mut st = Vec::new();
             let cv = Ident::new("cv", Span::call_site());
             
@@ -1287,6 +1351,45 @@ fn generate_polymorphic_decode_chain(
             }
             
             quote! { { #(#st)* frs } }
+        },
+        _ => { // Recursive
+            let rec_n = Ident::new(&format!("rec_{}", rng.gen::<u32>()), Span::call_site());
+            let ids_lit = quote! { &[#(#transform_ids),*] };
+            let mut junk_arms = Vec::new();
+            for (i, junk) in junk_tokens.iter().enumerate() {
+                junk_arms.push(quote! { #i => { #junk } });
+            }
+
+            let data_rec = Ident::new("d_rec", Span::call_site());
+            let rs_rec = Ident::new("rs_rec", Span::call_site());
+            let fr = generate_fragmented_string_recovery(&data_rec, &rs_rec, rng);
+
+            quote! {
+                {
+                    fn #rec_n(
+                        idx: usize,
+                        mut #data_rec: Vec<u8>,
+                        mut #rs_rec: u32,
+                        ids: &[u32],
+                        aux: &mut Vec<u8>,
+                        dispatch: &mut dyn FnMut(u32, &[u8], u32, &mut Vec<u8>) -> (Vec<u8>, u32)
+                    ) -> String {
+                        if idx >= ids.len() {
+                            return #fr;
+                        }
+                        let (next_data, next_rs) = dispatch(ids[idx] ^ #rs_rec, &#data_rec, #rs_rec, aux);
+                        #data_rec = next_data;
+                        #rs_rec = next_rs;
+                        match idx {
+                            #(#junk_arms)*
+                            _ => {}
+                        }
+                        #rec_n(idx + 1, #data_rec, #rs_rec, ids, aux, dispatch)
+                    }
+                    let mut #initial_input_var = #initial_input_var.clone();
+                    #rec_n(0, #initial_input_var, 0u32, #ids_lit, &mut #aux_var, &mut #dispatch_name)
+                }
+            }
         }
     }
 }
