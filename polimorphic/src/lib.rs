@@ -36,6 +36,8 @@ enum Primitive {
     ArithmeticChain { ops: [u8; 4], kinds: u8 },
     SwapBuffers,
     Ghost { val: u8 },
+    CustomTransform { op: u8, kind: u8 },
+    MapCombined { table: Vec<u8>, post_op: u8, post_kind: u8 },
 }
 
 struct Pipeline {
@@ -656,19 +658,31 @@ fn generate_bit_unpack(bits: u32, total_bits: u64, _rng: &mut impl Rng) -> Token
 
 fn generate_xor_transform(key: u8, _rng: &mut impl Rng) -> TokenStream2 {
     quote! {
-        for b in data.iter_mut() { *b ^= #key; }
+        for b in data.iter_mut() {
+            let n = (rs >> 8) as u8;
+            *b = b.wrapping_add(n).wrapping_sub(n);
+            *b ^= #key;
+        }
     }
 }
 
 fn generate_add_transform(val: u8, _rng: &mut impl Rng) -> TokenStream2 {
     quote! {
-        for b in data.iter_mut() { *b = b.wrapping_add(#val); }
+        for b in data.iter_mut() {
+            let n = (rs >> 16) as u8;
+            *b ^= n ^ n;
+            *b = b.wrapping_add(#val);
+        }
     }
 }
 
 fn generate_sub_transform(val: u8, _rng: &mut impl Rng) -> TokenStream2 {
     quote! {
-        for b in data.iter_mut() { *b = b.wrapping_sub(#val); }
+        for b in data.iter_mut() {
+            let n = (rs & 0xFF) as u8;
+            *b = b.rotate_left(1).rotate_right(1);
+            *b = b.wrapping_sub(#val);
+        }
     }
 }
 
@@ -789,6 +803,44 @@ fn generate_ghost(val: u8, rng: &mut impl Rng, rs_var: Option<&Ident>, rs_compil
             #(#code)*
             let _ = ghost;
         }
+    }
+}
+
+fn generate_custom_transform(op: u8, kind: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    match kind {
+        0 => quote! { for b in data.iter_mut() { *b = b.wrapping_add(#op); } },
+        1 => quote! { for b in data.iter_mut() { *b = b.wrapping_sub(#op); } },
+        2 => quote! { for b in data.iter_mut() { *b ^= #op; } },
+        3 => {
+            let rot = (op % 7 + 1) as u32;
+            quote! { for b in data.iter_mut() { *b = b.rotate_left(#rot); } }
+        },
+        _ => {
+            let rot = (op % 7 + 1) as u32;
+            quote! { for b in data.iter_mut() { *b = b.rotate_right(#rot); } }
+        },
+    }
+}
+
+fn generate_map_combined(alphabet: &[u8], post_op: u8, post_kind: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut map = vec![255u8; 256];
+    for (i, &c) in alphabet.iter().enumerate() { map[c as usize] = i as u8; }
+    let map_lit = Literal::byte_string(&map);
+
+    let op_code = match post_kind {
+        0 => quote! { v = v.wrapping_add(#post_op).wrapping_sub(#post_op); },
+        1 => quote! { v = v.wrapping_sub(#post_op).wrapping_add(#post_op); },
+        _ => quote! { v = (v ^ #post_op) ^ #post_op; },
+    };
+
+    quote! {
+        data = data.iter().filter_map(|&b| {
+            let mut v = (#map_lit)[b as usize];
+            if v == 255 { None } else {
+                #op_code
+                Some(v)
+            }
+        }).collect();
     }
 }
 
@@ -1312,6 +1364,28 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
 
         let mut final_primitives = Vec::new();
         for p in primitives {
+            let mut p = p;
+            // Phase 1: Semantic Role Shifting (Overlap)
+            if rng.gen_bool(0.3) {
+                p = match p {
+                    Primitive::XorTransform { key } => Primitive::CustomTransform { op: key, kind: 2 },
+                    Primitive::AddTransform { val } => Primitive::CustomTransform { op: val, kind: 0 },
+                    Primitive::SubTransform { val } => Primitive::CustomTransform { op: val, kind: 1 },
+                    Primitive::RotateLeft { rot } => {
+                        let mut table = [0u8; 256];
+                        for i in 0..256 { table[i] = (i as u8).rotate_left(rot); }
+                        Primitive::Map(table.to_vec())
+                    },
+                    Primitive::Map(table) => {
+                        let post_op = rng.gen::<u8>();
+                        let post_kind = rng.gen_range(0..3);
+                        Primitive::MapCombined { table: table.clone(), post_op, post_kind }
+                    },
+                    _ => p,
+                };
+            }
+
+            // Phase 2: Multi-step expansion
             if rng.gen_bool(0.2) {
                 match p {
                     Primitive::XorTransform { key } => {
@@ -1334,7 +1408,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                 }
             } else {
                 match &p {
-                    Primitive::Map(table) => {
+                    Primitive::Map(ref table) => {
                         match identify_map_semantic(table) {
                             MapSemantic::Xor(k) => final_primitives.push(Primitive::MapXor { key: k }),
                             MapSemantic::Add(v) => final_primitives.push(Primitive::MapAdd { val: v }),
@@ -1449,6 +1523,8 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                             Primitive::ArithmeticChain { ops, kinds } => generate_arithmetic_chain(ops, kinds, &mut rng),
                             Primitive::SwapBuffers => generate_swap_buffers(&mut rng),
                     Primitive::Ghost { val } => generate_ghost(val, &mut rng, Some(&Ident::new("rs", Span::call_site())), &mut arm_rs),
+                    Primitive::CustomTransform { op, kind } => generate_custom_transform(op, kind, &mut rng),
+                    Primitive::MapCombined { ref table, post_op, post_kind } => generate_map_combined(table, post_op, post_kind, &mut rng),
                         }
                     },
             TaskInternal::Ghost(val) => generate_ghost(val, &mut rng, Some(&Ident::new("rs", Span::call_site())), &mut arm_rs),
@@ -1654,6 +1730,50 @@ mod tests {
         while out.len() > total_bytes as usize { out.remove(0); }
         while out.len() < total_bytes as usize { out.insert(0, 0); }
         out
+    }
+
+    #[test]
+    fn test_hybrid_primitives() {
+        let original = b"Hybrid Test".to_vec();
+
+        // CustomTransform (Xor)
+        let mut b_data = original.clone();
+        for b in b_data.iter_mut() {
+            let op = 0x55;
+            let kind = 2; // XOR
+            match kind {
+                0 => *b = b.wrapping_add(op),
+                1 => *b = b.wrapping_sub(op),
+                2 => *b ^= op,
+                _ => {},
+            }
+        }
+        for b in b_data.iter_mut() { *b ^= 0x55; }
+        assert_eq!(b_data, original);
+
+        // MapCombined Equivalence
+        let alphabet = b"ABC".to_vec();
+        let data_orig = b"ABC".to_vec();
+        // Manual Map simulation
+        let mut map = [255u8; 256];
+        for (i, &c) in alphabet.iter().enumerate() { map[c as usize] = i as u8; }
+        let mut data_map = Vec::new();
+        for &b in &data_orig {
+            let v = map[b as usize];
+            if v != 255 { data_map.push(v); }
+        }
+
+        let post_op = 10;
+        let mut data_comb = Vec::new();
+        for &b in &data_orig {
+            let mut v = map[b as usize];
+            if v != 255 {
+                v = v.wrapping_add(post_op).wrapping_sub(post_op);
+                data_comb.push(v);
+            }
+        }
+
+        assert_eq!(data_comb, data_map);
     }
 
     #[test]
@@ -1869,6 +1989,27 @@ mod tests {
                                         }
                                     }
                                     b_data = out;
+                                }
+                            },
+                            Primitive::CustomTransform { op, kind } => {
+                                for b in b_data.iter_mut() {
+                                    match kind {
+                                        0 => *b = b.wrapping_add(op),
+                                        1 => *b = b.wrapping_sub(op),
+                                        2 => *b ^= op,
+                                        3 => *b = b.rotate_left((op % 7 + 1) as u32),
+                                        _ => *b = b.rotate_right((op % 7 + 1) as u32),
+                                    }
+                                }
+                            },
+                            Primitive::MapCombined { ref table, post_op, post_kind } => {
+                                for b in b_data.iter_mut() {
+                                    *b = table[*b as usize];
+                                    match post_kind {
+                                        0 => *b = b.wrapping_add(post_op),
+                                        1 => *b = b.wrapping_sub(post_op),
+                                        _ => *b ^= post_op,
+                                    }
                                 }
                             },
                             _ => {}
