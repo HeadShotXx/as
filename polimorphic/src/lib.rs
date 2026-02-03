@@ -415,7 +415,7 @@ fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 
             data = data.iter().filter_map(|&b| {
                 let v = (#map_lit)[b as usize];
                 if v == 255 { None } else { Some(v) }
-            }).collect();
+            }).collect::<Vec<u8>>();
         }
     }
 }
@@ -840,7 +840,7 @@ fn generate_map_combined(alphabet: &[u8], post_op: u8, post_kind: u8, _rng: &mut
                 #op_code
                 Some(v)
             }
-        }).collect();
+        }).collect::<Vec<u8>>();
     }
 }
 
@@ -1092,7 +1092,7 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
     let core = match rng.gen_range(0..3) {
         0 => quote! {
             let mut #k_n = self.key;
-            let mut #output_var = Vec::with_capacity(#input_expr.len());
+            let mut #output_var: Vec<u8> = Vec::with_capacity(#input_expr.len());
             for byte in #input_expr.iter() {
                 let #b_n = *byte;
                 #output_var.push(#b_n ^ #k_n);
@@ -1102,7 +1102,7 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
         },
         1 => quote! {
             let mut #k_n = self.key;
-            let mut #output_var = Vec::new();
+            let mut #output_var: Vec<u8> = Vec::new();
             let mut i = 0;
             while i < #input_expr.len() {
                 let #b_n = #input_expr[i];
@@ -1294,7 +1294,7 @@ fn generate_cfg_node(
             let r = generate_cfg_node(right, &m2, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
             quote! {
                 #l
-                let mut #m2 = #m_var.clone();
+                let mut #m2: Vec<u8> = #m_var.clone();
                 #r
                 #m_var = #m2;
             }
@@ -1443,7 +1443,7 @@ fn generate_unbounded_cfg_graph(
         {
             let mut #s_n = #start_s;
             let mut #ph_n = 0u32;
-            let mut #m_var = #initial_input_var.clone();
+            let mut #m_var: Vec<u8> = #initial_input_var.clone();
             let mut #rs_var = 0u32;
             loop {
                 match #s_n {
@@ -1520,7 +1520,7 @@ fn generate_polymorphic_decode_chain(
             let initial_s = shuffled[0];
             quote! {
                 let mut #s_n = #initial_s;
-                let mut #m_n = #initial_input_var.clone();
+                let mut #m_n: Vec<u8> = #initial_input_var.clone();
                 let mut #rs_n = 0u32;
                 loop { match #s_n { #(#arms)* } }
             }
@@ -1567,12 +1567,12 @@ fn generate_polymorphic_decode_chain(
             }
             
             let fv = Ident::new("nd_0", Span::call_site());
-            quote! { { let mut #fv = #initial_input_var.clone(); let mut #rs_n = 0u32; #nl } }
+            quote! { { let mut #fv: Vec<u8> = #initial_input_var.clone(); let mut #rs_n = 0u32; #nl } }
         },
         2 => { // Linear with Divergent Paths
             let mut st = Vec::new();
             let cv = Ident::new("cv", Span::call_site());
-            st.push(quote! { let mut #cv = #initial_input_var.clone(); });
+            st.push(quote! { let mut #cv: Vec<u8> = #initial_input_var.clone(); });
             st.push(quote! { let mut #rs_n = 0u32; });
             
             for (i, &id) in transform_ids.iter().enumerate() {
@@ -1622,7 +1622,7 @@ fn generate_polymorphic_decode_chain(
             let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
 
             quote! {
-                let mut #m_n = #initial_input_var.clone();
+                let mut #m_n: Vec<u8> = #initial_input_var.clone();
                 let mut #rs_n = 0u32;
                 let mut #pc_n = 0usize;
                 let #ops_n = [#( #transform_ids ),*];
@@ -1640,7 +1640,7 @@ fn generate_polymorphic_decode_chain(
         },
         4 => { // Divergent/Convergent Paths
             let mut st = Vec::new();
-            st.push(quote! { let mut #m_n = #initial_input_var.clone(); });
+            st.push(quote! { let mut #m_n: Vec<u8> = #initial_input_var.clone(); });
             st.push(quote! { let mut #rs_n = 0u32; });
             for (_i, (id, junk)) in tasks.iter().enumerate() {
                 let op = generate_opaque_predicate(&rs_n, rng);
@@ -1693,7 +1693,7 @@ fn generate_polymorphic_decode_chain(
             let cfg = generate_cfg_node(&tasks, &m_n, &rs_n, aux_var, dispatch_name, rng, 0, Some(&cc_n));
             let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
             quote! {
-                let mut #m_n = #initial_input_var.clone();
+                let mut #m_n: Vec<u8> = #initial_input_var.clone();
                 let mut #rs_n = 0u32;
                 let mut #cc_n = 0usize;
                 #cfg
@@ -1727,7 +1727,7 @@ fn generate_polymorphic_decode_chain(
             arms.push(quote! { #recovery_state => break #fr, });
             let start_s = shuffled[0];
             quote! {
-                let mut #m_n = #initial_input_var.clone();
+                let mut #m_n: Vec<u8> = #initial_input_var.clone();
                 let mut #rs_n = 0u32;
                 let mut #s_n = #start_s;
                 loop { match #s_n { #(#arms)* _ => break String::new(), } }
@@ -1738,7 +1738,7 @@ fn generate_polymorphic_decode_chain(
             let r1 = Ident::new("r1", Span::call_site());
             let r2 = Ident::new("r2", Span::call_site());
             let mut st = Vec::new();
-            st.push(quote! { let mut #r0 = #initial_input_var.clone(); let mut #r1 = Vec::new(); let mut #r2 = Vec::new(); });
+            st.push(quote! { let mut #r0: Vec<u8> = #initial_input_var.clone(); let mut #r1: Vec<u8> = Vec::new(); let mut #r2: Vec<u8> = Vec::new(); });
             for (i, (id, junk)) in tasks.iter().enumerate() {
                 let src = match i % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
                 let dst = match (i + 1) % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
@@ -2109,7 +2109,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
                         _ => (data.to_vec(), rs_in)
                     }
                 }
-                let mut #a_v = Vec::new();
+                let mut #a_v: Vec<u8> = Vec::new();
                 let mut rs_junk = 0u32;
                 let mut #d_b_i = { #rl #dl_c db };
                 let mut #i_v = #d_b_i;
