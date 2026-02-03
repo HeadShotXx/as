@@ -1207,6 +1207,113 @@ fn generate_opaque_predicate(rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2
     }
 }
 
+fn generate_cfg_node(
+    tasks: &[(u32, TokenStream2)],
+    m_var: &Ident,
+    rs_var: &Ident,
+    aux_var: &Ident,
+    dispatch_name: &Ident,
+    rng: &mut impl Rng,
+    depth: usize,
+    cc_var: Option<&Ident>,
+) -> TokenStream2 {
+    if tasks.is_empty() { return quote! {}; }
+
+    let cc_inc = if let Some(cc) = cc_var { quote! { #cc += 1; } } else { quote! {} };
+
+    if tasks.len() == 1 || depth >= 4 {
+        let mut st = Vec::new();
+        for (id, junk) in tasks {
+            st.push(quote! {
+                let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
+                #m_var = res;
+                #rs_var = next_rs;
+                #cc_inc
+                #junk
+            });
+        }
+        return quote! { #(#st)* };
+    }
+
+    let split_idx = rng.gen_range(1..tasks.len());
+    let (left, right) = tasks.split_at(split_idx);
+
+    match rng.gen_range(0..5) {
+        0 => { // Sequence
+            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            let r = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            quote! { #l #r }
+        },
+        1 => { // Scrambled FSM Node (Order Preserving)
+            let mut arms = Vec::new();
+            let s_n = Ident::new(&format!("s_{}_{}", depth, rng.gen::<u32>()), Span::call_site());
+            let mut states: Vec<usize> = (0..left.len()).collect();
+            states.shuffle(rng);
+            let exit_s = left.len() + 7;
+
+            for i in 0..left.len() {
+                let (id, junk) = &left[i];
+                let current_s = states[i];
+                let next_s = if i + 1 < left.len() { states[i + 1] } else { exit_s };
+                arms.push(quote! {
+                    #current_s => {
+                        let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
+                        #m_var = res;
+                        #rs_var = next_rs;
+                        #s_n = #next_s;
+                        #cc_inc
+                        #junk
+                    }
+                });
+            }
+            let start_s = states[0];
+            let l_node = quote! {
+                let mut #s_n = #start_s;
+                while #s_n != #exit_s {
+                    match #s_n {
+                        #(#arms)*
+                        _ => break,
+                    }
+                }
+            };
+            let r_node = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            quote! { #l_node #r_node }
+        },
+        2 => { // Opaque Predicate Wrapper
+            let op = generate_opaque_predicate(rs_var, rng);
+            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            let r = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            quote! {
+                if #op { #l } else { #l }
+                #r
+            }
+        },
+        3 => { // Double-Buffered Node
+            let m2 = Ident::new(&format!("m2_{}_{}", depth, rng.gen::<u32>()), Span::call_site());
+            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            let r = generate_cfg_node(right, &m2, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            quote! {
+                #l
+                let mut #m2 = #m_var.clone();
+                #r
+                #m_var = #m2;
+            }
+        },
+        _ => { // Loop-Jump
+            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            let r = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
+            let loop_label = syn::Lifetime::new(&format!("'L_{}_{}", depth, rng.gen::<u32>()), Span::call_site());
+            quote! {
+                #loop_label: loop {
+                    #l
+                    break #loop_label;
+                }
+                #r
+            }
+        }
+    }
+}
+
 fn generate_polymorphic_decode_chain(
     transform_ids: &[u32],
     junk_tokens: &[TokenStream2],
@@ -1216,8 +1323,10 @@ fn generate_polymorphic_decode_chain(
     rng: &mut impl Rng,
 ) -> TokenStream2 {
     let rs_n = Ident::new("rs", Span::call_site());
-    
-    match rng.gen_range(0..6) {
+    let m_n = Ident::new("m", Span::call_site());
+    let tasks: Vec<(u32, TokenStream2)> = transform_ids.iter().cloned().zip(junk_tokens.iter().cloned()).collect();
+
+    match rng.gen_range(0..10) {
         0 => { // State machine (Scrambled)
             let mut arms = Vec::new();
             let s_n = Ident::new("s", Span::call_site());
@@ -1246,7 +1355,7 @@ fn generate_polymorphic_decode_chain(
                                 #rs_n = next_rs;
                                 #s_n = #ns;
                             } else {
-                                #s_n = #current_s;
+                                #s_n = 0xDEAD;
                             }
                             #junk
                         }
@@ -1390,41 +1499,26 @@ fn generate_polymorphic_decode_chain(
         },
         4 => { // Divergent/Convergent Paths
             let mut st = Vec::new();
-            let m_n = Ident::new("m", Span::call_site());
             st.push(quote! { let mut #m_n = #initial_input_var.clone(); });
             st.push(quote! { let mut #rs_n = 0u32; });
-
-            for (i, &id) in transform_ids.iter().enumerate() {
+            for (_i, (id, junk)) in tasks.iter().enumerate() {
                 let op = generate_opaque_predicate(&rs_n, rng);
-                let junk = &junk_tokens[i];
                 st.push(quote! {
                     let (d, r) = if #op {
                         #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var)
                     } else {
                         #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var)
                     };
-                    #m_n = d; #rs_n = r;
-                    #junk
+                    #m_n = d; #rs_n = r; #junk
                 });
             }
-            let fb_n = Ident::new("fb", Span::call_site());
-            let nr_n = Ident::new("nr", Span::call_site());
-            let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
-            st.push(quote! {
-                {
-                    let #fb_n = #m_n;
-                    let #nr_n = #rs_n;
-                    #fr
-                }
-            });
-            quote! { { #(#st)* } }
+            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
+            quote! { { #(#st)* #fr } }
         },
-        _ => { // Recursive Continuation
+        5 => { // Recursive Continuation
             let unfold_n = Ident::new("unfold", Span::call_site());
-
             let mut cases = Vec::new();
-            for (i, &id) in transform_ids.iter().enumerate() {
-                let junk = &junk_tokens[i];
+            for (i, (id, junk)) in tasks.iter().enumerate() {
                 cases.push(quote! {
                     #i => {
                         let (res_data, next_rs) = #dispatch_name(#id ^ rs_val, &m_val, rs_val, aux_val);
@@ -1433,11 +1527,9 @@ fn generate_polymorphic_decode_chain(
                     }
                 });
             }
-
             let fb_n = Ident::new("fb", Span::call_site());
             let nr_n = Ident::new("nr", Span::call_site());
             let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
-
             quote! {
                 {
                     fn #unfold_n(idx: usize, m_val: Vec<u8>, rs_val: u32, aux_val: &mut Vec<u8>) -> String {
@@ -1453,6 +1545,91 @@ fn generate_polymorphic_decode_chain(
                     #unfold_n(0, #initial_input_var.clone(), 0u32, &mut #aux_var)
                 }
             }
+        },
+        6 => { // Truly Dynamic Recursive (Fragment Composition) with Stealth Completion
+            let cc_n = Ident::new("cc", Span::call_site());
+            let total = tasks.len();
+            let cfg = generate_cfg_node(&tasks, &m_n, &rs_n, aux_var, dispatch_name, rng, 0, Some(&cc_n));
+            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
+            quote! {
+                let mut #m_n = #initial_input_var.clone();
+                let mut #rs_n = 0u32;
+                let mut #cc_n = 0usize;
+                #cfg
+                if #cc_n == #total {
+                    #fr
+                } else {
+                    String::new()
+                }
+            }
+        },
+        7 => { // Dynamic FSM with Stealth Completion
+            let s_n = Ident::new("s", Span::call_site());
+            let mut arms = Vec::new();
+            let mut shuffled: Vec<usize> = (0..tasks.len()).collect();
+            shuffled.shuffle(rng);
+            let mut next_states = vec![0usize; tasks.len()];
+            for i in 0..tasks.len()-1 { next_states[i] = shuffled[i+1]; }
+            let recovery_state = tasks.len() + 100 + rng.gen_range(0..100);
+            next_states[tasks.len()-1] = recovery_state;
+            for (i, (id, junk)) in tasks.iter().enumerate() {
+                let curr_s = shuffled[i];
+                let ns = next_states[i];
+                arms.push(quote! {
+                    #curr_s => {
+                        let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
+                        #m_n = res; #rs_n = next_rs; #s_n = #ns; #junk
+                    }
+                });
+            }
+            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
+            arms.push(quote! { #recovery_state => break #fr, });
+            let start_s = shuffled[0];
+            quote! {
+                let mut #m_n = #initial_input_var.clone();
+                let mut #rs_n = 0u32;
+                let mut #s_n = #start_s;
+                loop { match #s_n { #(#arms)* _ => break String::new(), } }
+            }
+        },
+        8 => { // Register-style (Grounded)
+            let r0 = Ident::new("r0", Span::call_site());
+            let r1 = Ident::new("r1", Span::call_site());
+            let r2 = Ident::new("r2", Span::call_site());
+            let mut st = Vec::new();
+            st.push(quote! { let mut #r0 = #initial_input_var.clone(); let mut #r1 = Vec::new(); let mut #r2 = Vec::new(); });
+            for (i, (id, junk)) in tasks.iter().enumerate() {
+                let src = match i % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
+                let dst = match (i + 1) % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
+                st.push(quote! {
+                    let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &#src, #rs_n, &mut #aux_var);
+                    #rs_n = next_rs; #dst = res; #junk
+                });
+            }
+            let lr = match tasks.len() % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
+            let fr = generate_fragmented_string_recovery(lr, &rs_n, rng);
+            quote! { { let mut #rs_n = 0u32; #(#st)* #fr } }
+        },
+        _ => { // Stack-based (Grounded)
+             let stack_n = Ident::new("stk", Span::call_site());
+             let mut st = Vec::new();
+             st.push(quote! { let mut #stack_n: Vec<Vec<u8>> = vec![#initial_input_var.clone()]; });
+             for (id, junk) in tasks {
+                 st.push(quote! {
+                     let cur = #stack_n.pop().unwrap_or_default();
+                     let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &cur, #rs_n, &mut #aux_var);
+                     #rs_n = next_rs; #stack_n.push(res); #junk
+                 });
+             }
+             let fr = generate_fragmented_string_recovery(&Ident::new("final_data", Span::call_site()), &rs_n, rng);
+             quote! {
+                 {
+                     let mut #rs_n = 0u32;
+                     #(#st)*
+                     let final_data = #stack_n.pop().unwrap_or_default();
+                     #fr
+                 }
+             }
         }
     }
 }
