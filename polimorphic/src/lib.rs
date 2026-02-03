@@ -3,7 +3,7 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, LitStr};
-use rand::{Rng, thread_rng};
+use rand::{Rng, thread_rng, seq::SliceRandom};
 use proc_macro2::{TokenStream as TokenStream2, Ident, Span, Literal};
 
 #[derive(Clone, Debug)]
@@ -1132,29 +1132,77 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
 }
 
 fn generate_fragmented_string_recovery(bytes_var: &Ident, rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
-    let s_n = Ident::new(&format!("S_{}", rng.gen::<u32>()), Span::call_site());
-    let chunk_size = rng.gen_range(3usize..=10usize);
+    let lock_logic = quote! { (#rs_var ^ (#rs_var >> 13) ^ (#rs_var >> 21)) as u8 };
 
-    quote! {
-        {
-            struct #s_n(Vec<u8>, u32);
-            impl ::std::fmt::Display for #s_n {
-                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                    let mut temp_rs = self.1;
-                    let lock = (temp_rs ^ (temp_rs >> 13) ^ (temp_rs >> 21)) as u8;
-                    let unlocked: Vec<u8> = self.0.iter().map(|&b| b ^ lock).collect();
-                    for chunk in unlocked.chunks(#chunk_size) {
-                        let s: String = chunk.iter().map(|&b| {
-                            temp_rs = temp_rs.wrapping_add(b as u32).rotate_left(3);
-                            b as char
-                        }).collect();
-                        f.write_str(&s)?;
+    match rng.gen_range(0..5) {
+        0 => {
+            let s_n = Ident::new(&format!("S_{}", rng.gen::<u32>()), Span::call_site());
+            quote! {
+                {
+                    struct #s_n(Vec<u8>, u32);
+                    impl ::std::fmt::Display for #s_n {
+                        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                            let l = (self.1 ^ (self.1 >> 13) ^ (self.1 >> 21)) as u8;
+                            let s: String = self.0.iter().map(|&b| (b ^ l) as char).collect();
+                            f.write_str(&s)
+                        }
                     }
-                    let _ = temp_rs;
-                    Ok(())
+                    #s_n(#bytes_var.to_vec(), #rs_var).to_string()
                 }
             }
-            #s_n(#bytes_var, #rs_var).to_string()
+        },
+        1 => {
+            quote! {
+                {
+                    let l = #lock_logic;
+                    #bytes_var.iter().map(|&b| (b ^ l) as char).collect::<String>()
+                }
+            }
+        },
+        2 => {
+            quote! {
+                {
+                    let l = #lock_logic;
+                    let mut s = String::with_capacity(#bytes_var.len());
+                    for &b in #bytes_var.iter() {
+                        s.push((b ^ l) as char);
+                    }
+                    s
+                }
+            }
+        },
+        3 => {
+            quote! {
+                {
+                    let l = #lock_logic;
+                    let mut s = String::new();
+                    #bytes_var.iter().for_each(|&b| s.push((b ^ l) as char));
+                    s
+                }
+            }
+        },
+        _ => {
+            quote! {
+                {
+                    let l = #lock_logic;
+                    let mut b = #bytes_var.to_vec();
+                    for x in b.iter_mut() { *x ^= l; }
+                    String::from_utf8(b).expect("Polymorphic recovery failure")
+                }
+            }
+        }
+    }
+}
+
+fn generate_opaque_predicate(rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2 {
+    let rs = rs_var;
+    match rng.gen_range(0..4) {
+        0 => quote! { (#rs.wrapping_mul(#rs.wrapping_add(1)) % 2 == 0) },
+        1 => quote! { ((#rs.wrapping_add(1) ^ #rs) != 0) },
+        2 => quote! { (#rs.wrapping_sub(#rs.wrapping_add(1)) != 0) },
+        _ => {
+            let c = rng.gen::<u32>() | 1;
+            quote! { (#rs.wrapping_mul(#c).wrapping_add(1) != #rs.wrapping_mul(#c)) }
         }
     }
 }
@@ -1169,23 +1217,37 @@ fn generate_polymorphic_decode_chain(
 ) -> TokenStream2 {
     let rs_n = Ident::new("rs", Span::call_site());
     
-    match rng.gen_range(0..3) {
-        0 => { // State machine
+    match rng.gen_range(0..6) {
+        0 => { // State machine (Scrambled)
             let mut arms = Vec::new();
             let s_n = Ident::new("s", Span::call_site());
             let m_n = Ident::new("m", Span::call_site());
             
+            let mut shuffled: Vec<usize> = (0..transform_ids.len()).collect();
+            shuffled.shuffle(rng);
+
+            let mut next_state = vec![0usize; transform_ids.len()];
+            for i in 0..transform_ids.len() - 1 {
+                next_state[i] = shuffled[i+1];
+            }
+
             for (i, &id) in transform_ids.iter().enumerate() {
                 let junk = &junk_tokens[i];
-                let i_u = i as usize;
+                let current_s = shuffled[i];
+                let op = generate_opaque_predicate(&rs_n, rng);
                 
                 if i < transform_ids.len() - 1 {
+                    let ns = next_state[i];
                     arms.push(quote! {
-                        #i_u => {
-                            let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
-                            #m_n = res_data;
-                            #rs_n = next_rs;
-                            #s_n += 1;
+                        #current_s => {
+                            if #op {
+                                let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
+                                #m_n = res_data;
+                                #rs_n = next_rs;
+                                #s_n = #ns;
+                            } else {
+                                #s_n = #current_s;
+                            }
                             #junk
                         }
                     });
@@ -1194,40 +1256,41 @@ fn generate_polymorphic_decode_chain(
                     let nr_n = Ident::new("nr", Span::call_site());
                     let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
                     arms.push(quote! {
-                        #i_u => {
+                        #current_s => {
                             let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
                             let #fb_n = res_data;
                             let #nr_n = next_rs;
-                            let fv = #fr;
-                            break fv;
+                            break #fr;
                         }
                     });
                 }
             }
             arms.push(quote! { _ => break String::new(), });
             
+            let initial_s = shuffled[0];
             quote! {
-                let mut #s_n = 0usize;
+                let mut #s_n = #initial_s;
                 let mut #m_n = #initial_input_var.clone();
                 let mut #rs_n = 0u32;
                 loop { match #s_n { #(#arms)* } }
             }
         },
-        1 => { // Nested blocks
+        1 => { // Nested blocks (Enhanced)
             if transform_ids.is_empty() { return quote! { String::new() }; }
             
             let last_idx = transform_ids.len() - 1;
-
             let last_id = transform_ids[last_idx];
             let last_input = Ident::new(&format!("nd_{}", last_idx), Span::call_site());
             let last_bytes = Ident::new("lb", Span::call_site());
             let nr_n = Ident::new("nr_last", Span::call_site());
             let fr = generate_fragmented_string_recovery(&last_bytes, &nr_n, rng);
             
+            let op_final = generate_opaque_predicate(&rs_n, rng);
+
             let mut nl = quote! { 
                 { 
                     let (res_data, next_rs) = #dispatch_name(#last_id ^ #rs_n, &#last_input, #rs_n, &mut #aux_var); 
-                    let #last_bytes = res_data; 
+                    let #last_bytes = if #op_final { res_data } else { Vec::new() };
                     let #nr_n = next_rs; 
                     #fr 
                 } 
@@ -1239,12 +1302,13 @@ fn generate_polymorphic_decode_chain(
                 let ni = Ident::new(&format!("nd_{}", i + 1), Span::call_site());
                 let ob = Ident::new(&format!("nb_{}", i), Span::call_site());
                 let junk = &junk_tokens[i];
+                let op = generate_opaque_predicate(&rs_n, rng);
                 
                 nl = quote! { 
                     { 
                         let (res_data, next_rs_val) = #dispatch_name(#id ^ #rs_n, &#ci, #rs_n, &mut #aux_var); 
                         let mut #rs_n = next_rs_val; 
-                        let #ob = res_data; 
+                        let #ob = if #op { res_data } else { #ci.clone() };
                         #junk 
                         let mut #ni = #ob; 
                         #nl 
@@ -1255,38 +1319,140 @@ fn generate_polymorphic_decode_chain(
             let fv = Ident::new("nd_0", Span::call_site());
             quote! { { let mut #fv = #initial_input_var.clone(); let mut #rs_n = 0u32; #nl } }
         },
-        _ => { // Linear
+        2 => { // Linear with Divergent Paths
             let mut st = Vec::new();
             let cv = Ident::new("cv", Span::call_site());
-            
             st.push(quote! { let mut #cv = #initial_input_var.clone(); });
             st.push(quote! { let mut #rs_n = 0u32; });
             
             for (i, &id) in transform_ids.iter().enumerate() {
                 let nb = Ident::new(&format!("b_{}", i), Span::call_site());
-                let rd_v = Ident::new(&format!("rd_{}", i), Span::call_site());
-                let nr_v = Ident::new(&format!("nr_{}", i), Span::call_site());
+                let junk = &junk_tokens[i];
+                let op = generate_opaque_predicate(&rs_n, rng);
                 
                 st.push(quote! { 
-                    let (#rd_v, #nr_v) = #dispatch_name(#id ^ #rs_n, &#cv, #rs_n, &mut #aux_var); 
-                    let #nb = #rd_v; 
-                    #rs_n = #nr_v; 
+                    let (#nb, nr_next) = if #op {
+                        #dispatch_name(#id ^ #rs_n, &#cv, #rs_n, &mut #aux_var)
+                    } else {
+                        (#cv.clone(), #rs_n)
+                    };
+                    #rs_n = nr_next;
+                    #junk
                 });
-                
-                let junk = &junk_tokens[i];
-                st.push(quote! { #junk });
                 
                 if i < transform_ids.len() - 1 {
                     st.push(quote! { #cv = #nb; });
                 } else {
-                    let fvb = Ident::new("fv", Span::call_site());
-                    st.push(quote! { let mut #fvb = #nb; });
-                    let fr = generate_fragmented_string_recovery(&fvb, &rs_n, rng);
+                    let fr = generate_fragmented_string_recovery(&nb, &rs_n, rng);
                     st.push(quote! { let frs = #fr; });
                 }
             }
-            
             quote! { { #(#st)* frs } }
+        },
+        3 => { // Bytecode VM
+            let ops_n = Ident::new(&format!("ops_{}", rng.gen::<u32>()), Span::call_site());
+            let pc_n = Ident::new("pc", Span::call_site());
+            let m_n = Ident::new("m", Span::call_site());
+
+            let mut arms = Vec::new();
+            for (i, &id) in transform_ids.iter().enumerate() {
+                let junk = &junk_tokens[i];
+                arms.push(quote! {
+                    #i => {
+                        let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
+                        #m_n = res_data;
+                        #rs_n = next_rs;
+                        #junk
+                    }
+                });
+            }
+
+            let fb_n = Ident::new("fb", Span::call_site());
+            let nr_n = Ident::new("nr", Span::call_site());
+            let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
+
+            quote! {
+                let mut #m_n = #initial_input_var.clone();
+                let mut #rs_n = 0u32;
+                let mut #pc_n = 0usize;
+                let #ops_n = [#( #transform_ids ),*];
+                while #pc_n < #ops_n.len() {
+                    match #pc_n {
+                        #(#arms)*
+                        _ => {}
+                    }
+                    #pc_n += 1;
+                }
+                let #fb_n = #m_n;
+                let #nr_n = #rs_n;
+                #fr
+            }
+        },
+        4 => { // Divergent/Convergent Paths
+            let mut st = Vec::new();
+            let m_n = Ident::new("m", Span::call_site());
+            st.push(quote! { let mut #m_n = #initial_input_var.clone(); });
+            st.push(quote! { let mut #rs_n = 0u32; });
+
+            for (i, &id) in transform_ids.iter().enumerate() {
+                let op = generate_opaque_predicate(&rs_n, rng);
+                let junk = &junk_tokens[i];
+                st.push(quote! {
+                    let (d, r) = if #op {
+                        #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var)
+                    } else {
+                        #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var)
+                    };
+                    #m_n = d; #rs_n = r;
+                    #junk
+                });
+            }
+            let fb_n = Ident::new("fb", Span::call_site());
+            let nr_n = Ident::new("nr", Span::call_site());
+            let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
+            st.push(quote! {
+                {
+                    let #fb_n = #m_n;
+                    let #nr_n = #rs_n;
+                    #fr
+                }
+            });
+            quote! { { #(#st)* } }
+        },
+        _ => { // Recursive Continuation
+            let unfold_n = Ident::new("unfold", Span::call_site());
+
+            let mut cases = Vec::new();
+            for (i, &id) in transform_ids.iter().enumerate() {
+                let junk = &junk_tokens[i];
+                cases.push(quote! {
+                    #i => {
+                        let (res_data, next_rs) = #dispatch_name(#id ^ rs_val, &m_val, rs_val, aux_val);
+                        #junk
+                        #unfold_n(#i + 1, res_data, next_rs, aux_val)
+                    }
+                });
+            }
+
+            let fb_n = Ident::new("fb", Span::call_site());
+            let nr_n = Ident::new("nr", Span::call_site());
+            let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
+
+            quote! {
+                {
+                    fn #unfold_n(idx: usize, m_val: Vec<u8>, rs_val: u32, aux_val: &mut Vec<u8>) -> String {
+                        match idx {
+                            #(#cases)*
+                            _ => {
+                                let #fb_n = m_val;
+                                let #nr_n = rs_val;
+                                #fr
+                            }
+                        }
+                    }
+                    #unfold_n(0, #initial_input_var.clone(), 0u32, &mut #aux_var)
+                }
+            }
         }
     }
 }
@@ -1613,12 +1779,12 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         struct #s_n<'a> { #df key: u8, }
         impl<'a> #s_n<'a> {
             fn #m_n(&mut self) -> String {
-                let mut #d_n = |id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>| -> (Vec<u8>, u32) {
+                fn #d_n(id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
                     match (((id ^ rs_in).wrapping_mul(#mult) ^ #salt).rotate_left((rs_in & 0x7) as u32 + 1) ^ rs_in) {
                         #(#vt_c)*
                         _ => (data.to_vec(), rs_in)
                     }
-                };
+                }
                 let mut #a_v = Vec::new();
                 let mut rs_junk = 0u32;
                 let mut #d_b_i = { #rl #dl_c db };
