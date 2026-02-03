@@ -1207,6 +1207,179 @@ fn generate_opaque_predicate(rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2
     }
 }
 
+struct GraphNode {
+    id: u32,
+    tasks: Vec<(u32, TokenStream2)>,
+    next_states: Vec<u32>, // Multiple possible next states for branching
+    is_exit: bool,
+}
+
+struct Topology {
+    nodes: Vec<GraphNode>,
+    entry_id: u32,
+}
+
+fn generate_advanced_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology {
+    let mut nodes = Vec::new();
+    let mut ids: Vec<u32> = (0..num_blocks as u32 + 2).map(|_| rng.gen::<u32>()).collect();
+    ids.sort();
+    ids.dedup();
+    while ids.len() < num_blocks + 2 {
+        ids.push(rng.gen());
+        ids.sort();
+        ids.dedup();
+    }
+    ids.shuffle(rng);
+
+    let entry_id = ids[0];
+    let exit_id = ids[num_blocks + 1];
+
+    for i in 0..num_blocks + 1 {
+        let current_id = ids[i];
+        let next_id = if i + 1 < num_blocks + 1 { ids[i + 1] } else { exit_id };
+
+        let mut next_states = vec![next_id];
+        // Add some random edges to other nodes (junk paths)
+        if rng.gen_bool(0.3) && num_blocks > 1 {
+            let junk_target = ids[rng.gen_range(0..num_blocks + 1)];
+            if junk_target != current_id && junk_target != next_id {
+                next_states.push(junk_target);
+            }
+        }
+
+        nodes.push(GraphNode {
+            id: current_id,
+            tasks: Vec::new(),
+            next_states,
+            is_exit: false,
+        });
+    }
+
+    nodes.push(GraphNode {
+        id: exit_id,
+        tasks: Vec::new(),
+        next_states: Vec::new(),
+        is_exit: true,
+    });
+
+    Topology { nodes, entry_id }
+}
+
+fn fill_topology_with_tasks(
+    mut topology: Topology,
+    tasks: &[(u32, TokenStream2)],
+    rng: &mut impl Rng,
+) -> Topology {
+    let num_real_nodes = topology.nodes.len() - 1;
+    let mut task_idx = 0;
+
+    for i in 0..num_real_nodes {
+        let remaining_tasks = tasks.len() - task_idx;
+        let remaining_nodes = num_real_nodes - i;
+
+        let take = if remaining_nodes == 1 {
+            remaining_tasks
+        } else {
+            rng.gen_range(1..=(remaining_tasks - (remaining_nodes - 1)).max(1))
+        };
+
+        for _ in 0..take {
+            if task_idx < tasks.len() {
+                topology.nodes[i].tasks.push(tasks[task_idx].clone());
+                task_idx += 1;
+            }
+        }
+
+        // Inject some ghost tasks into every node
+        for _ in 0..rng.gen_range(0..3) {
+            let mut rs_c = 0u32;
+            let g = generate_ghost(rng.gen(), rng, None, &mut rs_c);
+            topology.nodes[i].tasks.push((0, g));
+        }
+    }
+
+    // Exit node can also have some ghost tasks
+    for _ in 0..rng.gen_range(1..3) {
+        let mut rs_c = 0u32;
+        let g = generate_ghost(rng.gen(), rng, None, &mut rs_c);
+        topology.nodes.last_mut().unwrap().tasks.push((0, g));
+    }
+
+    topology
+}
+
+fn generate_interpreter_cfg(
+    topology: Topology,
+    initial_input_var: &Ident,
+    m_var: &Ident,
+    rs_var: &Ident,
+    aux_var: &Ident,
+    dispatch_name: &Ident,
+    rng: &mut impl Rng,
+) -> TokenStream2 {
+    let mut arms = Vec::new();
+    let s_n = Ident::new("node_id", Span::call_site());
+
+    for node in &topology.nodes {
+        let node_id = node.id;
+        let mut node_logic = Vec::new();
+        for (id, junk) in &node.tasks {
+            if *id == 0 {
+                node_logic.push(quote! { #junk });
+            } else {
+                node_logic.push(quote! {
+                    let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
+                    #m_var = res; #rs_var = next_rs; #junk
+                });
+            }
+        }
+
+        let next_node_update = if node.is_exit {
+            quote! { break; }
+        } else if node.next_states.len() == 1 {
+            let next_id = node.next_states[0];
+            quote! { #s_n = #next_id; }
+        } else {
+            // Branching logic
+            let op = generate_opaque_predicate(rs_var, rng);
+            let true_id = node.next_states[0];
+            let false_id = node.next_states[1];
+            quote! {
+                if #op {
+                    #s_n = #true_id;
+                } else {
+                    #s_n = #false_id;
+                }
+            }
+        };
+
+        arms.push(quote! {
+            #node_id => {
+                #(#node_logic)*
+                #next_node_update
+            }
+        });
+    }
+
+    let fr = generate_fragmented_string_recovery(m_var, rs_var, rng);
+    let entry_id = topology.entry_id;
+
+    quote! {
+        {
+            let mut #s_n = #entry_id;
+            let mut #m_var: Vec<u8> = #initial_input_var.clone();
+            let mut #rs_var = 0u32;
+            loop {
+                match #s_n {
+                    #(#arms)*
+                    _ => break,
+                }
+            }
+            #fr
+        }
+    }
+}
+
 fn generate_cfg_node(
     tasks: &[(u32, TokenStream2)],
     m_var: &Ident,
@@ -1467,7 +1640,7 @@ fn generate_polymorphic_decode_chain(
     let m_n = Ident::new("m", Span::call_site());
     let tasks: Vec<(u32, TokenStream2)> = transform_ids.iter().cloned().zip(junk_tokens.iter().cloned()).collect();
 
-    match rng.gen_range(0..12) {
+    match rng.gen_range(0..13) {
         0 => { // State machine (Scrambled)
             let mut arms = Vec::new();
             let s_n = Ident::new("s", Span::call_site());
@@ -1774,6 +1947,11 @@ fn generate_polymorphic_decode_chain(
         },
         10 => { // Unbounded Graph-Based CFG
             generate_unbounded_cfg_graph(&tasks, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng)
+        },
+        11 => { // First-Class Interpreter CFG
+            let topo = generate_advanced_topology(tasks.len() / 2 + 1, rng);
+            let filled = fill_topology_with_tasks(topo, &tasks, rng);
+            generate_interpreter_cfg(filled, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng)
         },
         _ => { // Trampoline Dispatcher
             generate_trampoline_cfg(&tasks, initial_input_var, dispatch_name, rng)
