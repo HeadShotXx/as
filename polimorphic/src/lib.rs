@@ -1207,10 +1207,17 @@ fn generate_opaque_predicate(rs_var: &Ident, rng: &mut impl Rng) -> TokenStream2
     }
 }
 
+#[derive(Clone)]
+enum Edge {
+    Direct(u32),
+    Conditional(u32, u32, TokenStream2), // true_target, false_target, condition
+}
+
+#[derive(Clone)]
 struct GraphNode {
     id: u32,
     tasks: Vec<(u32, TokenStream2)>,
-    next_states: Vec<u32>, // Multiple possible next states for branching
+    transition: Edge,
     is_exit: bool,
 }
 
@@ -1219,38 +1226,58 @@ struct Topology {
     entry_id: u32,
 }
 
-fn generate_advanced_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology {
+fn generate_linear_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology {
     let mut nodes = Vec::new();
-    let mut ids: Vec<u32> = (0..num_blocks as u32 + 2).map(|_| rng.gen::<u32>()).collect();
-    ids.sort();
-    ids.dedup();
-    while ids.len() < num_blocks + 2 {
-        ids.push(rng.gen());
-        ids.sort();
-        ids.dedup();
-    }
-    ids.shuffle(rng);
+    let ids: Vec<u32> = (0..num_blocks + 1).map(|_| rng.gen::<u32>()).collect();
+    let entry_id = ids[0];
 
+    for i in 0..num_blocks {
+        nodes.push(GraphNode {
+            id: ids[i],
+            tasks: Vec::new(),
+            transition: Edge::Direct(ids[i+1]),
+            is_exit: false,
+        });
+    }
+
+    nodes.push(GraphNode {
+        id: ids[num_blocks],
+        tasks: Vec::new(),
+        transition: Edge::Direct(0),
+        is_exit: true,
+    });
+
+    Topology { nodes, entry_id }
+}
+
+fn generate_complex_graph_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology {
+    let mut nodes = Vec::new();
+    let mut ids: Vec<u32> = (0..num_blocks + 2).map(|_| rng.gen::<u32>()).collect();
+    ids.shuffle(rng);
     let entry_id = ids[0];
     let exit_id = ids[num_blocks + 1];
 
     for i in 0..num_blocks + 1 {
         let current_id = ids[i];
-        let next_id = if i + 1 < num_blocks + 1 { ids[i + 1] } else { exit_id };
+        let next_main = if i + 1 < num_blocks + 1 { ids[i+1] } else { exit_id };
 
-        let mut next_states = vec![next_id];
-        // Add some random edges to other nodes (junk paths)
-        if rng.gen_bool(0.3) && num_blocks > 1 {
-            let junk_target = ids[rng.gen_range(0..num_blocks + 1)];
-            if junk_target != current_id && junk_target != next_id {
-                next_states.push(junk_target);
+        if rng.gen_bool(0.4) && i < num_blocks {
+            let alt_target = ids[rng.gen_range(0..num_blocks + 2)];
+            if alt_target != current_id {
+                nodes.push(GraphNode {
+                    id: current_id,
+                    tasks: Vec::new(),
+                    transition: Edge::Conditional(next_main, alt_target, quote! {}),
+                    is_exit: false,
+                });
+                continue;
             }
         }
 
         nodes.push(GraphNode {
             id: current_id,
             tasks: Vec::new(),
-            next_states,
+            transition: Edge::Direct(next_main),
             is_exit: false,
         });
     }
@@ -1258,7 +1285,46 @@ fn generate_advanced_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology
     nodes.push(GraphNode {
         id: exit_id,
         tasks: Vec::new(),
-        next_states: Vec::new(),
+        transition: Edge::Direct(0),
+        is_exit: true,
+    });
+
+    Topology { nodes, entry_id }
+}
+
+fn generate_cyclic_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology {
+    let mut nodes = Vec::new();
+    let ids: Vec<u32> = (0..num_blocks + 2).map(|_| rng.gen::<u32>()).collect();
+    let entry_id = ids[0];
+    let exit_id = ids[num_blocks + 1];
+
+    for i in 0..num_blocks + 1 {
+        let current_id = ids[i];
+        let next_id = if i + 1 < num_blocks + 1 { ids[i+1] } else { exit_id };
+
+        // Potential loop back
+        if rng.gen_bool(0.2) && i > 1 {
+            let loop_target = ids[rng.gen_range(0..i)];
+            nodes.push(GraphNode {
+                id: current_id,
+                tasks: Vec::new(),
+                transition: Edge::Conditional(loop_target, next_id, quote! {}),
+                is_exit: false,
+            });
+        } else {
+            nodes.push(GraphNode {
+                id: current_id,
+                tasks: Vec::new(),
+                transition: Edge::Direct(next_id),
+                is_exit: false,
+            });
+        }
+    }
+
+    nodes.push(GraphNode {
+        id: exit_id,
+        tasks: Vec::new(),
+        transition: Edge::Direct(0),
         is_exit: true,
     });
 
@@ -1308,7 +1374,7 @@ fn fill_topology_with_tasks(
     topology
 }
 
-fn generate_interpreter_cfg(
+fn render_as_state_machine(
     topology: Topology,
     initial_input_var: &Ident,
     m_var: &Ident,
@@ -1324,9 +1390,8 @@ fn generate_interpreter_cfg(
         let node_id = node.id;
         let mut node_logic = Vec::new();
         for (id, junk) in &node.tasks {
-            if *id == 0 {
-                node_logic.push(quote! { #junk });
-            } else {
+            if *id == 0 { node_logic.push(quote! { #junk }); }
+            else {
                 node_logic.push(quote! {
                     let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
                     #m_var = res; #rs_var = next_rs; #junk
@@ -1334,35 +1399,24 @@ fn generate_interpreter_cfg(
             }
         }
 
-        let next_node_update = if node.is_exit {
-            quote! { break; }
-        } else if node.next_states.len() == 1 {
-            let next_id = node.next_states[0];
-            quote! { #s_n = #next_id; }
-        } else {
-            // Branching logic
-            let op = generate_opaque_predicate(rs_var, rng);
-            let true_id = node.next_states[0];
-            let false_id = node.next_states[1];
-            quote! {
-                if #op {
-                    #s_n = #true_id;
-                } else {
-                    #s_n = #false_id;
+        let next_node_update = if node.is_exit { quote! { break; } }
+        else {
+            match &node.transition {
+                Edge::Direct(next_id) => quote! { #s_n = #next_id; },
+                Edge::Conditional(true_id, false_id, _) => {
+                    let op = generate_opaque_predicate(rs_var, rng);
+                    quote! { if #op { #s_n = #true_id; } else { #s_n = #false_id; } }
                 }
             }
         };
 
         arms.push(quote! {
-            #node_id => {
-                #(#node_logic)*
-                #next_node_update
-            }
+            #node_id => { #(#node_logic)* #next_node_update }
         });
     }
 
-    let fr = generate_fragmented_string_recovery(m_var, rs_var, rng);
     let entry_id = topology.entry_id;
+    let fr = generate_fragmented_string_recovery(m_var, rs_var, rng);
 
     quote! {
         {
@@ -1380,252 +1434,176 @@ fn generate_interpreter_cfg(
     }
 }
 
-fn generate_cfg_node(
-    tasks: &[(u32, TokenStream2)],
-    m_var: &Ident,
-    rs_var: &Ident,
-    aux_var: &Ident,
-    dispatch_name: &Ident,
-    rng: &mut impl Rng,
-    depth: usize,
-    cc_var: Option<&Ident>,
-) -> TokenStream2 {
-    if tasks.is_empty() { return quote! {}; }
-
-    let cc_inc = if let Some(cc) = cc_var { quote! { #cc += 1; } } else { quote! {} };
-
-    if tasks.len() == 1 || depth >= 4 {
-        let mut st = Vec::new();
-        for (id, junk) in tasks {
-            st.push(quote! {
-                let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
-                #m_var = res;
-                #rs_var = next_rs;
-                #cc_inc
-                #junk
-            });
-        }
-        return quote! { #(#st)* };
-    }
-
-    let split_idx = rng.gen_range(1..tasks.len());
-    let (left, right) = tasks.split_at(split_idx);
-
-    match rng.gen_range(0..5) {
-        0 => { // Sequence
-            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            let r = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            quote! { #l #r }
-        },
-        1 => { // Scrambled FSM Node (Order Preserving)
-            let mut arms = Vec::new();
-            let s_n = Ident::new(&format!("s_{}_{}", depth, rng.gen::<u32>()), Span::call_site());
-            let mut states: Vec<usize> = (0..left.len()).collect();
-            states.shuffle(rng);
-            let exit_s = left.len() + 7;
-
-            for i in 0..left.len() {
-                let (id, junk) = &left[i];
-                let current_s = states[i];
-                let next_s = if i + 1 < left.len() { states[i + 1] } else { exit_s };
-                arms.push(quote! {
-                    #current_s => {
-                        let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
-                        #m_var = res;
-                        #rs_var = next_rs;
-                        #s_n = #next_s;
-                        #cc_inc
-                        #junk
-                    }
-                });
-            }
-            let start_s = states[0];
-            let l_node = quote! {
-                let mut #s_n = #start_s;
-                while #s_n != #exit_s {
-                    match #s_n {
-                        #(#arms)*
-                        _ => break,
-                    }
-                }
-            };
-            let r_node = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            quote! { #l_node #r_node }
-        },
-        2 => { // Opaque Predicate Wrapper
-            let op = generate_opaque_predicate(rs_var, rng);
-            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            let r = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            quote! {
-                if #op { #l } else { #l }
-                #r
-            }
-        },
-        3 => { // Double-Buffered Node
-            let m2 = Ident::new(&format!("m2_{}_{}", depth, rng.gen::<u32>()), Span::call_site());
-            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            let r = generate_cfg_node(right, &m2, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            quote! {
-                #l
-                let mut #m2: Vec<u8> = #m_var.clone();
-                #r
-                #m_var = #m2;
-            }
-        },
-        _ => { // Loop-Jump
-            let l = generate_cfg_node(left, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            let r = generate_cfg_node(right, m_var, rs_var, aux_var, dispatch_name, rng, depth + 1, cc_var);
-            let loop_label = syn::Lifetime::new(&format!("'L_{}_{}", depth, rng.gen::<u32>()), Span::call_site());
-            quote! {
-                #loop_label: loop {
-                    #l
-                    break #loop_label;
-                }
-                #r
-            }
-        }
-    }
-}
-
-fn generate_trampoline_cfg(
-    tasks: &[(u32, TokenStream2)],
+fn render_as_trampoline(
+    topology: Topology,
     initial_input_var: &Ident,
     dispatch_name: &Ident,
     rng: &mut impl Rng,
 ) -> TokenStream2 {
-    let mut blocks = Vec::new();
-    let mut current_idx = 0;
-    while current_idx < tasks.len() {
-        let size = rng.gen_range(1..=3).min(tasks.len() - current_idx);
-        blocks.push(&tasks[current_idx..current_idx + size]);
-        current_idx += size;
-    }
-
     let mut arms = Vec::new();
     let ctx_n = Ident::new("ctx", Span::call_site());
     let m_n = Ident::new("m", Span::call_site());
     let rs_n = Ident::new("rs", Span::call_site());
     let aux_n = Ident::new("aux", Span::call_site());
 
-    for (i, block) in blocks.iter().enumerate() {
-        let mut block_logic = Vec::new();
-        for (id, junk) in *block {
-            block_logic.push(quote! {
-                let (res, next_rs) = #dispatch_name(#id ^ #ctx_n.#rs_n, &#ctx_n.#m_n, #ctx_n.#rs_n, &mut #ctx_n.#aux_n);
-                #ctx_n.#m_n = res; #ctx_n.#rs_n = next_rs; #junk
-            });
+    for node in &topology.nodes {
+        let node_id = node.id;
+        let mut node_logic = Vec::new();
+        for (id, junk) in &node.tasks {
+            if *id == 0 { node_logic.push(quote! { #junk }); }
+            else {
+                node_logic.push(quote! {
+                    let (res, next_rs) = #dispatch_name(#id ^ #ctx_n.#rs_n, &#ctx_n.#m_n, #ctx_n.#rs_n, &mut #ctx_n.#aux_n);
+                    #ctx_n.#m_n = res; #ctx_n.#rs_n = next_rs; #junk
+                });
+            }
         }
 
-        let next_step = if i + 1 < blocks.len() {
-            let next_idx = i + 1;
-            quote! { Some(#next_idx) }
-        } else {
-            quote! { None }
+        let next_step = if node.is_exit { quote! { None } }
+        else {
+            match &node.transition {
+                Edge::Direct(next_id) => quote! { Some(#next_id) },
+                Edge::Conditional(t_id, f_id, _) => {
+                    let op = generate_opaque_predicate(&Ident::new("rs_tmp", Span::call_site()), rng);
+                    quote! {
+                        {
+                            let rs_tmp = #ctx_n.#rs_n;
+                            if #op { Some(#t_id) } else { Some(#f_id) }
+                        }
+                    }
+                }
+            }
         };
 
         arms.push(quote! {
-            #i => {
-                #(#block_logic)*
-                #next_step
-            }
+            #node_id => { #(#node_logic)* #next_step }
         });
     }
 
-    let fr = generate_fragmented_string_recovery(&Ident::new("m", Span::call_site()), &Ident::new("rs", Span::call_site()), rng);
+    let fr = generate_fragmented_string_recovery(&Ident::new("m_f", Span::call_site()), &Ident::new("rs_f", Span::call_site()), rng);
+    let entry_id = topology.entry_id;
 
     quote! {
         {
             struct Ctx { m: Vec<u8>, rs: u32, aux: Vec<u8> }
             let mut #ctx_n = Ctx { m: #initial_input_var.clone(), rs: 0, aux: Vec::new() };
-            let mut next_idx = Some(0usize);
-            while let Some(idx) = next_idx {
-                next_idx = match idx {
+            let mut next_id = Some(#entry_id);
+            while let Some(id) = next_id {
+                next_id = match id {
                     #(#arms)*
                     _ => None,
                 };
             }
-            let m = #ctx_n.m;
-            let rs = #ctx_n.rs;
+            let m_f = #ctx_n.m;
+            let rs_f = #ctx_n.rs;
             #fr
         }
     }
 }
 
-fn generate_unbounded_cfg_graph(
-    tasks: &[(u32, TokenStream2)],
+fn render_as_recursive_fns(
+    topology: Topology,
     initial_input_var: &Ident,
-    m_var: &Ident,
-    rs_var: &Ident,
-    aux_var: &Ident,
     dispatch_name: &Ident,
     rng: &mut impl Rng,
 ) -> TokenStream2 {
-    let mut blocks = Vec::new();
-    let mut current_idx = 0;
-    while current_idx < tasks.len() {
-        let size = rng.gen_range(1..=3).min(tasks.len() - current_idx);
-        blocks.push(&tasks[current_idx..current_idx + size]);
-        current_idx += size;
-    }
-
-    let _salt = rng.gen::<u32>();
-    let state_ids: Vec<u32> = (0..blocks.len()).map(|_| rng.gen::<u32>()).collect();
-    let exit_state = rng.gen::<u32>();
-
-    let mut path_hash = 0u32;
     let mut arms = Vec::new();
-    let s_n = Ident::new("s", Span::call_site());
-    let ph_n = Ident::new("ph", Span::call_site());
+    let m_n = Ident::new("m_r", Span::call_site());
+    let rs_n = Ident::new("rs_r", Span::call_site());
+    let aux_n = Ident::new("aux_r", Span::call_site());
+    let dispatch_n = Ident::new("dispatch", Span::call_site());
 
-    for (i, block) in blocks.iter().enumerate() {
-        let curr_s = state_ids[i];
-        let next_s = if i + 1 < blocks.len() { state_ids[i + 1] } else { exit_state };
-
-        path_hash = path_hash.wrapping_add(curr_s).rotate_left(1);
-
-        let mut block_logic = Vec::new();
-        for (id, junk) in *block {
-            block_logic.push(quote! {
-                let (res, next_rs) = #dispatch_name(#id ^ #rs_var, &#m_var, #rs_var, &mut #aux_var);
-                #m_var = res; #rs_var = next_rs; #junk
-            });
+    for node in &topology.nodes {
+        let node_id = node.id;
+        let mut node_logic = Vec::new();
+        for (id, junk) in &node.tasks {
+            if *id == 0 { node_logic.push(quote! { #junk }); }
+            else {
+                node_logic.push(quote! {
+                    let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, #aux_n);
+                    #m_n = res; #rs_n = next_rs; #junk
+                });
+            }
         }
 
-        arms.push(quote! {
-            #curr_s => {
-                #(#block_logic)*
-                #ph_n = #ph_n.wrapping_add(#s_n).rotate_left(1);
-                #s_n = #next_s;
+        let next_call = if node.is_exit {
+            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
+            quote! { #fr }
+        } else {
+            match &node.transition {
+                Edge::Direct(next_id) => quote! { #dispatch_n(#next_id, #m_n, #rs_n, #aux_n) },
+                Edge::Conditional(t_id, f_id, _) => {
+                    let op = generate_opaque_predicate(&rs_n, rng);
+                    quote! {
+                        if #op { #dispatch_n(#t_id, #m_n, #rs_n, #aux_n) }
+                        else { #dispatch_n(#f_id, #m_n, #rs_n, #aux_n) }
+                    }
+                }
             }
+        };
+
+        arms.push(quote! {
+            #node_id => { #(#node_logic)* #next_call }
         });
     }
 
-    let fr = generate_fragmented_string_recovery(m_var, rs_var, rng);
-    arms.push(quote! {
-        #exit_state => {
-            if #ph_n == #path_hash {
-                return #fr;
-            } else {
-                return String::new();
-            }
-        }
-    });
+    let entry_id = topology.entry_id;
 
-    let start_s = state_ids[0];
     quote! {
         {
-            let mut #s_n = #start_s;
-            let mut #ph_n = 0u32;
-            let mut #m_var: Vec<u8> = #initial_input_var.clone();
-            let mut #rs_var = 0u32;
-            loop {
-                match #s_n {
+            fn #dispatch_n(id: u32, mut #m_n: Vec<u8>, mut #rs_n: u32, #aux_n: &mut Vec<u8>) -> String {
+                match id {
                     #(#arms)*
-                    _ => return String::new(),
+                    _ => String::new(),
+                }
+            }
+            let mut aux_init = Vec::new();
+            #dispatch_n(#entry_id, #initial_input_var.clone(), 0u32, &mut aux_init)
+        }
+    }
+}
+
+fn render_as_nested_blocks(
+    topology: Topology,
+    initial_input_var: &Ident,
+    dispatch_name: &Ident,
+    rng: &mut impl Rng,
+) -> TokenStream2 {
+    let mut block = quote! { let mut m_b: Vec<u8> = #initial_input_var.clone(); let mut rs_b = 0u32; let mut aux_b = Vec::new(); };
+    let mut nodes_sorted = topology.nodes.clone();
+    // This is a naive linear renderer. It only works well for linear-ish graphs.
+    // For general graphs, it will still work but might be messy.
+
+    for node in &nodes_sorted {
+        let mut node_logic = Vec::new();
+        for (id, junk) in &node.tasks {
+            if *id == 0 { node_logic.push(quote! { #junk }); }
+            else {
+                node_logic.push(quote! {
+                    let (res, next_rs) = #dispatch_name(#id ^ rs_b, &m_b, rs_b, &mut aux_b);
+                    m_b = res; rs_b = next_rs; #junk
+                });
+            }
+        }
+
+        if node.is_exit {
+            let fr = generate_fragmented_string_recovery(&Ident::new("m_b", Span::call_site()), &Ident::new("rs_b", Span::call_site()), rng);
+            block = quote! { #block { #(#node_logic)* #fr } };
+            break;
+        } else {
+            match &node.transition {
+                Edge::Direct(_) => {
+                    block = quote! { #block { #(#node_logic)* } };
+                }
+                Edge::Conditional(_, _, _) => {
+                    let op = generate_opaque_predicate(&Ident::new("rs_b", Span::call_site()), rng);
+                    block = quote! { #block { #(#node_logic)* if #op {} } };
                 }
             }
         }
     }
+
+    quote! { { #block } }
 }
 
 fn generate_polymorphic_decode_chain(
@@ -1636,326 +1614,26 @@ fn generate_polymorphic_decode_chain(
     aux_var: &Ident,
     rng: &mut impl Rng,
 ) -> TokenStream2 {
-    let rs_n = Ident::new("rs", Span::call_site());
-    let m_n = Ident::new("m", Span::call_site());
     let tasks: Vec<(u32, TokenStream2)> = transform_ids.iter().cloned().zip(junk_tokens.iter().cloned()).collect();
+    let num_blocks = (tasks.len() / 2).max(2);
 
-    match rng.gen_range(0..13) {
-        0 => { // State machine (Scrambled)
-            let mut arms = Vec::new();
-            let s_n = Ident::new("s", Span::call_site());
-            let m_n = Ident::new("m", Span::call_site());
-            
-            let mut shuffled: Vec<usize> = (0..transform_ids.len()).collect();
-            shuffled.shuffle(rng);
+    let m_n = Ident::new("m", Span::call_site());
+    let rs_n = Ident::new("rs", Span::call_site());
 
-            let mut next_state = vec![0usize; transform_ids.len()];
-            for i in 0..transform_ids.len() - 1 {
-                next_state[i] = shuffled[i+1];
-            }
+    // CFG is now the authority. We first generate a topology, then fill it, then render it.
+    let topology = match rng.gen_range(0..3) {
+        0 => generate_linear_topology(num_blocks, rng),
+        1 => generate_complex_graph_topology(num_blocks, rng),
+        _ => generate_cyclic_topology(num_blocks, rng),
+    };
 
-            for (i, &id) in transform_ids.iter().enumerate() {
-                let junk = &junk_tokens[i];
-                let current_s = shuffled[i];
-                let op = generate_opaque_predicate(&rs_n, rng);
-                
-                if i < transform_ids.len() - 1 {
-                    let ns = next_state[i];
-                    arms.push(quote! {
-                        #current_s => {
-                            if #op {
-                                let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
-                                #m_n = res_data;
-                                #rs_n = next_rs;
-                                #s_n = #ns;
-                            } else {
-                                #s_n = 0xDEAD;
-                            }
-                            #junk
-                        }
-                    });
-                } else {
-                    let fb_n = Ident::new("fb", Span::call_site());
-                    let nr_n = Ident::new("nr", Span::call_site());
-                    let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
-                    arms.push(quote! {
-                        #current_s => {
-                            let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
-                            let #fb_n = res_data;
-                            let #nr_n = next_rs;
-                            break #fr;
-                        }
-                    });
-                }
-            }
-            arms.push(quote! { _ => break String::new(), });
-            
-            let initial_s = shuffled[0];
-            quote! {
-                let mut #s_n = #initial_s;
-                let mut #m_n: Vec<u8> = #initial_input_var.clone();
-                let mut #rs_n = 0u32;
-                loop { match #s_n { #(#arms)* } }
-            }
-        },
-        1 => { // Nested blocks (Enhanced)
-            if transform_ids.is_empty() { return quote! { String::new() }; }
-            
-            let last_idx = transform_ids.len() - 1;
-            let last_id = transform_ids[last_idx];
-            let last_input = Ident::new(&format!("nd_{}", last_idx), Span::call_site());
-            let last_bytes = Ident::new("lb", Span::call_site());
-            let nr_n = Ident::new("nr_last", Span::call_site());
-            let fr = generate_fragmented_string_recovery(&last_bytes, &nr_n, rng);
-            
-            let op_final = generate_opaque_predicate(&rs_n, rng);
+    let filled = fill_topology_with_tasks(topology, &tasks, rng);
 
-            let mut nl = quote! { 
-                { 
-                    let (res_data, next_rs) = #dispatch_name(#last_id ^ #rs_n, &#last_input, #rs_n, &mut #aux_var); 
-                    let #last_bytes = if #op_final { res_data } else { Vec::new() };
-                    let #nr_n = next_rs; 
-                    #fr 
-                } 
-            };
-            
-            for i in (0..last_idx).rev() {
-                let id = transform_ids[i];
-                let ci = Ident::new(&format!("nd_{}", i), Span::call_site());
-                let ni = Ident::new(&format!("nd_{}", i + 1), Span::call_site());
-                let ob = Ident::new(&format!("nb_{}", i), Span::call_site());
-                let junk = &junk_tokens[i];
-                let op = generate_opaque_predicate(&rs_n, rng);
-                
-                nl = quote! { 
-                    { 
-                        let (res_data, next_rs_val) = #dispatch_name(#id ^ #rs_n, &#ci, #rs_n, &mut #aux_var); 
-                        let mut #rs_n = next_rs_val; 
-                        let #ob = if #op { res_data } else { #ci.clone() };
-                        #junk 
-                        let mut #ni = #ob; 
-                        #nl 
-                    } 
-                };
-            }
-            
-            let fv = Ident::new("nd_0", Span::call_site());
-            quote! { { let mut #fv: Vec<u8> = #initial_input_var.clone(); let mut #rs_n = 0u32; #nl } }
-        },
-        2 => { // Linear with Divergent Paths
-            let mut st = Vec::new();
-            let cv = Ident::new("cv", Span::call_site());
-            st.push(quote! { let mut #cv: Vec<u8> = #initial_input_var.clone(); });
-            st.push(quote! { let mut #rs_n = 0u32; });
-            
-            for (i, &id) in transform_ids.iter().enumerate() {
-                let nb = Ident::new(&format!("b_{}", i), Span::call_site());
-                let junk = &junk_tokens[i];
-                let op = generate_opaque_predicate(&rs_n, rng);
-                
-                st.push(quote! { 
-                    let (#nb, nr_next) = if #op {
-                        #dispatch_name(#id ^ #rs_n, &#cv, #rs_n, &mut #aux_var)
-                    } else {
-                        (#cv.clone(), #rs_n)
-                    };
-                    #rs_n = nr_next;
-                    #junk
-                });
-                
-                if i < transform_ids.len() - 1 {
-                    st.push(quote! { #cv = #nb; });
-                } else {
-                    let fr = generate_fragmented_string_recovery(&nb, &rs_n, rng);
-                    st.push(quote! { let frs = #fr; });
-                }
-            }
-            quote! { { #(#st)* frs } }
-        },
-        3 => { // Bytecode VM
-            let ops_n = Ident::new(&format!("ops_{}", rng.gen::<u32>()), Span::call_site());
-            let pc_n = Ident::new("pc", Span::call_site());
-            let m_n = Ident::new("m", Span::call_site());
-
-            let mut arms = Vec::new();
-            for (i, &id) in transform_ids.iter().enumerate() {
-                let junk = &junk_tokens[i];
-                arms.push(quote! {
-                    #i => {
-                        let (res_data, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
-                        #m_n = res_data;
-                        #rs_n = next_rs;
-                        #junk
-                    }
-                });
-            }
-
-            let fb_n = Ident::new("fb", Span::call_site());
-            let nr_n = Ident::new("nr", Span::call_site());
-            let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
-
-            quote! {
-                let mut #m_n: Vec<u8> = #initial_input_var.clone();
-                let mut #rs_n = 0u32;
-                let mut #pc_n = 0usize;
-                let #ops_n = [#( #transform_ids ),*];
-                while #pc_n < #ops_n.len() {
-                    match #pc_n {
-                        #(#arms)*
-                        _ => {}
-                    }
-                    #pc_n += 1;
-                }
-                let #fb_n = #m_n;
-                let #nr_n = #rs_n;
-                #fr
-            }
-        },
-        4 => { // Divergent/Convergent Paths
-            let mut st = Vec::new();
-            st.push(quote! { let mut #m_n: Vec<u8> = #initial_input_var.clone(); });
-            st.push(quote! { let mut #rs_n = 0u32; });
-            for (_i, (id, junk)) in tasks.iter().enumerate() {
-                let op = generate_opaque_predicate(&rs_n, rng);
-                st.push(quote! {
-                    let (d, r) = if #op {
-                        #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var)
-                    } else {
-                        #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var)
-                    };
-                    #m_n = d; #rs_n = r; #junk
-                });
-            }
-            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
-            quote! { { #(#st)* #fr } }
-        },
-        5 => { // Recursive Continuation
-            let unfold_n = Ident::new("unfold", Span::call_site());
-            let mut cases = Vec::new();
-            for (i, (id, junk)) in tasks.iter().enumerate() {
-                cases.push(quote! {
-                    #i => {
-                        let (res_data, next_rs) = #dispatch_name(#id ^ rs_val, &m_val, rs_val, aux_val);
-                        #junk
-                        #unfold_n(#i + 1, res_data, next_rs, aux_val)
-                    }
-                });
-            }
-            let fb_n = Ident::new("fb", Span::call_site());
-            let nr_n = Ident::new("nr", Span::call_site());
-            let fr = generate_fragmented_string_recovery(&fb_n, &nr_n, rng);
-            quote! {
-                {
-                    fn #unfold_n(idx: usize, m_val: Vec<u8>, rs_val: u32, aux_val: &mut Vec<u8>) -> String {
-                        match idx {
-                            #(#cases)*
-                            _ => {
-                                let #fb_n = m_val;
-                                let #nr_n = rs_val;
-                                #fr
-                            }
-                        }
-                    }
-                    #unfold_n(0, #initial_input_var.clone(), 0u32, &mut #aux_var)
-                }
-            }
-        },
-        6 => { // Truly Dynamic Recursive (Fragment Composition) with Stealth Completion
-            let cc_n = Ident::new("cc", Span::call_site());
-            let total = tasks.len();
-            let cfg = generate_cfg_node(&tasks, &m_n, &rs_n, aux_var, dispatch_name, rng, 0, Some(&cc_n));
-            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
-            quote! {
-                let mut #m_n: Vec<u8> = #initial_input_var.clone();
-                let mut #rs_n = 0u32;
-                let mut #cc_n = 0usize;
-                #cfg
-                if #cc_n == #total {
-                    #fr
-                } else {
-                    String::new()
-                }
-            }
-        },
-        7 => { // Dynamic FSM with Stealth Completion
-            let s_n = Ident::new("s", Span::call_site());
-            let mut arms = Vec::new();
-            let mut shuffled: Vec<usize> = (0..tasks.len()).collect();
-            shuffled.shuffle(rng);
-            let mut next_states = vec![0usize; tasks.len()];
-            for i in 0..tasks.len()-1 { next_states[i] = shuffled[i+1]; }
-            let recovery_state = tasks.len() + 100 + rng.gen_range(0..100);
-            next_states[tasks.len()-1] = recovery_state;
-            for (i, (id, junk)) in tasks.iter().enumerate() {
-                let curr_s = shuffled[i];
-                let ns = next_states[i];
-                arms.push(quote! {
-                    #curr_s => {
-                        let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
-                        #m_n = res; #rs_n = next_rs; #s_n = #ns; #junk
-                    }
-                });
-            }
-            let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
-            arms.push(quote! { #recovery_state => break #fr, });
-            let start_s = shuffled[0];
-            quote! {
-                let mut #m_n: Vec<u8> = #initial_input_var.clone();
-                let mut #rs_n = 0u32;
-                let mut #s_n = #start_s;
-                loop { match #s_n { #(#arms)* _ => break String::new(), } }
-            }
-        },
-        8 => { // Register-style (Grounded)
-            let r0 = Ident::new("r0", Span::call_site());
-            let r1 = Ident::new("r1", Span::call_site());
-            let r2 = Ident::new("r2", Span::call_site());
-            let mut st = Vec::new();
-            st.push(quote! { let mut #r0: Vec<u8> = #initial_input_var.clone(); let mut #r1: Vec<u8> = Vec::new(); let mut #r2: Vec<u8> = Vec::new(); });
-            for (i, (id, junk)) in tasks.iter().enumerate() {
-                let src = match i % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
-                let dst = match (i + 1) % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
-                st.push(quote! {
-                    let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &#src, #rs_n, &mut #aux_var);
-                    #rs_n = next_rs; #dst = res; #junk
-                });
-            }
-            let lr = match tasks.len() % 3 { 0 => &r0, 1 => &r1, _ => &r2 };
-            let fr = generate_fragmented_string_recovery(lr, &rs_n, rng);
-            quote! { { let mut #rs_n = 0u32; #(#st)* #fr } }
-        },
-        9 => { // Stack-based (Grounded)
-             let stack_n = Ident::new("stk", Span::call_site());
-             let mut st = Vec::new();
-             st.push(quote! { let mut #stack_n: Vec<Vec<u8>> = vec![#initial_input_var.clone()]; });
-             for (id, junk) in tasks {
-                 st.push(quote! {
-                     let cur = #stack_n.pop().unwrap_or_default();
-                     let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &cur, #rs_n, &mut #aux_var);
-                     #rs_n = next_rs; #stack_n.push(res); #junk
-                 });
-             }
-             let fr = generate_fragmented_string_recovery(&Ident::new("final_data", Span::call_site()), &rs_n, rng);
-             quote! {
-                 {
-                     let mut #rs_n = 0u32;
-                     #(#st)*
-                     let final_data = #stack_n.pop().unwrap_or_default();
-                     #fr
-                 }
-             }
-        },
-        10 => { // Unbounded Graph-Based CFG
-            generate_unbounded_cfg_graph(&tasks, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng)
-        },
-        11 => { // First-Class Interpreter CFG
-            let topo = generate_advanced_topology(tasks.len() / 2 + 1, rng);
-            let filled = fill_topology_with_tasks(topo, &tasks, rng);
-            generate_interpreter_cfg(filled, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng)
-        },
-        _ => { // Trampoline Dispatcher
-            generate_trampoline_cfg(&tasks, initial_input_var, dispatch_name, rng)
-        }
+    match rng.gen_range(0..4) {
+        0 => render_as_state_machine(filled, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng),
+        1 => render_as_trampoline(filled, initial_input_var, dispatch_name, rng),
+        2 => render_as_recursive_fns(filled, initial_input_var, dispatch_name, rng),
+        _ => render_as_nested_blocks(filled, initial_input_var, dispatch_name, rng),
     }
 }
 
