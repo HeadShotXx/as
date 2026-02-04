@@ -1219,6 +1219,133 @@ struct Topology {
     entry_id: u32,
 }
 
+fn build_topology_recursive(
+    tasks: &[(u32, TokenStream2)],
+    exit_id: u32,
+    nodes: &mut Vec<GraphNode>,
+    rng: &mut impl Rng,
+    depth: usize,
+) -> u32 {
+    let entry_id = rng.gen::<u32>();
+
+    if depth > 7 || tasks.len() <= 1 {
+        nodes.push(GraphNode {
+            id: entry_id,
+            tasks: tasks.to_vec(),
+            next_states: vec![exit_id],
+            is_exit: false,
+        });
+        return entry_id;
+    }
+
+    let split = rng.gen_range(0..=tasks.len());
+    let (left, right) = tasks.split_at(split);
+
+    match rng.gen_range(0..4) {
+        0 => { // Simple Sequence: [Left] -> [Right] -> exit_id
+            let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
+            build_topology_recursive(left, r_entry, nodes, rng, depth + 1)
+        },
+        1 => { // Branching Junk: [Left] -> (Main: [Right] -> exit_id | Junk: [Junk] -> exit_id)
+            let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
+            let junk_id = rng.gen::<u32>();
+            let mut rs_c = 0u32;
+            nodes.push(GraphNode {
+                id: junk_id,
+                tasks: vec![(0, generate_ghost(rng.gen(), rng, None, &mut rs_c))],
+                next_states: vec![exit_id],
+                is_exit: false,
+            });
+
+            let branch_id = rng.gen::<u32>();
+            nodes.push(GraphNode {
+                id: branch_id,
+                tasks: Vec::new(),
+                next_states: vec![r_entry, junk_id],
+                is_exit: false,
+            });
+
+            build_topology_recursive(left, branch_id, nodes, rng, depth + 1)
+        },
+        2 => { // Fake Parallelism (Opaque Branch): Branch -> ([Left] -> [Right] -> exit_id | Decoy -> Trap)
+            let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
+            let l_entry = build_topology_recursive(left, r_entry, nodes, rng, depth + 1);
+
+            let decoy_id = rng.gen::<u32>();
+            nodes.push(GraphNode {
+                id: decoy_id,
+                tasks: vec![(0, quote! { return String::new(); })],
+                next_states: Vec::new(),
+                is_exit: true,
+            });
+
+            let branch_id = rng.gen::<u32>();
+            nodes.push(GraphNode {
+                id: branch_id,
+                tasks: Vec::new(),
+                next_states: vec![l_entry, decoy_id],
+                is_exit: false,
+            });
+            branch_id
+        },
+        _ => { // Diamond Merge: [Left] -> Branch -> (Mid1 | Mid2) -> Merge -> [Right] -> exit_id
+            let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
+
+            let merge_id = rng.gen::<u32>();
+            nodes.push(GraphNode {
+                id: merge_id,
+                tasks: Vec::new(),
+                next_states: vec![r_entry],
+                is_exit: false,
+            });
+
+            let m1_id = rng.gen::<u32>();
+            let mut rs_c1 = 0u32;
+            nodes.push(GraphNode {
+                id: m1_id,
+                tasks: vec![(0, generate_ghost(rng.gen(), rng, None, &mut rs_c1))],
+                next_states: vec![merge_id],
+                is_exit: false,
+            });
+
+            let m2_id = rng.gen::<u32>();
+            let mut rs_c2 = 0u32;
+            nodes.push(GraphNode {
+                id: m2_id,
+                tasks: vec![(0, generate_ghost(rng.gen(), rng, None, &mut rs_c2))],
+                next_states: vec![merge_id],
+                is_exit: false,
+            });
+
+            let branch_id = rng.gen::<u32>();
+            nodes.push(GraphNode {
+                id: branch_id,
+                tasks: Vec::new(),
+                next_states: vec![m1_id, m2_id],
+                is_exit: false,
+            });
+
+            build_topology_recursive(left, branch_id, nodes, rng, depth + 1)
+        }
+    }
+}
+
+fn generate_fractal_topology(tasks: &[(u32, TokenStream2)], rng: &mut impl Rng) -> Topology {
+    let mut nodes = Vec::new();
+    let exit_id = rng.gen::<u32>();
+
+    nodes.push(GraphNode {
+        id: exit_id,
+        tasks: Vec::new(),
+        next_states: Vec::new(),
+        is_exit: true,
+    });
+
+    let entry_id = build_topology_recursive(tasks, exit_id, &mut nodes, rng, 0);
+
+    Topology { nodes, entry_id }
+}
+
 fn generate_advanced_topology(num_blocks: usize, rng: &mut impl Rng) -> Topology {
     let mut nodes = Vec::new();
     let mut ids: Vec<u32> = (0..num_blocks as u32 + 2).map(|_| rng.gen::<u32>()).collect();
@@ -1640,7 +1767,7 @@ fn generate_polymorphic_decode_chain(
     let m_n = Ident::new("m", Span::call_site());
     let tasks: Vec<(u32, TokenStream2)> = transform_ids.iter().cloned().zip(junk_tokens.iter().cloned()).collect();
 
-    match rng.gen_range(0..13) {
+    match rng.gen_range(0..14) {
         0 => { // State machine (Scrambled)
             let mut arms = Vec::new();
             let s_n = Ident::new("s", Span::call_site());
@@ -1952,6 +2079,10 @@ fn generate_polymorphic_decode_chain(
             let topo = generate_advanced_topology(tasks.len() / 2 + 1, rng);
             let filled = fill_topology_with_tasks(topo, &tasks, rng);
             generate_interpreter_cfg(filled, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng)
+        },
+        12 => { // Fractal Graph-Based CFG
+            let topo = generate_fractal_topology(&tasks, rng);
+            generate_interpreter_cfg(topo, initial_input_var, &m_n, &rs_n, aux_var, dispatch_name, rng)
         },
         _ => { // Trampoline Dispatcher
             generate_trampoline_cfg(&tasks, initial_input_var, dispatch_name, rng)
