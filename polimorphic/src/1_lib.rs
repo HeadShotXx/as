@@ -45,6 +45,7 @@ enum Primitive {
     BigIntPoly { base: u128, total_bytes: u64 },
     MapConv { k0: u8 },
     IdentityBranch { path_a: Vec<Primitive>, path_b: Vec<Primitive> },
+    Polynomial { a: u8, b: u8, c: u8 },
 }
 
 struct Pipeline {
@@ -429,7 +430,24 @@ fn get_pipelines() -> Vec<Pipeline> {
         }
     };
 
-    vec![b32(), b36(), b64(), z85(), b91(), arith_p(), perm_p(), xor_p(), split_p(), bit_p(), rot_p(), adv_p()]
+    let poly_p = || {
+        Pipeline {
+            encoder: Box::new(move |data| {
+                let mut rng = thread_rng();
+                let a = rng.gen::<u8>() & 0xFE; // even
+                let b = rng.gen::<u8>() | 0x01; // odd
+                let c = rng.gen::<u8>();
+                let out: Vec<u8> = data.iter().map(|&x| {
+                    let x32 = x as u32;
+                    let res = (a as u32 * x32 * x32 + b as u32 * x32 + c as u32) % 256;
+                    res as u8
+                }).collect();
+                (out, vec![Primitive::Polynomial { a, b, c }])
+            }),
+        }
+    };
+
+    vec![b32(), b36(), b64(), z85(), b91(), arith_p(), perm_p(), xor_p(), split_p(), bit_p(), rot_p(), adv_p(), poly_p()]
 }
 
 // --- HELPERS ---
@@ -538,6 +556,20 @@ fn generate_primitive_dispatch_logic(p: &Primitive, rng: &mut impl Rng, arm_rs: 
         Primitive::BigIntPoly { base, total_bytes } => generate_bigint_poly(*base, *total_bytes, rng),
         Primitive::MapConv { k0 } => generate_map_conv(*k0, rng),
         Primitive::IdentityBranch { path_a, path_b } => generate_identity_branch(path_a, path_b, rng, arm_rs),
+        Primitive::Polynomial { a, b, c } => generate_polynomial_transform(*a, *b, *c, rng),
+    }
+}
+
+fn generate_polynomial_transform(a: u8, b: u8, c: u8, _rng: &mut impl Rng) -> TokenStream2 {
+    let mut inv_table = [0u8; 256];
+    for x in 0..=255u8 {
+        let x32 = x as u32;
+        let y = (a as u32 * x32 * x32 + b as u32 * x32 + c as u32) % 256;
+        inv_table[y as usize] = x;
+    }
+    let table_lit = Literal::byte_string(&inv_table);
+    quote! {
+        for b in data.iter_mut() { *b = (#table_lit)[*b as usize]; }
     }
 }
 
@@ -1373,9 +1405,9 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
     let br_n = Ident::new(&format!("br_{}", rng.gen::<u32>()), Span::call_site());
     
     let u_l = match variant {
-        0 => quote! { #k_n = #k_n.wrapping_add(#b_n); },
-        1 => quote! { #k_n = #k_n.wrapping_sub(#b_n); },
-        _ => quote! { #k_n = #k_n.rotate_left(3); },
+        0 => quote! { #k_n = #k_n.wrapping_add(#b_n ^ 0x55).rotate_left(1); },
+        1 => quote! { #k_n = #k_n.wrapping_sub(#b_n ^ 0xAA).rotate_right(1); },
+        _ => quote! { #k_n = (#k_n ^ #b_n).wrapping_add(0x33).rotate_left(3); },
     };
     
     let junk = generate_junk_logic(rng, Some(output_var), Some(rs_var), rs_compile);
@@ -1532,7 +1564,7 @@ fn build_topology_recursive(
     let split = rng.gen_range(0..=tasks.len());
     let (left, right) = tasks.split_at(split);
 
-    match rng.gen_range(0..4) {
+    match rng.gen_range(0..6) {
         0 => { // Simple Sequence: [Left] -> [Right] -> exit_id
             let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
             build_topology_recursive(left, r_entry, nodes, rng, depth + 1)
@@ -1579,7 +1611,7 @@ fn build_topology_recursive(
             });
             branch_id
         },
-        _ => { // Diamond Merge: [Left] -> Branch -> (Mid1 | Mid2) -> Merge -> [Right] -> exit_id
+        3 => { // Diamond Merge: [Left] -> Branch -> (Mid1 | Mid2) -> Merge -> [Right] -> exit_id
             let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
 
             let merge_id = rng.gen::<u32>();
@@ -1617,6 +1649,54 @@ fn build_topology_recursive(
             });
 
             build_topology_recursive(left, branch_id, nodes, rng, depth + 1)
+        },
+        4 => { // Fake Loop Forest: Structural loop that executes once
+            let r_entry = build_topology_recursive(right, exit_id, nodes, rng, depth + 1);
+            let loop_entry = rng.gen::<u32>();
+            let loop_body_exit = rng.gen::<u32>();
+
+            let body_entry = build_topology_recursive(left, loop_body_exit, nodes, rng, depth + 1);
+
+            nodes.push(GraphNode {
+                id: loop_entry,
+                tasks: Vec::new(),
+                next_states: vec![body_entry],
+                is_exit: false,
+            });
+
+            nodes.push(GraphNode {
+                id: loop_body_exit,
+                tasks: Vec::new(),
+                next_states: vec![r_entry, loop_entry], // Predicate is always true, so it goes to r_entry
+                is_exit: false,
+            });
+
+            loop_entry
+        },
+        _ => { // Dead Path Weaving: A chain of dead nodes
+            let real_entry = build_topology_recursive(tasks, exit_id, nodes, rng, depth + 1);
+
+            let mut prev_dead = exit_id;
+            for _ in 0..rng.gen_range(2..5) {
+                let curr_dead = rng.gen::<u32>();
+                let mut rs_c = 0u32;
+                nodes.push(GraphNode {
+                    id: curr_dead,
+                    tasks: vec![(0, generate_ghost(rng.gen(), rng, None, &mut rs_c))],
+                    next_states: vec![prev_dead],
+                    is_exit: false,
+                });
+                prev_dead = curr_dead;
+            }
+
+            let branch_id = rng.gen::<u32>();
+            nodes.push(GraphNode {
+                id: branch_id,
+                tasks: Vec::new(),
+                next_states: vec![real_entry, prev_dead], // Predicate always true -> real_entry
+                is_exit: false,
+            });
+            branch_id
         }
     }
 }
@@ -2145,99 +2225,221 @@ fn generate_professional_vm(
     let mut bytecode = Vec::new();
     let mut arms = Vec::new();
 
-    let salt = rng.gen::<u8>();
-    let encode = |op: u8| -> u8 { op.wrapping_add(salt).rotate_right(3) };
+    let mut decode_logic = Vec::new();
+    let mut encode_fn: Box<dyn Fn(u8) -> u8> = Box::new(|op| op);
 
-    let mut get_aliases = |count: usize| -> Vec<u8> {
-        (0..count).map(|_| rng.gen::<u8>()).collect()
+    for _ in 0..rng.gen_range(3..6) {
+        match rng.gen_range(0..3) {
+            0 => {
+                let s = rng.gen::<u8>();
+                let old_encode = encode_fn;
+                encode_fn = Box::new(move |op| old_encode(op).wrapping_add(s));
+                decode_logic.insert(0, quote! { inst = inst.wrapping_sub(#s); });
+            },
+            1 => {
+                let s = rng.gen::<u8>();
+                let old_encode = encode_fn;
+                encode_fn = Box::new(move |op| old_encode(op) ^ s);
+                decode_logic.insert(0, quote! { inst ^= #s; });
+            },
+            _ => {
+                let r = rng.gen_range(1..7) as u32;
+                let old_encode = encode_fn;
+                encode_fn = Box::new(move |op| old_encode(op).rotate_left(r));
+                decode_logic.insert(0, quote! { inst = inst.rotate_right(#r); });
+            }
+        }
+    }
+    let encode = |op: u8| -> u8 { encode_fn(op) };
+
+    let mut all_special_ops = Vec::new();
+    let mut get_unique_aliases = |count: usize| -> Vec<u8> {
+        let mut res = Vec::new();
+        for _ in 0..count {
+            loop {
+                let op = rng.gen::<u8>();
+                if !all_special_ops.contains(&op) {
+                    all_special_ops.push(op);
+                    res.push(op);
+                    break;
+                }
+            }
+        }
+        res
     };
 
-    let op_exec_aliases = get_aliases(3);
-    let op_push_aliases = get_aliases(2);
-    let op_pop_aliases  = get_aliases(2);
-    let op_add_aliases  = get_aliases(2);
-    let op_xor_aliases  = get_aliases(2);
-    let op_mov_aliases  = get_aliases(2);
-    let op_jmp_aliases  = get_aliases(2);
-    let op_junk_aliases = get_aliases(3);
+    let op_exec_aliases = get_unique_aliases(3);
+    let op_push_aliases = get_unique_aliases(2);
+    let op_pop_aliases  = get_unique_aliases(2);
+    let op_add_aliases  = get_unique_aliases(2);
+    let op_xor_aliases  = get_unique_aliases(2);
+    let op_mov_aliases  = get_unique_aliases(2);
+    let op_jmp_aliases  = get_unique_aliases(2);
+    let op_junk_aliases = get_unique_aliases(3);
+    let op_subvm_aliases = get_unique_aliases(2);
 
-    let mut current_reg = 0u8;
+    let mut reg_map: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
+    reg_map.shuffle(rng);
 
-    for (id, junk) in tasks {
+    let mut current_logical_reg = 0u8;
+
+    let mut r_keys = [0u32; 8];
+    for k in &mut r_keys { *k = rng.gen::<u32>(); }
+    let r_keys_lit = quote! { [#(#r_keys),*] };
+
+    let mut used_opcodes = ::std::collections::HashSet::new();
+
+    let mut task_idx = 0;
+    while task_idx < tasks.len() {
+        if rng.gen_bool(0.2) && task_idx + 2 < tasks.len() {
+            // Emit JMP to skip these tasks in normal flow
+            let jmp_op = *op_jmp_aliases.choose(rng).unwrap();
+            bytecode.push(encode(jmp_op));
+            bytecode.push(0);
+            bytecode.push(16); // Jump over 3 tasks (12 bytes) + itself (wait, no, pc update logic)
+            // Wait, Offset 0: JMP 16 -> Offset 16. Correct.
+            bytecode.push(rng.gen());
+
+            let start_pc = bytecode.len();
+            for _ in 0..3 {
+                let (id, junk) = &tasks[task_idx];
+                let mut exec_op;
+                let mut task_op;
+                loop {
+                    exec_op = *op_exec_aliases.choose(rng).unwrap();
+                    task_op = rng.gen::<u8>();
+                    if used_opcodes.insert((exec_op, task_op)) { break; }
+                }
+                bytecode.push(encode(exec_op));
+                bytecode.push(task_op);
+                bytecode.push(reg_map[current_logical_reg as usize]);
+                bytecode.push(rng.gen());
+                arms.push(quote! {
+                    (#exec_op, #task_op) => {
+                        let r_idx = bc[pc + 2] as usize;
+                        let r_key = r_keys[r_idx];
+                        let (res, next_rs) = #dispatch_name(#id ^ rs, regs.get(&r_key).unwrap(), rs, &mut aux_buf);
+                        regs.insert(r_key, res);
+                        rs = next_rs;
+                        {
+                            let db = regs.get_mut(&r_key).unwrap();
+                            let mut rs_junk = rs;
+                            #junk
+                            rs = rs_junk;
+                        }
+                    }
+                });
+                task_idx += 1;
+            }
+            let end_pc = bytecode.len();
+            let subvm_op = *op_subvm_aliases.choose(rng).unwrap();
+            bytecode.push(encode(subvm_op));
+            bytecode.push((start_pc / 4) as u8);
+            bytecode.push((end_pc / 4) as u8);
+            bytecode.push(rng.gen());
+            continue;
+        }
+        let (id, junk) = &tasks[task_idx];
 
         // Register hopping
-        let next_reg = rng.gen_range(0..8u8);
-        if next_reg != current_reg {
+        let next_logical_reg = rng.gen_range(0..8u8);
+        if next_logical_reg != current_logical_reg {
             let mov_op = *op_mov_aliases.choose(rng).unwrap();
             bytecode.push(encode(mov_op));
-            bytecode.push(current_reg);
-            bytecode.push(next_reg);
+            bytecode.push(reg_map[current_logical_reg as usize]);
+            bytecode.push(reg_map[next_logical_reg as usize]);
             bytecode.push(rng.gen());
-            current_reg = next_reg;
+            current_logical_reg = next_logical_reg;
         }
 
-        let exec_op = *op_exec_aliases.choose(rng).unwrap();
-        let task_op = rng.gen::<u8>();
+        let mut exec_op;
+        let mut task_op;
+        loop {
+            exec_op = *op_exec_aliases.choose(rng).unwrap();
+            task_op = rng.gen::<u8>();
+            if used_opcodes.insert((exec_op, task_op)) { break; }
+        }
         bytecode.push(encode(exec_op));
         bytecode.push(task_op);
-        bytecode.push(current_reg);
+        bytecode.push(reg_map[current_logical_reg as usize]);
         bytecode.push(rng.gen());
 
         arms.push(quote! {
             (#exec_op, #task_op) => {
                 let r_idx = bc[pc + 2] as usize;
-                let (res, next_rs) = #dispatch_name(#id ^ rs, &regs[r_idx], rs, &mut aux_buf);
-                regs[r_idx] = res;
+                let r_key = r_keys[r_idx];
+                let (res, next_rs) = #dispatch_name(#id ^ rs, regs.get(&r_key).unwrap(), rs, &mut aux_buf);
+                regs.insert(r_key, res);
                 rs = next_rs;
                 {
-                    let db = &mut regs[r_idx];
+                    let db = regs.get_mut(&r_key).unwrap();
                     let mut rs_junk = rs;
                     #junk
                     rs = rs_junk;
                 }
             }
         });
+        task_idx += 1;
     }
 
     let bc_lit = Literal::byte_string(&bytecode);
     let fr = generate_fragmented_string_recovery(&Ident::new("final_m", Span::call_site()), &Ident::new("rs", Span::call_site()), rng);
 
+    let mut regs_init = Vec::new();
+    for i in 0..8 {
+        let mut logical_idx = 0;
+        for (l, &p) in reg_map.iter().enumerate() {
+            if p == i as u8 { logical_idx = l; break; }
+        }
+
+        if logical_idx == 0 {
+            regs_init.push(quote! { #initial_input_var.clone() });
+        } else {
+            let junk_val = rng.gen::<u8>();
+            regs_init.push(quote! { vec![#junk_val; #initial_input_var.len()] });
+        }
+    }
+
+    let final_phys_reg = reg_map[current_logical_reg as usize];
+
     quote! {
         {
             let bc = #bc_lit;
             let mut pc = 0usize;
-            let mut regs: [Vec<u8>; 8] = [
-                #initial_input_var.clone(), #initial_input_var.clone(),
-                #initial_input_var.clone(), #initial_input_var.clone(),
-                #initial_input_var.clone(), #initial_input_var.clone(),
-                #initial_input_var.clone(), #initial_input_var.clone(),
-            ];
+            let mut regs: ::std::collections::HashMap<u32, Vec<u8>> = ::std::collections::HashMap::new();
+            let r_keys: [u32; 8] = #r_keys_lit;
+            let initial_regs: [Vec<u8>; 8] = [ #(#regs_init),* ];
+            for i in 0..8 { regs.insert(r_keys[i], initial_regs[i].clone()); }
+
             let mut stk: Vec<Vec<u8>> = Vec::new();
             let mut aux_buf: Vec<u8> = Vec::new();
             let mut rs = 0u32;
             let mut v_noise = 0u32;
 
             while pc < bc.len() {
-                let inst = (bc[pc].rotate_left(3)).wrapping_sub(#salt);
+                let mut inst = bc[pc];
+                #(#decode_logic)*
                 let sub  = bc[pc + 1];
                 match (inst, sub) {
                     #(#arms)*
                     (inst, _) if [#(#op_push_aliases),*].contains(&inst) => {
                         let r_idx = bc[pc + 1] as usize;
-                        if r_idx < 8 { stk.push(regs[r_idx].clone()); }
+                        if r_idx < 8 { stk.push(regs.get(&r_keys[r_idx]).unwrap().clone()); }
                     }
                     (inst, _) if [#(#op_pop_aliases),*].contains(&inst) => {
                         let r_idx = bc[pc + 1] as usize;
-                        if r_idx < 8 { if let Some(v) = stk.pop() { regs[r_idx] = v; } }
+                        if r_idx < 8 { if let Some(v) = stk.pop() { regs.insert(r_keys[r_idx], v); } }
                     }
                     (inst, _) if [#(#op_add_aliases),*].contains(&inst) => {
                         let r_s = bc[pc + 1] as usize;
                         let r_d = bc[pc + 2] as usize;
                         if r_s < 8 && r_d < 8 {
-                             let src = regs[r_s].clone();
-                             for (i, b) in regs[r_d].iter_mut().enumerate() {
-                                 if !src.is_empty() {
-                                     *b = b.wrapping_add(src[i % src.len()]);
+                             let src = regs.get(&r_keys[r_s]).unwrap().clone();
+                             if let Some(dst) = regs.get_mut(&r_keys[r_d]) {
+                                 for (i, b) in dst.iter_mut().enumerate() {
+                                     if !src.is_empty() {
+                                         *b = b.wrapping_add(src[i % src.len()]);
+                                     }
                                  }
                              }
                         }
@@ -2246,10 +2448,12 @@ fn generate_professional_vm(
                         let r_s = bc[pc + 1] as usize;
                         let r_d = bc[pc + 2] as usize;
                         if r_s < 8 && r_d < 8 {
-                             let src = regs[r_s].clone();
-                             for (i, b) in regs[r_d].iter_mut().enumerate() {
-                                 if !src.is_empty() {
-                                     *b ^= src[i % src.len()];
+                             let src = regs.get(&r_keys[r_s]).unwrap().clone();
+                             if let Some(dst) = regs.get_mut(&r_keys[r_d]) {
+                                 for (i, b) in dst.iter_mut().enumerate() {
+                                     if !src.is_empty() {
+                                         *b ^= src[i % src.len()];
+                                     }
                                  }
                              }
                         }
@@ -2257,11 +2461,31 @@ fn generate_professional_vm(
                     (inst, _) if [#(#op_mov_aliases),*].contains(&inst) => {
                         let r_s = bc[pc + 1] as usize;
                         let r_d = bc[pc + 2] as usize;
-                        if r_s < 8 && r_d < 8 { regs[r_d] = regs[r_s].clone(); }
+                        if r_s < 8 && r_d < 8 {
+                            let src = regs.get(&r_keys[r_s]).unwrap().clone();
+                            regs.insert(r_keys[r_d], src);
+                        }
                     }
                     (inst, _) if [#(#op_jmp_aliases),*].contains(&inst) => {
                         pc = (pc as isize + bc[pc + 2] as isize) as usize;
                         continue;
+                    }
+                    (inst, _) if [#(#op_subvm_aliases),*].contains(&inst) => {
+                        let mut inner_pc = bc[pc + 1] as usize * 4;
+                        let epc = bc[pc + 2] as usize * 4;
+                        {
+                            let mut pc = inner_pc;
+                            while pc < epc && pc + 3 < bc.len() {
+                                let mut inst = bc[pc];
+                                #(#decode_logic)*
+                                let sub = bc[pc + 1];
+                                match (inst, sub) {
+                                    #(#arms)*
+                                    _ => {}
+                                }
+                                pc += 4;
+                            }
+                        }
                     }
                     (inst, _) if [#(#op_junk_aliases),*].contains(&inst) => {
                          v_noise = v_noise.wrapping_add(sub as u32).rotate_left(3);
@@ -2272,7 +2496,55 @@ fn generate_professional_vm(
                 }
                 pc += 4;
             }
-            let final_m = regs[#current_reg as usize].clone();
+            let final_m = regs.get(&r_keys[#final_phys_reg as usize]).unwrap().clone();
+            #fr
+        }
+    }
+}
+
+fn generate_flattened_cfg(
+    tasks: &[(u32, TokenStream2)],
+    initial_input_var: &Ident,
+    dispatch_name: &Ident,
+    aux_var: &Ident,
+    rng: &mut impl Rng,
+) -> TokenStream2 {
+    let mut arms = Vec::new();
+    let rs_n = Ident::new("rs", Span::call_site());
+    let m_n = Ident::new("m", Span::call_site());
+    let state_n = Ident::new("state", Span::call_site());
+
+    let state_ids: Vec<u32> = (0..tasks.len()).map(|_| rng.gen::<u32>()).collect();
+    let exit_state = rng.gen::<u32>();
+
+    for (i, (id, junk)) in tasks.iter().enumerate() {
+        let curr_state = state_ids[i];
+        let next_state = if i + 1 < tasks.len() { state_ids[i + 1] } else { exit_state };
+
+        arms.push(quote! {
+            #curr_state => {
+                let (res, next_rs) = #dispatch_name(#id ^ #rs_n, &#m_n, #rs_n, &mut #aux_var);
+                #m_n = res; #rs_n = next_rs; #junk
+                #state_n = #next_state;
+            }
+        });
+    }
+
+    let fr = generate_fragmented_string_recovery(&m_n, &rs_n, rng);
+    let start_state = state_ids[0];
+
+    quote! {
+        {
+            let mut #m_n = #initial_input_var.clone();
+            let mut #rs_n = 0u32;
+            let mut #state_n = #start_state;
+            loop {
+                if #state_n == #exit_state { break; }
+                match #state_n {
+                    #(#arms)*
+                    _ => break,
+                }
+            }
             #fr
         }
     }
@@ -2290,7 +2562,7 @@ fn generate_polymorphic_decode_chain(
     let m_n = Ident::new("m", Span::call_site());
     let tasks: Vec<(u32, TokenStream2)> = transform_ids.iter().cloned().zip(junk_tokens.iter().cloned()).collect();
 
-    match rng.gen_range(0..15) {
+    match rng.gen_range(0..16) {
         0 => { // State machine (Scrambled)
             let mut arms = Vec::new();
             let s_n = Ident::new("s", Span::call_site());
@@ -2613,6 +2885,9 @@ fn generate_polymorphic_decode_chain(
         14 => { // ProfessionalVM level renderer
             generate_professional_vm(&tasks, initial_input_var, dispatch_name, rng)
         },
+        15 => { // Full Control-Flow Flattening
+            generate_flattened_cfg(&tasks, initial_input_var, dispatch_name, aux_var, rng)
+        },
         _ => { // Trampoline Dispatcher
             generate_trampoline_cfg(&tasks, initial_input_var, dispatch_name, rng)
         }
@@ -2665,9 +2940,9 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         let eb_b = (ob ^ lock_junk) ^ key;
         eb.push(eb_b);
         match ev {
-            0 => key = key.wrapping_add(eb_b),
-            1 => key = key.wrapping_sub(eb_b),
-            _ => key = key.rotate_left(3),
+            0 => key = key.wrapping_add(eb_b ^ 0x55).rotate_left(1),
+            1 => key = key.wrapping_sub(eb_b ^ 0xAA).rotate_right(1),
+            _ => key = (key ^ eb_b).wrapping_add(0x33).rotate_left(3),
         };
     }
 
@@ -3276,6 +3551,17 @@ mod tests {
                 }
             },
             Primitive::Noop { .. } | Primitive::Sync => {},
+            Primitive::Polynomial { a, b, c } => {
+                let mut inv_table = [0u8; 256];
+                for x in 0..=255u8 {
+                    let x32 = x as u32;
+                    let y = (*a as u32 * x32 * x32 + *b as u32 * x32 + *c as u32) % 256;
+                    inv_table[y as usize] = x;
+                }
+                let mut decoded = Vec::new();
+                for &b in b_data.iter() { decoded.push(inv_table[b as usize]); }
+                *b_data = decoded;
+            }
         }
     }
 
