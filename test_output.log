@@ -1,0 +1,36 @@
+warning: multiple variants are never constructed
+  --> polimorphic/src/1_lib.rs:14:5
+   |
+10 | enum Primitive {
+   |      --------- variants in this enum
+...
+14 |     BaseLoad { base: u128, in_c: usize },
+   |     ^^^^^^^^
+15 |     BaseEmit { base: u128, in_c: usize, out_c: usize, total_bytes: u64 },
+   |     ^^^^^^^^
+16 |     BigIntInit,
+   |     ^^^^^^^^^^
+17 |     BigIntPush { base: u128 },
+   |     ^^^^^^^^^^
+18 |     BigIntEmit { total_bytes: u64 },
+   |     ^^^^^^^^^^
+...
+37 |     SwapBuffers,
+   |     ^^^^^^^^^^^
+...
+40 |     MapCombined { table: Vec<u8>, post_op: u8, post_kind: u8 },
+   |     ^^^^^^^^^^^
+...
+45 |     BigIntPoly { base: u128, total_bytes: u64 },
+   |     ^^^^^^^^^^
+46 |     MapConv { k0: u8 },
+47 |     IdentityBranch { path_a: Vec<Primitive>, path_b: Vec<Primitive> },
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `Primitive` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `polimorphic` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `target/debug/test_simple`
+OK
