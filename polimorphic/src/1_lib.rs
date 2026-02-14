@@ -45,6 +45,8 @@ enum Primitive {
     BigIntPoly { base: u128, total_bytes: u64 },
     MapConv { k0: u8 },
     IdentityBranch { path_a: Vec<Primitive>, path_b: Vec<Primitive> },
+    EnvCheck { expected_time: u64 },
+    SelfModifySim { mutation_seed: u32 },
 }
 
 struct Pipeline {
@@ -441,6 +443,173 @@ enum MapSemantic {
     Sub(u8),
 }
 
+struct StubContext {
+    s_n: Ident,
+    m_n: Ident,
+    df: TokenStream2,
+    di: TokenStream2,
+    xk: u8,
+    vt_c: Vec<TokenStream2>,
+    mult: u32,
+    salt: u32,
+    rl: TokenStream2,
+    dl_c: TokenStream2,
+    d_b_i: Ident,
+    i_v: Ident,
+    gate_n: Ident,
+    a_v: Ident,
+    dc: TokenStream2,
+    gate_junk: TokenStream2,
+}
+
+fn generate_struct_stub(ctx: StubContext, rng: &mut impl Rng) -> TokenStream2 {
+    let StubContext { s_n, m_n, df, di, xk, vt_c, mult, salt, rl, dl_c, d_b_i, i_v, gate_n, a_v, dc, gate_junk } = ctx;
+    let d_n = Ident::new(&format!("d_{}", rng.gen::<u32>()), Span::call_site());
+
+    quote! {{
+        struct #s_n<'a> { #df key: u8, }
+        impl<'a> #s_n<'a> {
+            fn #m_n(&mut self) -> String {
+                fn #d_n(id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
+                    let sel = (((id ^ rs_in).wrapping_mul(#mult) ^ #salt).rotate_left((rs_in & 0x7) as u32 + 1) ^ rs_in).wrapping_add(0x1337);
+                    match sel {
+                        #(#vt_c)*
+                        _ => (data.to_vec(), rs_in)
+                    }
+                }
+                let mut #a_v: Vec<u8> = Vec::new();
+                let mut rs_junk = 0u32;
+                let mut #d_b_i = { #rl #dl_c db };
+                let mut #i_v = #d_b_i;
+                fn #gate_n(id: u32, data: &[u8], rs: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
+                    #gate_junk
+                    #d_n(id, data, rs, aux)
+                }
+                #dc
+            }
+        }
+        let mut inst = #s_n { #di key: #xk, };
+        inst.#m_n()
+    }}
+}
+
+fn generate_trait_stub(ctx: StubContext, rng: &mut impl Rng) -> TokenStream2 {
+    let StubContext { s_n, m_n, df, di, xk, vt_c, mult, salt, rl, dl_c, d_b_i, i_v, gate_n, a_v, dc, gate_junk } = ctx;
+    let t_n = Ident::new(&format!("t_{}", rng.gen::<u32>()), Span::call_site());
+    let d_n = Ident::new(&format!("d_{}", rng.gen::<u32>()), Span::call_site());
+
+    quote! {{
+        trait #t_n { fn #m_n(&mut self) -> String; }
+        struct #s_n<'a> { #df key: u8, }
+        impl<'a> #t_n for #s_n<'a> {
+            fn #m_n(&mut self) -> String {
+                fn #d_n(id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
+                    let sel = (((id ^ rs_in).wrapping_mul(#mult) ^ #salt).rotate_left((rs_in & 0x7) as u32 + 1) ^ rs_in).wrapping_add(0x1337);
+                    match sel {
+                        #(#vt_c)*
+                        _ => (data.to_vec(), rs_in)
+                    }
+                }
+                let mut #a_v: Vec<u8> = Vec::new();
+                let mut rs_junk = 0u32;
+                let mut #d_b_i = { #rl #dl_c db };
+                let mut #i_v = #d_b_i;
+                fn #gate_n(id: u32, data: &[u8], rs: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
+                    #gate_junk
+                    #d_n(id, data, rs, aux)
+                }
+                #dc
+            }
+        }
+        let mut inst = #s_n { #di key: #xk, };
+        let mut dyn_inst: Box<dyn #t_n + '_> = Box::new(inst);
+        dyn_inst.#m_n()
+    }}
+}
+
+fn generate_closure_stub(ctx: StubContext, _rng: &mut impl Rng) -> TokenStream2 {
+    let StubContext { s_n, m_n, df, di, xk, vt_c, mult, salt, rl, dl_c, d_b_i, i_v, gate_n, a_v, dc, gate_junk } = ctx;
+    let d_n = Ident::new("d_closure", Span::call_site());
+
+    quote! {{
+        struct #s_n<'a> { #df key: u8, }
+        impl<'a> #s_n<'a> {
+            fn #m_n(&mut self) -> String {
+                let mut #m_n = |_: u32| -> String {
+                    fn #d_n(id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>, mult: u32, salt: u32) -> (Vec<u8>, u32) {
+                        let sel = (((id ^ rs_in).wrapping_mul(mult) ^ salt).rotate_left((rs_in & 0x7) as u32 + 1) ^ rs_in).wrapping_add(0x1337);
+                        match sel {
+                            #(#vt_c)*
+                            _ => (data.to_vec(), rs_in)
+                        }
+                    }
+                    let mut #a_v: Vec<u8> = Vec::new();
+                    let mut rs_junk = 0u32;
+                    let mut #d_b_i = { #rl #dl_c db };
+                    let mut #i_v = #d_b_i;
+                    fn #gate_n(id: u32, data: &[u8], rs: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
+                        #gate_junk
+                        #d_n(id, data, rs, aux, #mult, #salt)
+                    }
+                    #dc
+                };
+                #m_n(0)
+            }
+        }
+        let mut inst = #s_n { #di key: #xk, };
+        inst.#m_n()
+    }}
+}
+
+fn generate_flattened_stub(ctx: StubContext, rng: &mut impl Rng) -> TokenStream2 {
+    let StubContext { s_n, m_n, df, di, xk, vt_c, mult, salt, rl, dl_c, d_b_i, i_v, gate_n, a_v, dc, gate_junk } = ctx;
+    let d_n = Ident::new("d_flat", Span::call_site());
+    let state_n = Ident::new("state", Span::call_site());
+
+    let s0 = rng.gen::<u32>() % 1000;
+    let s1 = rng.gen::<u32>() % 1000 + 1000;
+    let s2 = rng.gen::<u32>() % 1000 + 2000;
+
+    quote! {{
+        struct #s_n<'a> { #df key: u8, }
+        impl<'a> #s_n<'a> {
+            fn #m_n(&mut self) -> String {
+                fn #d_n(id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>, mult: u32, salt: u32) -> (Vec<u8>, u32) {
+                    let sel = (((id ^ rs_in).wrapping_mul(mult) ^ salt).rotate_left((rs_in & 0x7) as u32 + 1) ^ rs_in).wrapping_add(0x1337);
+                    match sel {
+                        #(#vt_c)*
+                        _ => (data.to_vec(), rs_in)
+                    }
+                }
+                let mut #a_v: Vec<u8> = Vec::new();
+                let mut rs_junk = 0u32;
+                let mut res = String::new();
+                let mut #state_n = #s0;
+                loop {
+                    match #state_n {
+                        #s0 => { #state_n = #s1; }
+                        #s1 => {
+                            let mut #d_b_i = { #rl #dl_c db };
+                            let mut #i_v = #d_b_i;
+                            fn #gate_n(id: u32, data: &[u8], rs: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
+                                #gate_junk
+                                #d_n(id, data, rs, aux, #mult, #salt)
+                            }
+                            res = #dc;
+                            #state_n = #s2;
+                        }
+                        #s2 => break,
+                        _ => { #state_n = #s0; }
+                    }
+                }
+                res
+            }
+        }
+        let mut inst = #s_n { #di key: #xk, };
+        inst.#m_n()
+    }}
+}
+
 fn identify_map_semantic(table: &[u8]) -> MapSemantic {
     if table.len() != 256 { return MapSemantic::None; }
 
@@ -499,6 +668,44 @@ fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 
     }
 }
 
+fn generate_env_check(_expected_time: u64, _rng: &mut impl Rng, arm_rs: &mut u32) -> TokenStream2 {
+    // We add a timing check that mutates rs if it fails
+    let rs_delta = 0xABCDEF12u32;
+    *arm_rs = arm_rs.wrapping_add(0); // In simulation we assume it passes
+
+    quote! {
+        {
+            let t1 = ::std::time::Instant::now();
+            let mut sum = 0u64;
+            for i in 0..1000 { sum = sum.wrapping_add(i); }
+            let t2 = ::std::time::Instant::now();
+            let dur = t2.duration_since(t1).as_nanos() as u64;
+            // If it takes WAY too long (e.g. 100ms for a tiny loop), assume debugging
+            if dur > 100_000_000 {
+                rs = rs.wrapping_add(#rs_delta);
+            }
+            let _ = sum;
+        }
+    }
+}
+
+fn generate_self_modify_sim(mutation_seed: u32, _rng: &mut impl Rng, arm_rs: &mut u32) -> TokenStream2 {
+    // This primitive mutates rs based on the hash of the current data buffer
+    // To maintain bit-exact recovery, we use a trick where the data is used but the result is predictable
+    *arm_rs ^= mutation_seed;
+
+    quote! {
+        {
+            let mut h = 0u32;
+            for &b in data.iter() {
+                h = h.wrapping_add(b as u32).rotate_left(3);
+            }
+            // Use black_box to prevent the compiler from optimizing away the data-dependent part
+            rs ^= #mutation_seed ^ (::std::hint::black_box(h) ^ ::std::hint::black_box(h));
+        }
+    }
+}
+
 fn generate_primitive_dispatch_logic(p: &Primitive, rng: &mut impl Rng, arm_rs: &mut u32) -> TokenStream2 {
     match p {
         Primitive::Map(table) => generate_obfuscated_map(&table, rng),
@@ -538,6 +745,8 @@ fn generate_primitive_dispatch_logic(p: &Primitive, rng: &mut impl Rng, arm_rs: 
         Primitive::BigIntPoly { base, total_bytes } => generate_bigint_poly(*base, *total_bytes, rng),
         Primitive::MapConv { k0 } => generate_map_conv(*k0, rng),
         Primitive::IdentityBranch { path_a, path_b } => generate_identity_branch(path_a, path_b, rng, arm_rs),
+        Primitive::EnvCheck { expected_time } => generate_env_check(*expected_time, rng, arm_rs),
+        Primitive::SelfModifySim { mutation_seed } => generate_self_modify_sim(*mutation_seed, rng, arm_rs),
     }
 }
 
@@ -1184,7 +1393,7 @@ fn generate_bigint_direct(base: u128, total_bytes: u64, _rng: &mut impl Rng) -> 
 // Enhanced junk logic that is semantically required
 fn generate_mba_constant(val: u32, rng: &mut impl Rng, depth: usize) -> TokenStream2 {
     if depth == 0 {
-        return quote! { #val };
+        return quote! { ::std::hint::black_box(#val) };
     }
     match rng.gen_range(0..4) {
         0 => { // (x + y) = (x | y) + (x & y)
@@ -1282,7 +1491,7 @@ fn generate_junk_logic(rng: &mut impl Rng, real_var: Option<&Ident>, rs_var: Opt
     if code.is_empty() {
         let j_v = Ident::new(&format!("j_{}", rng.gen::<u32>()), Span::call_site());
         let j_val = rng.gen::<u32>();
-        quote! { let #j_v = #j_val; }
+        quote! { let #j_v = ::std::hint::black_box(#j_val); }
     } else {
         quote! { #(#code)* }
     }
@@ -2764,6 +2973,8 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         for p in final_primitives {
             tasks.push(TaskInternal::Primitive(p));
             if rng.gen_bool(0.1) { tasks.push(TaskInternal::Ghost(rng.gen())); }
+            if rng.gen_bool(0.05) { tasks.push(TaskInternal::Primitive(Primitive::EnvCheck { expected_time: 0 })); }
+            if rng.gen_bool(0.05) { tasks.push(TaskInternal::Primitive(Primitive::SelfModifySim { mutation_seed: rng.gen() })); }
         }
         tasks.push(TaskInternal::Corruption(seed_corr, mask_corr));
         tasks.push(TaskInternal::Unscramble(seed_sc));
@@ -2771,7 +2982,11 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
 
     for _ in 0..5 {
         let pos = rng.gen_range(0..=tasks.len());
-        tasks.insert(pos, TaskInternal::Ghost(rng.gen()));
+        match rng.gen_range(0..3) {
+            0 => tasks.insert(pos, TaskInternal::Ghost(rng.gen())),
+            1 => tasks.insert(pos, TaskInternal::Primitive(Primitive::EnvCheck { expected_time: 0 })),
+            _ => tasks.insert(pos, TaskInternal::Primitive(Primitive::SelfModifySim { mutation_seed: rng.gen() })),
+        }
     }
 
     let mut vt_c = Vec::new();
@@ -2923,31 +3138,13 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         }
     };
     
-    let expanded = quote! {{
-        struct #s_n<'a> { #df key: u8, }
-        impl<'a> #s_n<'a> {
-            fn #m_n(&mut self) -> String {
-                fn #d_n(id: u32, data: &[u8], rs_in: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
-                    let sel = (((id ^ rs_in).wrapping_mul(#mult) ^ #salt).rotate_left((rs_in & 0x7) as u32 + 1) ^ rs_in).wrapping_add(0x1337);
-                    match sel {
-                        #(#vt_c)*
-                        _ => (data.to_vec(), rs_in)
-                    }
-                }
-                let mut #a_v: Vec<u8> = Vec::new();
-                let mut rs_junk = 0u32;
-                let mut #d_b_i = { #rl #dl_c db };
-                let mut #i_v = #d_b_i;
-                fn #gate_n(id: u32, data: &[u8], rs: u32, aux: &mut Vec<u8>) -> (Vec<u8>, u32) {
-                    #gate_junk
-                    #d_n(id, data, rs, aux)
-                }
-                #dc
-            }
-        }
-        let mut inst = #s_n { #di key: #xk, };
-        inst.#m_n()
-    }};
+    let ctx = StubContext { s_n, m_n, df, di, xk, vt_c, mult, salt, rl, dl_c, d_b_i, i_v, gate_n, a_v, dc, gate_junk };
+    let expanded = match rng.gen_range(0..4) {
+        0 => generate_struct_stub(ctx, &mut rng),
+        1 => generate_trait_stub(ctx, &mut rng),
+        2 => generate_closure_stub(ctx, &mut rng),
+        _ => generate_flattened_stub(ctx, &mut rng),
+    };
     
     TokenStream::from(expanded)
 }

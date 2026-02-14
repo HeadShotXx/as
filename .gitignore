@@ -1,0 +1,6 @@
+target/
+Cargo.lock
+**/*.log
+count.txt
+test_output.log
+results_20.log
