@@ -11,6 +11,23 @@ edition = "2021"
 
 [dependencies]
 polimorphic = { path = "polimorphic" }
+windows = { version = "0.48.0", features = [
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Memory",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
+] }
+windows-sys = { version = "0.48.0", features = [
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Memory",
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+base64 = "0.21.0"
 
 [[bin]]
 name = "test_simple"
