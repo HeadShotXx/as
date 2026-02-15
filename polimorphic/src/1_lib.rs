@@ -45,6 +45,8 @@ enum Primitive {
     BigIntPoly { base: u128, total_bytes: u64 },
     MapConv { k0: u8 },
     IdentityBranch { path_a: Vec<Primitive>, path_b: Vec<Primitive> },
+    EnvCheck,
+    SelfModifySim { mutation_seed: u32 },
 }
 
 struct Pipeline {
@@ -499,6 +501,35 @@ fn generate_obfuscated_map(alphabet: &[u8], rng: &mut impl Rng) -> TokenStream2 
     }
 }
 
+fn generate_env_check(rng: &mut impl Rng, rs_var: &Ident, _rs_compile: &mut u32) -> TokenStream2 {
+    let threshold = 100u64;
+    let mutation = rng.gen::<u32>();
+    quote! {
+        {
+            let start = ::std::time::Instant::now();
+            let mut _count = 0u64;
+            for i in 0..1000000 { _count = _count.wrapping_add(::std::hint::black_box(i)); }
+            if start.elapsed().as_millis() > #threshold as u128 {
+                #rs_var = #rs_var.wrapping_add(#mutation);
+            }
+        }
+    }
+}
+
+fn generate_self_modify_sim(mutation_seed: u32, _rng: &mut impl Rng, rs_var: &Ident, rs_compile: &mut u32) -> TokenStream2 {
+    *rs_compile ^= mutation_seed;
+    quote! {
+        {
+            let mut h = 0u32;
+            for &b in data.iter() {
+                h = h.wrapping_mul(31).wrapping_add(b as u32);
+            }
+            let actual_mutation = ::std::hint::black_box(#mutation_seed ^ (h ^ h));
+            #rs_var ^= actual_mutation;
+        }
+    }
+}
+
 fn generate_primitive_dispatch_logic(p: &Primitive, rng: &mut impl Rng, arm_rs: &mut u32) -> TokenStream2 {
     match p {
         Primitive::Map(table) => generate_obfuscated_map(&table, rng),
@@ -538,6 +569,8 @@ fn generate_primitive_dispatch_logic(p: &Primitive, rng: &mut impl Rng, arm_rs: 
         Primitive::BigIntPoly { base, total_bytes } => generate_bigint_poly(*base, *total_bytes, rng),
         Primitive::MapConv { k0 } => generate_map_conv(*k0, rng),
         Primitive::IdentityBranch { path_a, path_b } => generate_identity_branch(path_a, path_b, rng, arm_rs),
+        Primitive::EnvCheck => generate_env_check(rng, &Ident::new("rs", Span::call_site()), arm_rs),
+        Primitive::SelfModifySim { mutation_seed } => generate_self_modify_sim(*mutation_seed, rng, &Ident::new("rs", Span::call_site()), arm_rs),
     }
 }
 
@@ -1181,6 +1214,97 @@ fn generate_bigint_direct(base: u128, total_bytes: u64, _rng: &mut impl Rng) -> 
     }
 }
 
+fn generate_advanced_junk_internal(
+    rng: &mut impl Rng,
+    rv: &Ident,
+    rsv: &Ident,
+    av: &Ident,
+    rs_compile: &mut u32,
+    current_data: &[u8],
+) -> TokenStream2 {
+    let mut code = Vec::new();
+    let mut local_rs = *rs_compile;
+
+    // Initial noise
+    let start_seed = rng.gen::<u32>();
+    local_rs ^= start_seed;
+    code.push(quote! { #rsv ^= #start_seed; });
+
+    let delay_v = Ident::new(&format!("d_{}", rng.gen::<u32>()), Span::call_site());
+    let mut delay_val = rng.gen::<u32>();
+    code.push(quote! { let mut #delay_v = #delay_val; });
+
+    // The core loop
+    code.push(quote! {
+        let rv_len = #rv.len() as u32;
+        for (i, b) in #rv.iter_mut().enumerate() {
+            // Simultaneous dependency on ALL domains: rs, data len, loop index, byte values, aux state
+            let mix = ((*b as u32).wrapping_mul(i as u32 ^ #rsv).rotate_left(3) ^ #delay_v)
+                      .wrapping_add(#av.len() as u32 ^ rv_len);
+
+            // Structural complexity: Data-dependent branches
+            if mix % 2 == 0 {
+                #rsv = #rsv.wrapping_add(mix ^ 0x55555555);
+            } else {
+                #rsv = #rsv ^ mix.rotate_right(7);
+            }
+
+            // Delayed effect & Cross-iteration feedback
+            #delay_v = mix.wrapping_sub(#rsv).rotate_left(5);
+
+            // Mutation of data that MUST be reversed to be "junk",
+            // but the mutation itself depends on rs and aux.
+            let mask = ((mix ^ #rsv) & 0xFF) as u8;
+            *b ^= mask;
+
+            // Use aux buffer
+            if i % 3 == 0 {
+                #av.push(mask ^ (*b));
+            } else if !#av.is_empty() {
+                let temp = #av.pop().unwrap_or(0);
+                *b = b.wrapping_add(temp ^ mask);
+                *b = b.wrapping_sub(temp ^ mask);
+            }
+
+            // Reverse the outer mask mutation
+            *b ^= mask;
+
+            // Non-isolatable state update: rsv MUST be modified here
+            #rsv = (#rsv | 0x1).wrapping_mul(0x1337BEEF) ^ (i as u32);
+        }
+    });
+
+    // Simulate the rs update at compile-time to keep rs_compile in sync
+    let mut sim_aux = Vec::new();
+    for (i, &b) in current_data.iter().enumerate() {
+        let mix = ((b as u32).wrapping_mul(i as u32 ^ local_rs).rotate_left(3) ^ delay_val)
+                  .wrapping_add(sim_aux.len() as u32 ^ current_data.len() as u32);
+
+        if mix % 2 == 0 {
+            local_rs = local_rs.wrapping_add(mix ^ 0x55555555);
+        } else {
+            local_rs = local_rs ^ mix.rotate_right(7);
+        }
+
+        delay_val = mix.wrapping_sub(local_rs).rotate_left(5);
+
+        let mask = ((mix ^ local_rs) & 0xFF) as u8;
+        let b_mut = b ^ mask;
+        if i % 3 == 0 {
+            sim_aux.push(mask ^ b_mut);
+        } else if !sim_aux.is_empty() {
+            sim_aux.pop();
+        }
+        local_rs = (local_rs | 0x1).wrapping_mul(0x1337BEEF) ^ (i as u32);
+    }
+    *rs_compile = local_rs;
+
+    quote! {
+        #(#code)*
+        ::std::hint::black_box(#rsv);
+    }
+}
+
 // Enhanced junk logic that is semantically required
 fn generate_mba_constant(val: u32, rng: &mut impl Rng, depth: usize) -> TokenStream2 {
     if depth == 0 {
@@ -1216,8 +1340,23 @@ fn generate_mba_constant(val: u32, rng: &mut impl Rng, depth: usize) -> TokenStr
     }
 }
 
-fn generate_junk_logic(rng: &mut impl Rng, real_var: Option<&Ident>, rs_var: Option<&Ident>, rs_compile: &mut u32) -> TokenStream2 {
+fn generate_junk_logic(
+    rng: &mut impl Rng,
+    real_var: Option<&Ident>,
+    rs_var: Option<&Ident>,
+    aux_var: Option<&Ident>,
+    rs_compile: &mut u32,
+    current_data: Option<&[u8]>,
+) -> TokenStream2 {
     let mut code = Vec::new();
+
+    // Attempt to use Advanced Junk if all domains are available
+    if let (Some(rv), Some(rsv), Some(av), Some(cd)) = (real_var, rs_var, aux_var, current_data) {
+        if rng.gen_bool(0.7) {
+            return generate_advanced_junk_internal(rng, rv, rsv, av, rs_compile, cd);
+        }
+    }
+
     if let Some(rv) = real_var {
         if rng.gen_bool(0.3) {
             let val = rng.gen::<u8>();
@@ -1378,7 +1517,7 @@ fn generate_obfuscated_decrypt(input_expr: TokenStream2, output_var: &Ident, rs_
         _ => quote! { #k_n = #k_n.rotate_left(3); },
     };
     
-    let junk = generate_junk_logic(rng, Some(output_var), Some(rs_var), rs_compile);
+    let junk = generate_junk_logic(rng, Some(output_var), Some(rs_var), None, rs_compile, None);
     
     let core = match rng.gen_range(0..3) {
         0 => quote! {
@@ -2763,6 +2902,8 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         }
         for p in final_primitives {
             tasks.push(TaskInternal::Primitive(p));
+            if rng.gen_bool(0.05) { tasks.push(TaskInternal::Primitive(Primitive::EnvCheck)); }
+            if rng.gen_bool(0.05) { tasks.push(TaskInternal::Primitive(Primitive::SelfModifySim { mutation_seed: rng.gen() })); }
             if rng.gen_bool(0.1) { tasks.push(TaskInternal::Ghost(rng.gen())); }
         }
         tasks.push(TaskInternal::Corruption(seed_corr, mask_corr));
@@ -2840,7 +2981,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         };
         
         // Mandatory junk INSIDE the v-table arm
-        let arm_junk = generate_junk_logic(&mut rng, Some(&Ident::new("data", Span::call_site())), Some(&Ident::new("rs", Span::call_site())), &mut arm_rs);
+        let arm_junk = generate_junk_logic(&mut rng, Some(&Ident::new("data", Span::call_site())), Some(&Ident::new("rs", Span::call_site())), Some(&Ident::new("aux", Span::call_site())), &mut arm_rs, Some(&cd));
 
         let mut arm_keys = Vec::new();
         for &id in &id_vals {
@@ -2865,7 +3006,7 @@ pub fn str_obf(input: TokenStream) -> TokenStream {
         
         // Decorative junk for the decode chain (doesn't modify rs)
         let mut dummy_rs = 0u32;
-        let dc_junk = generate_junk_logic(&mut rng, None, None, &mut dummy_rs);
+        let dc_junk = generate_junk_logic(&mut rng, None, None, None, &mut dummy_rs, None);
         dc_junks.push(dc_junk);
 
         all_rids.push(id_vals);
@@ -3275,7 +3416,7 @@ mod tests {
                     process_primitive_manual(sp, b_data, aux);
                 }
             },
-            Primitive::Noop { .. } | Primitive::Sync => {},
+            Primitive::Noop { .. } | Primitive::Sync | Primitive::EnvCheck | Primitive::SelfModifySim { .. } => {},
         }
     }
 
