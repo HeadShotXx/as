@@ -143,19 +143,27 @@ pub unsafe fn get_module_base(module_name: &str) -> Option<*mut core::ffi::c_voi
         out(reg) peb_ptr
     );
 
+    if peb_ptr.is_null() { return None; }
+
     let ldr = (*peb_ptr).ldr;
-    let mut current_entry = (*ldr).in_load_order_module_list.next;
+    if ldr.is_null() { return None; }
 
-    while current_entry != &mut (*ldr).in_load_order_module_list {
+    let head = &mut (*ldr).in_load_order_module_list;
+    let mut current_entry = (*head).next;
+
+    while !current_entry.is_null() && current_entry != head {
         let entry = current_entry as *mut LDR_DATA_TABLE_ENTRY;
-        let name_slice = std::slice::from_raw_parts(
-            (*entry).base_dll_name.buffer,
-            ((*entry).base_dll_name.length / 2) as usize,
-        );
-        let name = String::from_utf16_lossy(name_slice);
 
-        if name.to_lowercase() == module_name.to_lowercase() {
-            return Some((*entry).dll_base);
+        if !(*entry).base_dll_name.buffer.is_null() {
+            let name_slice = std::slice::from_raw_parts(
+                (*entry).base_dll_name.buffer,
+                ((*entry).base_dll_name.length / 2) as usize,
+            );
+            let name = String::from_utf16_lossy(name_slice);
+
+            if name.eq_ignore_ascii_case(module_name) {
+                return Some((*entry).dll_base);
+            }
         }
 
         current_entry = (*current_entry).next;
@@ -165,6 +173,8 @@ pub unsafe fn get_module_base(module_name: &str) -> Option<*mut core::ffi::c_voi
 }
 
 pub unsafe fn get_export_address(module_base: *mut core::ffi::c_void, func_name: &str) -> Option<*mut core::ffi::c_void> {
+    if module_base.is_null() { return None; }
+
     let dos_header = module_base as *const IMAGE_DOS_HEADER;
     if (*dos_header).e_magic != 0x5A4D {
         return None;
@@ -187,12 +197,12 @@ pub unsafe fn get_export_address(module_base: *mut core::ffi::c_void, func_name:
 
     for i in 0..(*export_dir).NumberOfNames {
         let name_ptr = (module_base as usize + *names_rva.add(i as usize) as usize) as *const i8;
-        let name = std::ffi::CStr::from_ptr(name_ptr).to_str().ok()?;
-
-        if name == func_name {
-            let ordinal = *ordinals_rva.add(i as usize);
-            let func_rva = *functions_rva.add(ordinal as usize);
-            return Some((module_base as usize + func_rva as usize) as *mut core::ffi::c_void);
+        if let Ok(name) = std::ffi::CStr::from_ptr(name_ptr).to_str() {
+            if name == func_name {
+                let ordinal = *ordinals_rva.add(i as usize);
+                let func_rva = *functions_rva.add(ordinal as usize);
+                return Some((module_base as usize + func_rva as usize) as *mut core::ffi::c_void);
+            }
         }
     }
 
@@ -204,19 +214,27 @@ pub fn get_syscall_number(func_name: &str) -> Option<u32> {
         let ntdll_base = get_module_base("ntdll.dll")?;
         let func_addr = get_export_address(ntdll_base, func_name)?;
 
-        let func_bytes = std::slice::from_raw_parts(func_addr as *const u8, 8);
+        let func_bytes = std::slice::from_raw_parts(func_addr as *const u8, 32);
 
-        if func_bytes[0] == 0x4c
-            && func_bytes[1] == 0x8b
-            && func_bytes[2] == 0xd1
-            && func_bytes[3] == 0xb8
-            && func_bytes[6] == 0x00
-            && func_bytes[7] == 0x00
-        {
-            let high = u32::from(func_bytes[5]);
-            let low = u32::from(func_bytes[4]);
-            let syscall_number = (high << 8) | low;
-            return Some(syscall_number);
+        // Pattern for syscall:
+        // mov r10, rcx
+        // mov eax, <id>
+        // ...
+        // syscall
+        // ret
+
+        for i in 0..16 {
+            if func_bytes[i] == 0x4c && func_bytes[i+1] == 0x8b && func_bytes[i+2] == 0xd1 && func_bytes[i+3] == 0xb8 {
+                let low = u32::from(func_bytes[i+4]);
+                let high = u32::from(func_bytes[i+5]);
+                return Some((high << 8) | low);
+            }
+            // Sometimes it starts with mov eax, <id>; mov r10, rcx
+            if func_bytes[i] == 0xb8 && func_bytes[i+5] == 0x4c && func_bytes[i+6] == 0x8b && func_bytes[i+7] == 0xd1 {
+                let low = u32::from(func_bytes[i+1]);
+                let high = u32::from(func_bytes[i+2]);
+                return Some((high << 8) | low);
+            }
         }
 
         None
