@@ -209,24 +209,6 @@ pub unsafe fn get_export_address(module_base: *mut core::ffi::c_void, func_name:
     None
 }
 
-pub fn get_ret_gadget(module_name: &str) -> Option<*mut core::ffi::c_void> {
-    unsafe {
-        let module_base = get_module_base(module_name)?;
-        let dos_header = module_base as *const IMAGE_DOS_HEADER;
-        let nt_header = (module_base as usize + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
-        let size_of_image = (*nt_header).OptionalHeader.SizeOfImage as usize;
-
-        let module_bytes = std::slice::from_raw_parts(module_base as *const u8, size_of_image);
-
-        for i in 0..size_of_image {
-            if module_bytes[i] == 0xc3 { // ret
-                return Some((module_base as usize + i) as *mut core::ffi::c_void);
-            }
-        }
-        None
-    }
-}
-
 pub fn get_syscall_info(func_name: &str) -> Option<(u32, *mut core::ffi::c_void, *mut core::ffi::c_void)> {
     unsafe {
         let ntdll_base = get_module_base("ntdll.dll")?;
@@ -253,14 +235,13 @@ pub fn get_syscall_info(func_name: &str) -> Option<(u32, *mut core::ffi::c_void,
                 }
 
                 if syscall_inst.is_null() {
-                    // Search ntdll for generic syscall; ret
                     if let Some(gadget) = get_syscall_gadget("ntdll.dll") {
                         syscall_inst = gadget;
                         ret_gadget = (gadget as usize + 2) as *mut core::ffi::c_void;
                     }
                 }
 
-                if !syscall_inst.is_null() {
+                if !syscall_inst.is_null() && !ret_gadget.is_null() {
                     return Some((id, syscall_inst, ret_gadget));
                 }
             }
