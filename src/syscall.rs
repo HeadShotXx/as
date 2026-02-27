@@ -136,6 +136,28 @@ pub struct IMAGE_EXPORT_DIRECTORY {
     pub AddressOfNameOrdinals: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct IMAGE_SECTION_HEADER {
+    pub Name: [u8; 8],
+    pub VirtualSize: u32,
+    pub VirtualAddress: u32,
+    pub SizeOfRawData: u32,
+    pub PointerToRawData: u32,
+    pub PointerToRelocations: u32,
+    pub PointerToLinenumbers: u32,
+    pub NumberOfRelocations: u16,
+    pub NumberOfLinenumbers: u16,
+    pub Characteristics: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SyscallInfo {
+    pub id: u32,
+    pub syscall_gadget: *mut core::ffi::c_void,
+}
+
 pub unsafe fn get_module_base(module_name: &str) -> Option<*mut core::ffi::c_void> {
     let peb_ptr: *mut PEB;
     core::arch::asm!(
@@ -216,20 +238,12 @@ pub fn get_syscall_number(module_name: &str, func_name: &str) -> Option<u32> {
 
         let func_bytes = std::slice::from_raw_parts(func_addr as *const u8, 32);
 
-        // Pattern for syscall:
-        // mov r10, rcx
-        // mov eax, <id>
-        // ...
-        // syscall
-        // ret
-
         for i in 0..16 {
             if func_bytes[i] == 0x4c && func_bytes[i+1] == 0x8b && func_bytes[i+2] == 0xd1 && func_bytes[i+3] == 0xb8 {
                 let low = u32::from(func_bytes[i+4]);
                 let high = u32::from(func_bytes[i+5]);
                 return Some((high << 8) | low);
             }
-            // Sometimes it starts with mov eax, <id>; mov r10, rcx
             if func_bytes[i] == 0xb8 && func_bytes[i+5] == 0x4c && func_bytes[i+6] == 0x8b && func_bytes[i+7] == 0xd1 {
                 let low = u32::from(func_bytes[i+1]);
                 let high = u32::from(func_bytes[i+2]);
@@ -238,5 +252,65 @@ pub fn get_syscall_number(module_name: &str, func_name: &str) -> Option<u32> {
         }
 
         None
+    }
+}
+
+pub unsafe fn find_syscall_gadget(module_base: *mut core::ffi::c_void) -> Option<*mut core::ffi::c_void> {
+    let dos_header = module_base as *const IMAGE_DOS_HEADER;
+    let nt_header = (module_base as usize + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
+
+    let section_header = (nt_header as usize + core::mem::size_of::<IMAGE_NT_HEADERS64>()) as *const IMAGE_SECTION_HEADER;
+
+    for i in 0..(*nt_header).FileHeader.NumberOfSections {
+        let section = *section_header.add(i as usize);
+        // Look for executable sections (IMAGE_SCN_MEM_EXECUTE = 0x20000000)
+        if (section.Characteristics & 0x20000000) != 0 {
+            let start = (module_base as usize + section.VirtualAddress as usize) as *const u8;
+            let size = section.VirtualSize as usize;
+            let bytes = std::slice::from_raw_parts(start, size);
+
+            for j in 0..size - 2 {
+                if bytes[j] == 0x0F && bytes[j+1] == 0x05 && bytes[j+2] == 0xC3 {
+                    return Some((start as usize + j) as *mut core::ffi::c_void);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub unsafe fn find_ret_gadget(module_base: *mut core::ffi::c_void) -> Option<*mut core::ffi::c_void> {
+    let dos_header = module_base as *const IMAGE_DOS_HEADER;
+    let nt_header = (module_base as usize + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
+
+    let section_header = (nt_header as usize + core::mem::size_of::<IMAGE_NT_HEADERS64>()) as *const IMAGE_SECTION_HEADER;
+
+    for i in 0..(*nt_header).FileHeader.NumberOfSections {
+        let section = *section_header.add(i as usize);
+        if (section.Characteristics & 0x20000000) != 0 {
+            let start = (module_base as usize + section.VirtualAddress as usize) as *const u8;
+            let size = section.VirtualSize as usize;
+            let bytes = std::slice::from_raw_parts(start, size);
+
+            for j in 0..size {
+                if bytes[j] == 0xC3 {
+                    return Some((start as usize + j) as *mut core::ffi::c_void);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_syscall_info(module_name: &str, func_name: &str) -> Option<SyscallInfo> {
+    unsafe {
+        let module_base = get_module_base(module_name)?;
+        let id = get_syscall_number(module_name, func_name)?;
+        let syscall_gadget = find_syscall_gadget(module_base)?;
+
+        Some(SyscallInfo {
+            id,
+            syscall_gadget,
+        })
     }
 }
