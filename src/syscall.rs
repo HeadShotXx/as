@@ -209,6 +209,32 @@ pub unsafe fn get_export_address(module_base: *mut core::ffi::c_void, func_name:
     None
 }
 
+pub fn get_syscall_info(func_name: &str) -> Option<(u32, *mut core::ffi::c_void)> {
+    unsafe {
+        let ntdll_base = get_module_base("ntdll.dll")?;
+        let func_addr = get_export_address(ntdll_base, func_name)?;
+
+        let func_bytes = std::slice::from_raw_parts(func_addr as *const u8, 32);
+
+        for i in 0..16 {
+            if func_bytes[i] == 0x4c && func_bytes[i+1] == 0x8b && func_bytes[i+2] == 0xd1 && func_bytes[i+3] == 0xb8 {
+                let low = u32::from(func_bytes[i+4]);
+                let high = u32::from(func_bytes[i+5]);
+                let id = (high << 8) | low;
+
+                // Find syscall instruction in the same function or globally in ntdll
+                for j in 0..32 {
+                    if func_bytes[j] == 0x0f && func_bytes[j+1] == 0x05 && func_bytes[j+2] == 0xc3 {
+                        return Some((id, (func_addr as usize + j) as *mut core::ffi::c_void));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+}
+
 pub fn get_syscall_number(module_name: &str, func_name: &str) -> Option<u32> {
     unsafe {
         let module_base = get_module_base(module_name)?;
@@ -216,20 +242,12 @@ pub fn get_syscall_number(module_name: &str, func_name: &str) -> Option<u32> {
 
         let func_bytes = std::slice::from_raw_parts(func_addr as *const u8, 32);
 
-        // Pattern for syscall:
-        // mov r10, rcx
-        // mov eax, <id>
-        // ...
-        // syscall
-        // ret
-
         for i in 0..16 {
             if func_bytes[i] == 0x4c && func_bytes[i+1] == 0x8b && func_bytes[i+2] == 0xd1 && func_bytes[i+3] == 0xb8 {
                 let low = u32::from(func_bytes[i+4]);
                 let high = u32::from(func_bytes[i+5]);
                 return Some((high << 8) | low);
             }
-            // Sometimes it starts with mov eax, <id>; mov r10, rcx
             if func_bytes[i] == 0xb8 && func_bytes[i+5] == 0x4c && func_bytes[i+6] == 0x8b && func_bytes[i+7] == 0xd1 {
                 let low = u32::from(func_bytes[i+1]);
                 let high = u32::from(func_bytes[i+2]);
