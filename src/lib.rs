@@ -462,7 +462,7 @@ unsafe fn hook_exit_process() {
                 -1isize as windows_sys::Win32::Foundation::HANDLE,
                 &mut base_address,
                 &mut region_size,
-                0x40, // PAGE_EXECUTE_READWRITE
+                0x04, // PAGE_READWRITE
                 &mut old_protect,
                 nt_protect_id,
             );
