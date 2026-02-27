@@ -209,10 +209,10 @@ pub unsafe fn get_export_address(module_base: *mut core::ffi::c_void, func_name:
     None
 }
 
-pub fn get_syscall_number(func_name: &str) -> Option<u32> {
+pub fn get_syscall_number(module_name: &str, func_name: &str) -> Option<u32> {
     unsafe {
-        let ntdll_base = get_module_base("ntdll.dll")?;
-        let func_addr = get_export_address(ntdll_base, func_name)?;
+        let module_base = get_module_base(module_name)?;
+        let func_addr = get_export_address(module_base, func_name)?;
 
         let func_bytes = std::slice::from_raw_parts(func_addr as *const u8, 32);
 
