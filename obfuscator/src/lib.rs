@@ -873,6 +873,23 @@ struct ControlFlowObfuscator;
 impl VisitMut for ControlFlowObfuscator {
     fn visit_expr_mut(&mut self, expr: &mut Expr) {
         if let Expr::If(if_expr) = expr {
+            // Check if any condition uses `let` (if-let) which is not supported in match guards
+            fn has_if_let(if_expr: &syn::ExprIf) -> bool {
+                if let Expr::Let(_) = *if_expr.cond {
+                    return true;
+                }
+                if let Some((_, ref next)) = if_expr.else_branch {
+                    if let Expr::If(ref next_if) = **next {
+                        return has_if_let(next_if);
+                    }
+                }
+                false
+            }
+            if has_if_let(if_expr) {
+                visit_mut::visit_expr_mut(self, expr);
+                return;
+            }
+
             let mut conditions_and_blocks = vec![];
             let mut final_else_block = None;
             let mut current_if = if_expr.clone();
@@ -926,15 +943,15 @@ impl VisitMut for ControlFlowObfuscator {
             arms.shuffle(&mut rng);
 
             let final_arm = if let Some(else_block) = final_else_block {
-                quote! { _ => #else_block }
+                quote! { #else_block }
             } else {
-                quote! { _ => {} }
+                quote! { {} }
             };
 
             let match_expr_tokens = quote! {
                 match () {
                     #(#arms,)*
-                    #final_arm,
+                    _ => #final_arm,
                 }
             };
 

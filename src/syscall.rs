@@ -1,43 +1,43 @@
 #[repr(C)]
-struct LIST_ENTRY {
-    next: *mut LIST_ENTRY,
-    prev: *mut LIST_ENTRY,
+pub struct LIST_ENTRY {
+    pub next: *mut LIST_ENTRY,
+    pub prev: *mut LIST_ENTRY,
 }
 
 #[repr(C)]
-struct UNICODE_STRING {
-    length: u16,
-    maximum_length: u16,
-    buffer: *mut u16,
+pub struct UNICODE_STRING {
+    pub length: u16,
+    pub maximum_length: u16,
+    pub buffer: *mut u16,
 }
 
 #[repr(C)]
-struct LDR_DATA_TABLE_ENTRY {
-    in_load_order_links: LIST_ENTRY,
-    in_memory_order_links: LIST_ENTRY,
-    in_initialization_order_links: LIST_ENTRY,
-    dll_base: *mut core::ffi::c_void,
-    entry_point: *mut core::ffi::c_void,
-    size_of_image: u32,
-    full_dll_name: UNICODE_STRING,
-    base_dll_name: UNICODE_STRING,
+pub struct LDR_DATA_TABLE_ENTRY {
+    pub in_load_order_links: LIST_ENTRY,
+    pub in_memory_order_links: LIST_ENTRY,
+    pub in_initialization_order_links: LIST_ENTRY,
+    pub dll_base: *mut core::ffi::c_void,
+    pub entry_point: *mut core::ffi::c_void,
+    pub size_of_image: u32,
+    pub full_dll_name: UNICODE_STRING,
+    pub base_dll_name: UNICODE_STRING,
 }
 
 #[repr(C)]
-struct PEB_LDR_DATA {
-    length: u32,
-    initialized: u8,
-    reserved: [u8; 3],
-    ss_handle: *mut core::ffi::c_void,
-    in_load_order_module_list: LIST_ENTRY,
+pub struct PEB_LDR_DATA {
+    pub length: u32,
+    pub initialized: u8,
+    pub reserved: [u8; 3],
+    pub ss_handle: *mut core::ffi::c_void,
+    pub in_load_order_module_list: LIST_ENTRY,
 }
 
 #[repr(C)]
-struct PEB {
-    reserved1: [u8; 2],
-    being_debugged: u8,
-    reserved2: [u8; 21],
-    ldr: *mut PEB_LDR_DATA,
+pub struct PEB {
+    pub reserved1: [u8; 2],
+    pub being_debugged: u8,
+    pub reserved2: [u8; 21],
+    pub ldr: *mut PEB_LDR_DATA,
 }
 
 #[repr(C)]

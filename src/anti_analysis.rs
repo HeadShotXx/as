@@ -1,3 +1,4 @@
+
 #![cfg(windows)]
 
 use rand::seq::SliceRandom;
@@ -5,14 +6,17 @@ use rand::Rng;
 use raw_cpuid::CpuId;
 use std::ffi::c_void;
 use std::thread;
-use std::time::{Duration};
+use std::time::Duration;
 use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::Foundation::{GENERIC_READ, BOOL, HANDLE, CloseHandle, SetLastError, GetLastError};
+use windows::Win32::Foundation::{
+    BOOL, GENERIC_READ, HANDLE, CloseHandle, SetLastError, POINT,
+};
 use windows::Win32::System::Registry::{
     RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RRF_RT_REG_SZ,
 };
 use windows::Win32::System::SystemInformation::{
-    GlobalMemoryStatusEx, MEMORYSTATUSEX, GetSystemInfo, SYSTEM_INFO, EnumSystemFirmwareTables, GetSystemFirmwareTable, FIRMWARE_TABLE_PROVIDER,
+    GlobalMemoryStatusEx, MEMORYSTATUSEX, GetSystemInfo, SYSTEM_INFO, EnumSystemFirmwareTables,
+    GetSystemFirmwareTable, FIRMWARE_TABLE_PROVIDER,
 };
 use windows::Win32::System::WindowsProgramming::GetUserNameW;
 use windows::Win32::Storage::FileSystem::{
@@ -21,7 +25,10 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
-use windows::Win32::System::Diagnostics::Debug::{AddVectoredExceptionHandler, RemoveVectoredExceptionHandler, EXCEPTION_POINTERS, IsDebuggerPresent, CheckRemoteDebuggerPresent, GetThreadContext, CONTEXT, OutputDebugStringW};
+use windows::Win32::System::Diagnostics::Debug::{
+    AddVectoredExceptionHandler, RemoveVectoredExceptionHandler, EXCEPTION_POINTERS,
+    IsDebuggerPresent, CheckRemoteDebuggerPresent, GetThreadContext, CONTEXT, OutputDebugStringW,
+};
 #[cfg(target_arch = "x86_64")]
 use windows::Win32::System::Diagnostics::Debug::CONTEXT_DEBUG_REGISTERS_AMD64 as DEBUG_REG_FLAG;
 #[cfg(target_arch = "x86")]
@@ -32,9 +39,15 @@ use windows::Win32::System::Ioctl::{
     IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY, StorageDeviceProperty,
     PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
 };
+#[cfg(windows)]
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
-/// Weights for the scoring system (Recalibrated for False Positive reduction).
+use crate::syscall::{
+    IMAGE_DOS_HEADER, IMAGE_NT_HEADERS64, IMAGE_SECTION_HEADER, IMAGE_EXPORT_DIRECTORY,
+    IMAGE_FILE_HEADER, get_module_base,
+};
+
+/// Weights for the scoring system.
 const WEIGHT_RDTSC: u32 = 25;
 const WEIGHT_TSC_DRIFT: u32 = 15;
 const WEIGHT_EXCEPTION_LATENCY: u32 = 15;
@@ -71,58 +84,6 @@ static mut EXCEPTION_HIT: bool = false;
 fn get_median(mut samples: [u64; 50]) -> u64 {
     samples.sort_unstable();
     samples[25]
-}
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-struct IMAGE_DOS_HEADER {
-    e_magic: u16, e_cblp: u16, e_cp: u16, e_crlc: u16, e_cparhdr: u16, e_minalloc: u16, e_maxalloc: u16,
-    e_ss: u16, e_sp: u16, e_csum: u16, e_ip: u16, e_cs: u16, e_lfarlc: u16, e_ovno: u16,
-    e_res: [u16; 4], e_oemid: u16, e_oeminfo: u16, e_res2: [u16; 10], e_lfanew: i32,
-}
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-struct IMAGE_FILE_HEADER {
-    Machine: u16, NumberOfSections: u16, TimeDateStamp: u32, PointerToSymbolTable: u32,
-    NumberOfSymbols: u32, SizeOfOptionalHeader: u16, Characteristics: u16,
-}
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-struct IMAGE_DATA_DIRECTORY { VirtualAddress: u32, Size: u32 }
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-struct IMAGE_OPTIONAL_HEADER64 {
-    Magic: u16, MajorLinkerVersion: u8, MinorLinkerVersion: u8, SizeOfCode: u32,
-    SizeOfInitializedData: u32, SizeOfUninitializedData: u32, AddressOfEntryPoint: u32,
-    BaseOfCode: u32, ImageBase: u64, SectionAlignment: u32, FileAlignment: u32,
-    MajorOperatingSystemVersion: u16, MinorOperatingSystemVersion: u16,
-    MajorImageVersion: u16, MinorImageVersion: u16, MajorSubsystemVersion: u16,
-    MinorSubsystemVersion: u16, Win32VersionValue: u32, SizeOfImage: u32,
-    SizeOfHeaders: u32, CheckSum: u32, Subsystem: u16, DllCharacteristics: u16,
-    SizeOfStackReserve: u64, SizeOfStackCommit: u64, SizeOfHeapReserve: u64,
-    SizeOfHeapCommit: u64, LoaderFlags: u32, NumberOfRvaAndSizes: u32,
-    DataDirectory: [IMAGE_DATA_DIRECTORY; 16],
-}
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-struct IMAGE_NT_HEADERS64 { Signature: u32, FileHeader: IMAGE_FILE_HEADER, OptionalHeader: IMAGE_OPTIONAL_HEADER64 }
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-struct IMAGE_SECTION_HEADER {
-    Name: [u8; 8], VirtualSize: u32, VirtualAddress: u32, SizeOfRawData: u32,
-    PointerToRawData: u32, PointerToRelocations: u32, PointerToLinenumbers: u32,
-    NumberOfRelocations: u16, NumberOfLinenumbers: u16, Characteristics: u32,
 }
 
 /// 1. Advanced RDTSC timing analysis.
@@ -447,15 +408,11 @@ pub fn check_debugger() -> bool {
 }
 
 /// 12. Hardware Breakpoint Detection.
-/// Inspects DR0-DR3 (addresses), DR6 (status), and DR7 (control).
 pub fn check_hw_breakpoints() -> bool {
     let mut ctx = CONTEXT::default();
     ctx.ContextFlags = DEBUG_REG_FLAG;
     unsafe {
         if GetThreadContext(windows::Win32::System::Threading::GetCurrentThread(), &mut ctx).is_ok() {
-            // DR0-DR3 are breakpoint addresses.
-            // DR6 is status, DR7 is control.
-            // In a normal system, these should typically be 0.
             if ctx.Dr0 != 0 || ctx.Dr1 != 0 || ctx.Dr2 != 0 || ctx.Dr3 != 0 || ctx.Dr6 != 0 || (ctx.Dr7 != 0 && ctx.Dr7 != 0x400) {
                 return true;
             }
@@ -464,7 +421,7 @@ pub fn check_hw_breakpoints() -> bool {
     false
 }
 
-/// 13. PEB-based Debugger Detection (BeingDebugged & NtGlobalFlag).
+/// 13. PEB-based Debugger Detection.
 pub fn check_peb_debugger() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
@@ -481,7 +438,6 @@ pub fn check_peb_debugger() -> bool {
             );
         }
         if being_debugged != 0 { return true; }
-        // FLG_HEAP_ENABLE_TAIL_CHECK | FLG_HEAP_ENABLE_FREE_CHECK | FLG_HEAP_VALIDATE_PARAMETERS
         if (nt_global_flag & 0x70) != 0 { return true; }
     }
     #[cfg(target_arch = "x86")]
@@ -510,24 +466,26 @@ pub fn check_nt_query_info_process() -> bool {
         HANDLE, u32, *mut c_void, u32, *mut u32
     ) -> i32;
 
-    let ntdll = unsafe { GetModuleHandleW(PCWSTR("ntdll.dll\0".encode_utf16().collect::<Vec<u16>>().as_ptr())).unwrap_or_default() };
-    if ntdll.is_invalid() { return false; }
+    unsafe {
+        let ntdll = get_module_base("ntdll.dll").unwrap_or(std::ptr::null_mut());
+        if ntdll.is_null() { return false; }
 
-    let nt_query_info_ptr = unsafe { GetProcAddress(ntdll, windows::core::PCSTR("NtQueryInformationProcess\0".as_ptr())) };
-    if let Some(nt_query_info_addr) = nt_query_info_ptr {
-        let nt_query_info: NtQueryInformationProcessFn = unsafe { std::mem::transmute(nt_query_info_addr) };
+        let nt_query_info_ptr = GetProcAddress(windows::Win32::Foundation::HINSTANCE(ntdll as isize), windows::core::PCSTR("NtQueryInformationProcess\0".as_ptr()));
+        if let Some(nt_query_info_addr) = nt_query_info_ptr {
+            let nt_query_info: NtQueryInformationProcessFn = std::mem::transmute(nt_query_info_addr);
 
-        let mut debug_port: usize = 0;
-        let mut status = unsafe { nt_query_info(windows::Win32::System::Threading::GetCurrentProcess(), 7, &mut debug_port as *mut _ as *mut c_void, std::mem::size_of::<usize>() as u32, std::ptr::null_mut()) };
-        if status == 0 && debug_port != 0 { return true; }
+            let mut debug_port: usize = 0;
+            let mut status = nt_query_info(windows::Win32::System::Threading::GetCurrentProcess(), 7, &mut debug_port as *mut _ as *mut c_void, std::mem::size_of::<usize>() as u32, std::ptr::null_mut());
+            if status == 0 && debug_port != 0 { return true; }
 
-        let mut debug_object: HANDLE = HANDLE(0);
-        status = unsafe { nt_query_info(windows::Win32::System::Threading::GetCurrentProcess(), 30, &mut debug_object as *mut _ as *mut c_void, std::mem::size_of::<HANDLE>() as u32, std::ptr::null_mut()) };
-        if status == 0 && !debug_object.is_invalid() { return true; }
+            let mut debug_object: HANDLE = HANDLE(0);
+            status = nt_query_info(windows::Win32::System::Threading::GetCurrentProcess(), 30, &mut debug_object as *mut _ as *mut c_void, std::mem::size_of::<HANDLE>() as u32, std::ptr::null_mut());
+            if status == 0 && !debug_object.is_invalid() { return true; }
 
-        let mut debug_flags: u32 = 0;
-        status = unsafe { nt_query_info(windows::Win32::System::Threading::GetCurrentProcess(), 31, &mut debug_flags as *mut _ as *mut c_void, 4, std::ptr::null_mut()) };
-        if status == 0 && debug_flags == 0 { return true; }
+            let mut debug_flags: u32 = 0;
+            status = nt_query_info(windows::Win32::System::Threading::GetCurrentProcess(), 31, &mut debug_flags as *mut _ as *mut c_void, 4, std::ptr::null_mut());
+            if status == 0 && debug_flags == 0 { return true; }
+        }
     }
     false
 }
@@ -538,15 +496,16 @@ pub fn check_thread_hide_from_debugger() -> bool {
         HANDLE, u32, *mut c_void, u32
     ) -> i32;
 
-    let ntdll = unsafe { GetModuleHandleW(PCWSTR("ntdll.dll\0".encode_utf16().collect::<Vec<u16>>().as_ptr())).unwrap_or_default() };
-    if ntdll.is_invalid() { return false; }
+    unsafe {
+        let ntdll = get_module_base("ntdll.dll").unwrap_or(std::ptr::null_mut());
+        if ntdll.is_null() { return false; }
 
-    let nt_set_info_ptr = unsafe { GetProcAddress(ntdll, windows::core::PCSTR("NtSetInformationThread\0".as_ptr())) };
-    if let Some(nt_set_info_addr) = nt_set_info_ptr {
-        let nt_set_info: NtSetInformationThreadFn = unsafe { std::mem::transmute(nt_set_info_addr) };
-        // ThreadHideFromDebugger = 0x11
-        let status = unsafe { nt_set_info(windows::Win32::System::Threading::GetCurrentThread(), 0x11, std::ptr::null_mut(), 0) };
-        return status >= 0;
+        let nt_set_info_ptr = GetProcAddress(windows::Win32::Foundation::HINSTANCE(ntdll as isize), windows::core::PCSTR("NtSetInformationThread\0".as_ptr()));
+        if let Some(nt_set_info_addr) = nt_set_info_ptr {
+            let nt_set_info: NtSetInformationThreadFn = std::mem::transmute(nt_set_info_addr);
+            let status = nt_set_info(windows::Win32::System::Threading::GetCurrentThread(), 0x11, std::ptr::null_mut(), 0);
+            return status >= 0;
+        }
     }
     false
 }
@@ -577,12 +536,11 @@ pub fn check_output_debug_string() -> bool {
     unsafe {
         SetLastError(windows::Win32::Foundation::WIN32_ERROR(0xDEADBEEF));
         OutputDebugStringW(PCWSTR("Anti-Debug\0".encode_utf16().collect::<Vec<u16>>().as_ptr()));
-        GetLastError().0 != 0xDEADBEEF
+        windows_sys::Win32::Foundation::GetLastError() != 0xDEADBEEF
     }
 }
 
 /// 18. Trap Flag Detection.
-/// Uses the CPU Trap Flag (TF) to detect single-step debugging.
 pub fn check_trap_flag() -> bool {
     unsafe extern "system" fn handler(exception_info: *mut EXCEPTION_POINTERS) -> i32 {
         if (*(*exception_info).ExceptionRecord).ExceptionCode.0 == 0x80000004u32 as i32 {
@@ -612,16 +570,11 @@ pub fn check_trap_flag() -> bool {
             );
             RemoveVectoredExceptionHandler(h);
         }
-        // If EXCEPTION_HIT is true, it means our VEH caught the single-step.
-        // If a debugger intercepted it, EXCEPTION_HIT might be false.
         !EXCEPTION_HIT
     }
 }
 
 /// 19. Code Integrity Self-Check.
-/// Detects if a debugger has patched the .text section with software breakpoints (0xCC).
-#[allow(non_snake_case)]
-#[allow(dead_code)]
 pub fn check_code_integrity() -> bool {
     unsafe {
         let h_module = GetModuleHandleW(None).unwrap_or_default();
@@ -657,9 +610,7 @@ pub fn check_code_integrity() -> bool {
     false
 }
 
-/// 20. Memory Breakpoint Detection (Guard Pages).
-/// Sets a guard page on a memory region. Accessing it should trigger STATUS_GUARD_PAGE_VIOLATION.
-/// If no exception is raised, a debugger is likely intercepting it.
+/// 20. Memory Breakpoint Detection.
 pub fn check_memory_breakpoints() -> bool {
     use windows::Win32::System::Memory::{VirtualAlloc, VirtualFree, VirtualProtect, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, PAGE_GUARD, MEM_RELEASE, PAGE_PROTECTION_FLAGS};
 
@@ -684,42 +635,28 @@ pub fn check_memory_breakpoints() -> bool {
         EXCEPTION_HIT = false;
         let h = AddVectoredExceptionHandler(1, Some(handler));
         if !h.is_null() {
-            // Access the guard page
             let _val = std::ptr::read_volatile(buffer as *const u8);
             RemoveVectoredExceptionHandler(h);
         }
 
         let _ = VirtualFree(buffer, 0, MEM_RELEASE);
-
-        // If EXCEPTION_HIT is true, the guard page worked correctly.
-        // If false, it was intercepted or failed to trigger.
         !EXCEPTION_HIT
     }
 }
 
 /// 21. ntdll Integrity Check (Hook Detection).
-/// Manually walks ntdll exports and checks for JMP/inline hooks on critical syscall stubs.
-#[allow(non_snake_case)]
 pub fn check_ntdll_hooks() -> bool {
-    #[repr(C)]
-    struct IMAGE_EXPORT_DIRECTORY {
-        Characteristics: u32, TimeDateStamp: u32, MajorVersion: u16, MinorVersion: u16,
-        Name: u32, Base: u32, NumberOfFunctions: u32, NumberOfNames: u32,
-        AddressOfFunctions: u32, AddressOfNames: u32, AddressOfNameOrdinals: u32,
-    }
-
     let target_funcs = ["NtQueryInformationProcess", "NtSetInformationThread", "NtReadVirtualMemory", "NtQuerySystemInformation", "NtOpenProcess"];
     let mut hook_detected = false;
 
     unsafe {
-        let h_ntdll = GetModuleHandleW(PCWSTR("ntdll.dll\0".encode_utf16().collect::<Vec<u16>>().as_ptr())).unwrap_or_default();
-        if h_ntdll.is_invalid() { return false; }
+        let h_ntdll = get_module_base("ntdll.dll").unwrap_or(std::ptr::null_mut());
+        if h_ntdll.is_null() { return false; }
 
-        let base_addr = h_ntdll.0 as *const u8;
+        let base_addr = h_ntdll as *const u8;
         let dos_header = &*(base_addr as *const IMAGE_DOS_HEADER);
         let nt_headers = &*(base_addr.add(dos_header.e_lfanew as usize) as *const IMAGE_NT_HEADERS64);
 
-        // Export Directory is at index 0
         let export_dir_rva = nt_headers.OptionalHeader.DataDirectory[0].VirtualAddress;
         if export_dir_rva == 0 { return false; }
 
@@ -735,22 +672,15 @@ pub fn check_ntdll_hooks() -> bool {
             if target_funcs.iter().any(|&f| f == name) {
                 let ordinal = ordinals[i];
                 let func_addr = base_addr.add(functions[ordinal as usize] as usize);
-
-                // Inspect first few bytes for common hooks
                 let prologue = std::slice::from_raw_parts(func_addr, 4);
 
-                // 0xE9 = JMP rel32, 0xEB = JMP rel8, 0xFF 0x25 = JMP [rip+offset]
                 if prologue[0] == 0xE9 || prologue[0] == 0xEB || (prologue[0] == 0xFF && prologue[1] == 0x25) {
                     hook_detected = true;
                     break;
                 }
 
-                // On x64, syscalls usually start with 4C 8B D1 (mov r10, rcx)
                 #[cfg(target_arch = "x86_64")]
                 if prologue[0] != 0x4C || prologue[1] != 0x8B || prologue[2] != 0xD1 {
-                    // Check if it's a known variation or just suspicious
-                    // Some security software might use different but "safe" prologues,
-                    // but for anti-analysis, any deviation is a signal.
                     hook_detected = true;
                     break;
                 }
@@ -799,8 +729,8 @@ pub fn check_smbios_data() -> bool {
 
 /// 2. Mouse movement monitor.
 pub fn check_mouse_behavior() -> bool {
-    let mut pos1 = windows::Win32::Foundation::POINT::default();
-    let mut pos2 = windows::Win32::Foundation::POINT::default();
+    let mut pos1 = POINT::default();
+    let mut pos2 = POINT::default();
     unsafe { let _ = GetCursorPos(&mut pos1); }
     thread::sleep(Duration::from_millis(2000));
     unsafe { let _ = GetCursorPos(&mut pos2); }
@@ -832,8 +762,7 @@ pub fn check_system32_footprint() -> bool {
     false
 }
 
-/// 1. TLB Timing Test (Translation Lookaside Buffer).
-/// Measures memory translation latency which is significantly higher in virtualized environments.
+/// 1. TLB Timing Test.
 pub fn check_tlb_latency() -> bool {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
@@ -845,14 +774,13 @@ pub fn check_tlb_latency() -> bool {
         use windows::Win32::System::Memory::{VirtualAlloc, VirtualFree, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, MEM_RELEASE};
 
         let page_size = 4096;
-        let num_pages = 1024; // 4MB to ensure spread
+        let num_pages = 1024;
         let buffer_size = num_pages * page_size;
 
         unsafe {
             let buffer_ptr = VirtualAlloc(None, buffer_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
             if buffer_ptr.is_null() { return false; }
 
-            // Warm up / Ensure mapped
             for i in 0..num_pages {
                 std::ptr::write_volatile(buffer_ptr.cast::<u8>().add(i * page_size), 0);
             }
@@ -874,12 +802,9 @@ pub fn check_tlb_latency() -> bool {
             }
 
             let _ = VirtualFree(buffer_ptr, 0, MEM_RELEASE);
-
             let mut sorted = samples.to_vec();
             sorted.sort_unstable();
             let median = sorted[50];
-
-            // Real PC: ~50-200 cycles, VM: ~500-2000 cycles
             median > 450
         }
     }
@@ -904,7 +829,7 @@ pub fn check_device_files() -> bool {
     false
 }
 
-/// 4. Hardware fingerprinting with negative scoring.
+/// 4. Hardware fingerprinting.
 pub fn get_hardware_score() -> i32 {
     let mut score = 0;
     let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
@@ -950,7 +875,7 @@ pub fn check_registry_artifacts() -> bool {
     false
 }
 
-/// Central is_virtualized function using a weighted scoring system.
+/// Central is_virtualized function.
 pub fn is_virtualized() -> bool {
     let mut score: i32 = get_hardware_score();
     let checks: Vec<(&str, fn() -> bool, u32)> = vec![
@@ -991,7 +916,6 @@ pub fn is_virtualized() -> bool {
         let (_name, check_fn, weight) = checks[i];
         if check_fn() { score += weight as i32; }
         if score >= THRESHOLD_VIRTUALIZED as i32 { return true; }
-        thread::sleep(Duration::from_millis(rng.gen_range(50..150)));
     }
     score >= THRESHOLD_VIRTUALIZED as i32
 }
