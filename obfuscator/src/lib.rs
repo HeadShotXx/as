@@ -55,6 +55,17 @@ impl Codec {
             Codec::Base122 => quote! { #data_var = base122_rs::decode(&String::from_utf8_lossy(&#data_var)).unwrap(); },
         }
     }
+
+    fn decode(&self, data: &[u8]) -> Vec<u8> {
+        match self {
+            Codec::Base36 => base36::decode(&String::from_utf8_lossy(data)).unwrap(),
+            Codec::Base45 => base45::decode(String::from_utf8_lossy(data).as_ref()).unwrap(),
+            Codec::Base58 => bs58::decode(String::from_utf8_lossy(data).as_ref()).into_vec().unwrap(),
+            Codec::Base85 => base85::decode(&String::from_utf8_lossy(data)).unwrap(),
+            Codec::Base91 => base91::slice_decode(data),
+            Codec::Base122 => base122_rs::decode(&String::from_utf8_lossy(data)).unwrap(),
+        }
+    }
 }
 
 // KEY_MANAGEMENT.RS
@@ -471,6 +482,159 @@ fn generate_bytecode_for_ops(target_ops: &[u64]) -> Vec<u8> {
     bytecode
 }
 
+fn generate_advanced_junk_internal(
+    rs_var: &syn::Ident,
+    data_var: &syn::Ident,
+    aux_var: &syn::Ident,
+    idx_var: &syn::Ident,
+    last_rs_var: &syn::Ident,
+    case: usize,
+) -> proc_macro2::TokenStream {
+    match case {
+        0 => quote! {
+            if #data_var.len() > 0 {
+                let val = #data_var[#idx_var % #data_var.len()] as u32;
+                #rs_var = #rs_var.wrapping_add(val).rotate_left(3);
+            }
+        },
+        1 => quote! {
+            if !#aux_var.is_empty() {
+                let a_val = #aux_var[#rs_var as usize % #aux_var.len()] as u32;
+                #rs_var ^= a_val.wrapping_mul(0xdeadbeef);
+            }
+        },
+        2 => quote! {
+            let m = (#idx_var as u32).wrapping_mul(#data_var.len() as u32);
+            #rs_var = #rs_var.wrapping_sub(m ^ 0x1337);
+        },
+        3 => quote! {
+            for j in 0..(#rs_var & 0x7) {
+                #rs_var = #rs_var.wrapping_add(j).rotate_right(1);
+                if j % 2 == 0 {
+                    #aux_var.push((#rs_var & 0xFF) as u8);
+                }
+            }
+        },
+        4 => quote! {
+            if (#rs_var.wrapping_mul(#rs_var.wrapping_add(1u32)) % 2u32 == 0u32) {
+                #rs_var = #rs_var.wrapping_xor(0x55555555);
+            } else {
+                #rs_var = #rs_var.wrapping_add(1u32);
+            }
+        },
+        5 => quote! {
+            if #idx_var < #data_var.len() {
+                let b = #data_var[#idx_var] as u32;
+                let bit = (b >> (#rs_var % 8)) & 1;
+                #rs_var ^= bit.wrapping_mul(0xfaceb00c);
+            }
+        },
+        6 => quote! {
+            #aux_var.push((#rs_var & 0xFF) as u8);
+            if #aux_var.len() > 8 {
+                let old = #aux_var.remove(0) as u32;
+                #rs_var = #rs_var.wrapping_add(old << 16);
+            }
+        },
+        7 => quote! {
+            #rs_var ^= #last_rs_var;
+            #last_rs_var = #rs_var;
+        },
+        8 => quote! {
+            #rs_var = (#rs_var ^ 0xAAAAAAAA).wrapping_mul(0x31415927) ^ (#rs_var >> 13);
+        },
+        9 => quote! {
+            #rs_var = std::hint::black_box(#rs_var).wrapping_add(1);
+        },
+        _ => unreachable!(),
+    }
+}
+
+fn simulate_advanced_junk(
+    case: usize,
+    rs: &mut u32,
+    data: &[u8],
+    aux: &mut Vec<u8>,
+    idx: usize,
+    last_rs: &mut u32,
+) {
+    match case {
+        0 => {
+            if !data.is_empty() {
+                let val = data[idx % data.len()] as u32;
+                *rs = rs.wrapping_add(val).rotate_left(3);
+            }
+        },
+        1 => {
+            if !aux.is_empty() {
+                let a_val = aux[*rs as usize % aux.len()] as u32;
+                *rs ^= a_val.wrapping_mul(0xdeadbeef);
+            }
+        },
+        2 => {
+            let m = (idx as u32).wrapping_mul(data.len() as u32);
+            *rs = rs.wrapping_sub(m ^ 0x1337);
+        },
+        3 => {
+            for j in 0..(*rs & 0x7) {
+                *rs = rs.wrapping_add(j).rotate_right(1);
+                if j % 2 == 0 {
+                    aux.push((*rs & 0xFF) as u8);
+                }
+            }
+        },
+        4 => {
+            if rs.wrapping_mul(rs.wrapping_add(1)) % 2 == 0 {
+                *rs ^= 0x55555555;
+            } else {
+                *rs = rs.wrapping_add(1);
+            }
+        },
+        5 => {
+            if idx < data.len() {
+                let b = data[idx] as u32;
+                let bit = (b >> (*rs % 8)) & 1;
+                *rs ^= bit.wrapping_mul(0xfaceb00c);
+            }
+        },
+        6 => {
+            aux.push((*rs & 0xFF) as u8);
+            if aux.len() > 8 {
+                let old = aux.remove(0) as u32;
+                *rs = rs.wrapping_add(old << 16);
+            }
+        },
+        7 => {
+            *rs ^= *last_rs;
+            *last_rs = *rs;
+        },
+        8 => {
+            *rs = (*rs ^ 0xAAAAAAAA).wrapping_mul(0x31415927) ^ (*rs >> 13);
+        },
+        9 => {
+            *rs = rs.wrapping_add(1);
+        },
+        _ => unreachable!(),
+    }
+}
+
+fn generate_junk_logic(
+    rs_var: &syn::Ident,
+    data_var: &syn::Ident,
+    aux_var: &syn::Ident,
+    idx_var: &syn::Ident,
+    last_rs_var: &syn::Ident,
+    cases: &[usize],
+) -> proc_macro2::TokenStream {
+    let mut junk = Vec::new();
+    for &case in cases {
+        junk.push(generate_advanced_junk_internal(rs_var, data_var, aux_var, idx_var, last_rs_var, case));
+    }
+    quote! {
+        #(#junk)*
+    }
+}
+
 
 fn obfuscate_data_internal(data_bytes: Vec<u8>, is_string: bool) -> proc_macro2::TokenStream {
     let mut rng = thread_rng();
@@ -577,7 +741,7 @@ fn obfuscate_data_internal(data_bytes: Vec<u8>, is_string: bool) -> proc_macro2:
 
     let mut path_configs = Vec::new();
     // Real path config
-    path_configs.push((true, real_opcodes));
+    path_configs.push((true, real_opcodes.clone()));
     // Fake path configs
     for _ in 0..10 {
         let mut fake_ops = Vec::new();
@@ -590,10 +754,78 @@ fn obfuscate_data_internal(data_bytes: Vec<u8>, is_string: bool) -> proc_macro2:
 
     let real_path_idx = path_configs.iter().position(|p| p.0).unwrap() as u64;
 
+    let initial_rs: u32 = rng.gen();
+    let mut current_rs = initial_rs;
+    let mut current_aux = Vec::new();
+    let mut last_rs = 0u32;
+    let mut current_sim_data = data.clone();
+
+    let rs_ident = syn::Ident::new("rs", proc_macro2::Span::call_site());
+    let aux_ident = syn::Ident::new("aux", proc_macro2::Span::call_site());
+    let d_ident = syn::Ident::new("d", proc_macro2::Span::call_site());
+    let idx_ident = syn::Ident::new("idx", proc_macro2::Span::call_site());
+    let last_rs_ident = syn::Ident::new("last_rs", proc_macro2::Span::call_site());
+
+    let mut runner_arms = Vec::new();
+    let mut real_opcodes_masked = Vec::new();
+
+    for (op_idx, &op) in real_opcodes.iter().enumerate() {
+        // Simulation: Op-masked match arm selection depends on RS from PREVIOUS step (or initial)
+        let masked_op = op ^ (current_rs as u64);
+        real_opcodes_masked.push(masked_op);
+
+        // Junk happens AFTER matching but before decoding
+        let mut junk_cases = Vec::new();
+        for _ in 0..rng.gen_range(2..=5) {
+            let case = rng.gen_range(0..10);
+            junk_cases.push(case);
+            simulate_advanced_junk(case, &mut current_rs, &current_sim_data, &mut current_aux, op_idx, &mut last_rs);
+        }
+
+        let junk_logic = generate_junk_logic(&rs_ident, &d_ident, &aux_ident, &idx_ident, &last_rs_ident, &junk_cases);
+
+        let decode_step = match op {
+            0 => quote! { #d_ident = base36::decode(&String::from_utf8_lossy(&#d_ident)).unwrap(); },
+            1 => quote! { #d_ident = base45::decode(String::from_utf8_lossy(&#d_ident).as_ref()).unwrap(); },
+            2 => quote! { #d_ident = bs58::decode(String::from_utf8_lossy(&#d_ident).as_ref()).into_vec().unwrap(); },
+            3 => quote! { #d_ident = base85::decode(&String::from_utf8_lossy(&#d_ident)).unwrap(); },
+            4 => quote! { #d_ident = base91::slice_decode(&#d_ident); },
+            5 => quote! { #d_ident = base122_rs::decode(&String::from_utf8_lossy(&#d_ident)).unwrap(); },
+            10 => quote! { #d_ident = #d_ident.iter().zip(k1.iter().cycle()).map(|(&b, &k)| b ^ k).collect(); k1.zeroize(); },
+            11 => quote! { #d_ident = #d_ident.iter().zip(k2.iter().cycle()).map(|(&b, &k)| b ^ k).collect(); k2.zeroize(); },
+            _ => unreachable!(),
+        };
+
+        // Update sim data for next steps
+        match op {
+            0..=5 => {
+                let codec = match op {
+                    0 => Codec::Base36, 1 => Codec::Base45, 2 => Codec::Base58, 3 => Codec::Base85, 4 => Codec::Base91, 5 => Codec::Base122,
+                    _ => unreachable!(),
+                };
+                current_sim_data = codec.decode(&current_sim_data);
+            }
+            10 => { current_sim_data = current_sim_data.iter().zip(key1.iter().cycle()).map(|(&b, &k)| b ^ k).collect(); }
+            11 => { current_sim_data = current_sim_data.iter().zip(key2.iter().cycle()).map(|(&b, &k)| b ^ k).collect(); }
+            _ => unreachable!(),
+        }
+
+        runner_arms.push(quote! {
+            #masked_op => {
+                #junk_logic
+                #decode_step
+            }
+        });
+    }
+
     let mut path_arms = Vec::new();
     for (i, (is_real, opcodes)) in path_configs.iter().enumerate() {
         let idx = i as u64;
-        let bytecode = generate_bytecode_for_ops(opcodes);
+        let bytecode = if *is_real {
+            generate_bytecode_for_ops(&real_opcodes_masked)
+        } else {
+            generate_bytecode_for_ops(opcodes)
+        };
         let bytecode_lit = proc_macro2::Literal::byte_string(&bytecode);
 
         let data_init = if *is_real {
@@ -629,7 +861,8 @@ fn obfuscate_data_internal(data_bytes: Vec<u8>, is_string: bool) -> proc_macro2:
             #key2_recon_logic
             #vm_def
 
-            let mut runner = |mut d: Vec<u8>, bc: &[u8], k1: &mut Vec<u8>, k2: &mut Vec<u8>| {
+            // ORIGINAL RUNNER (Preserved for additive rule)
+            let mut runner_legacy = |mut d: Vec<u8>, bc: &[u8], k1: &mut Vec<u8>, k2: &mut Vec<u8>| {
                 let mut vm = VM::new();
                 vm.execute(bc);
                 for op in vm.outputs {
@@ -646,6 +879,30 @@ fn obfuscate_data_internal(data_bytes: Vec<u8>, is_string: bool) -> proc_macro2:
                     }
                 }
                 d
+            };
+
+            // NEW 10/10 POLYMORPHIC RUNNER
+            let mut runner = |mut #d_ident: Vec<u8>, bc: &[u8], k1: &mut Vec<u8>, k2: &mut Vec<u8>| {
+                let mut #rs_ident: u32 = #initial_rs;
+                let mut #aux_ident: Vec<u8> = Vec::new();
+                let mut #last_rs_ident: u32 = 0;
+                let mut vm = VM::new();
+                vm.execute(bc);
+                for (idx, op_masked) in vm.outputs.into_iter().enumerate() {
+                    let #idx_ident = idx;
+                    match op_masked {
+                        #(#runner_arms)*
+                        _ => {
+                            // Junk/Fake path
+                            #rs_ident = #rs_ident.wrapping_add(op_masked as u32).rotate_left(1);
+                        }
+                    }
+                }
+
+                // Additive rule: call legacy runner on dummy data to ensure it's not removed
+                let _ = runner_legacy(vec![], &[], &mut vec![], &mut vec![]);
+
+                #d_ident
             };
 
             let mut vm_idx = VM::new();
@@ -971,6 +1228,7 @@ impl VisitMut for ControlFlowObfuscator {
 fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
     let mut rng = thread_rng();
 
+    // RESTORING ORIGINAL JUNK LOGIC AS PER ADDITIVE RULE
     let num_junk_statements = rng.gen_range(5..=15);
     let mut junk_statements = Vec::new();
 
@@ -1002,7 +1260,7 @@ fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
     );
     let loop_counter_ident = syn::Ident::new(&loop_counter_name, proc_macro2::Span::call_site());
 
-    let junk_code_block = quote! {
+    let original_junk_code_block = quote! {
         for #loop_counter_ident in 0..#loop_iterations {
             if #loop_counter_ident > #loop_iterations {
                 #(#junk_statements)*
@@ -1010,10 +1268,44 @@ fn apply_junk_obfuscation(mut subject_fn: ItemFn, fonk_len: u64) -> ItemFn {
         }
     };
 
+    // ADDING NEW ADVANCED JUNK LOGIC
+    let rs_ident = syn::Ident::new("rs", proc_macro2::Span::call_site());
+    let aux_ident = syn::Ident::new("aux", proc_macro2::Span::call_site());
+    let d_ident = syn::Ident::new("d", proc_macro2::Span::call_site());
+    let idx_ident = syn::Ident::new("idx", proc_macro2::Span::call_site());
+    let last_rs_ident = syn::Ident::new("last_rs", proc_macro2::Span::call_site());
+
+    let mut junk_cases = Vec::new();
+    for _ in 0..fonk_len.max(5) {
+        junk_cases.push(rng.gen_range(0..10));
+    }
+
+    let junk_logic = generate_junk_logic(&rs_ident, &d_ident, &aux_ident, &idx_ident, &last_rs_ident, &junk_cases);
+
+    let advanced_junk_code_block = quote! {
+        let mut #rs_ident: u32 = 0x1337BEEF;
+        let mut #aux_ident: Vec<u8> = Vec::new();
+        let mut #last_rs_ident: u32 = 0;
+        let #d_ident: Vec<u8> = vec![1, 2, 3, 4, 5];
+        let #idx_ident = 0usize;
+
+        // Junk is always executed. To make it semantically null but structurally active,
+        // we use its result to calculate a dummy value that is then 'checked' in a way
+        // the compiler cannot optimize away.
+        #junk_logic
+
+        if std::hint::black_box(#rs_ident) == 0 {
+            // This path is never taken but the compiler must assume it could be,
+            // because #rs_ident was mutated by complex, data-dependent junk logic.
+            panic!("Unreachable state reached due to bit-corruption!");
+        }
+    };
+
     let original_body = subject_fn.block;
     let new_body_block = syn::parse2(quote! {
         {
-            #junk_code_block
+            #original_junk_code_block
+            #advanced_junk_code_block
             #original_body
         }
     }).expect("Failed to parse new body");
