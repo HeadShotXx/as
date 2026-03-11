@@ -8,7 +8,6 @@ def generate_random_name(length=5, used_names=None):
     if used_names is None:
         used_names = set()
     while True:
-        # Using confusing-looking characters for variable names
         chars = "IlO0_"
         name = "".join(random.choices(chars, k=length))
         if name not in used_names:
@@ -16,12 +15,8 @@ def generate_random_name(length=5, used_names=None):
             return name
 
 def generate_unreadable_string(length=50):
-    # Characters that look like garbage or noise
-    noise_chars = string.ascii_letters + string.digits + "!@#$%^&*()_+-=[]{}|;:,.<>?/`~"
-    # Filter out chars that are forbidden in the master string for safety
-    forbidden = ('\n', '\r', '%', '"', '!', '&', '|', '<', '>', '^', '(', ')', ',', ';', '=', ' ', '\t')
-    safe_noise = [c for c in noise_chars if c not in forbidden]
-    return "".join(random.choices(safe_noise, k=length))
+    noise_chars = string.ascii_letters + string.digits + "@#$_+-=[]{}|;:,.<>?/`~"
+    return "".join(random.choices(noise_chars, k=length))
 
 def obfuscate_batch(input_file, output_file):
     try:
@@ -31,31 +26,20 @@ def obfuscate_batch(input_file, output_file):
         print(f"Error: {input_file} not found.")
         return
 
-    unique_chars = set()
-    for line in lines:
-        unique_chars.update(line)
-
-    # Critical Batch control characters and metacharacters must NOT be obfuscated
-    forbidden = ('\n', '\r', '%', '"', '!', '&', '|', '<', '>', '^', '(', ')', ',', ';', '=', ' ', '\t')
-    safe_chars = [c for c in unique_chars if c not in forbidden]
-
-    # Add common ones
-    for c in string.ascii_letters + string.digits + " .\\/-_":
-        if c not in safe_chars and c not in forbidden:
-            safe_chars.append(c)
-
-    random.shuffle(safe_chars)
-    master_string = "".join(safe_chars)
+    # ASCII mapping pool only
+    mapping_pool = string.ascii_letters + string.digits + " .\\/-_"
+    mapping_pool = list(set(mapping_pool))
+    random.shuffle(mapping_pool)
+    master_string = "".join(mapping_pool)
 
     used_vars = set()
     master_var = "__" + generate_random_name(8, used_vars)
     char_map = {}
 
-    # Noise strings to add confusion
     noise_vars = []
-    for _ in range(5):
+    for _ in range(3):
         nv = "___" + generate_random_name(10, used_vars)
-        val = generate_unreadable_string(random.randint(60, 100))
+        val = generate_unreadable_string(random.randint(50, 80))
         noise_vars.append((nv, val))
 
     char_assignments = []
@@ -65,37 +49,34 @@ def obfuscate_batch(input_file, output_file):
 
         method = random.random()
         if method > 0.6:
-            char_assignments.append(f'set "{var_name}=%{master_var}:~{i},1%"')
+            char_assignments.append(f'set "{var_name}=%{master_var}:~{i},1%"\n')
         elif method > 0.3:
-            char_assignments.append(f'call set "{var_name}=%%{master_var}:~{i},1%%"')
+            char_assignments.append(f'call set "{var_name}=%%{master_var}:~{i},1%%"\n')
         else:
-            # Multi-level assignment for extra confusion
+            # Grouping dependent assignments to prevent shuffle issues
             tmp_var = "_" + generate_random_name(7, used_vars)
-            char_assignments.append(f'set "{tmp_var}=%{master_var}:~{i},1%"')
-            char_assignments.append(f'set "{var_name}=%{tmp_var}%"')
+            grouped_set = f'set "{tmp_var}=%{master_var}:~{i},1%"\nset "{var_name}=%{tmp_var}%"\n'
+            char_assignments.append(grouped_set)
 
     random.shuffle(char_assignments)
 
-    obfuscated_lines = ["@echo off\n"]
-
-    # Add noise variables as junk in the header
+    obfuscated_lines = ["@echo off\n", "chcp 65001 >nul\n"]
     for nv, val in noise_vars:
         obfuscated_lines.append(f'set "{nv}={val}"\n')
-
-    # Set Master Var
     obfuscated_lines.append(f'set "{master_var}={master_string}"\n')
 
-    # Set character mappings with random noise insertion
-    for i, m_line in enumerate(char_assignments):
-        obfuscated_lines.append(m_line + "\n")
-        if i % 15 == 0 and random.random() < 0.2:
-            obfuscated_lines.append(f'REM {generate_unreadable_string(20)}\n')
-            if random.random() < 0.1:
-                junk_v = "__" + generate_random_name(12, used_vars)
-                obfuscated_lines.append(f'set "{junk_v}=%{noise_vars[0][0]}:~{random.randint(0,10)},5%"\n')
+    for i, m_block in enumerate(char_assignments):
+        obfuscated_lines.append(m_block)
+        if i % 25 == 0 and random.random() < 0.15:
+            obfuscated_lines.append(f'REM {generate_unreadable_string(15)}\n')
 
-    # Protection pattern
-    pattern = r'(%[a-zA-Z0-9_#$@-]+%|%~[a-zA-Z]*[0-9*]|%[0-9*]|%%[a-zA-Z]|![a-zA-Z0-9_#$@-]+!)'
+    # Precise regex for:
+    # 1. %VAR%, %VAR:a=b%, %VAR:~0,1%
+    # 2. %~modifiers digit
+    # 3. %digit, %*
+    # 4. %%[a-zA-Z]
+    # 5. !VAR!, !VAR:a=b!, !VAR:~0,1!
+    pattern = r'(%[a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%|%~[a-zA-Z]*[0-9*]|%[0-9*]|%%[a-zA-Z]|![a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^!]*))?!)'
 
     for line in lines:
         stripped = line.lstrip()
@@ -109,20 +90,21 @@ def obfuscate_batch(input_file, output_file):
         if stripped.lower().startswith("@echo off"):
             continue
 
-        # Occasionally use dynamic command construction for a line
-        use_dynamic = random.random() < 0.15 and len(stripped) > 5
+        # Limit dynamic execution to safe lines
+        safe_for_dyn = not any(c in stripped for c in ('|', '>', '<', '&', '(', ')'))
+        use_dynamic = safe_for_dyn and random.random() < 0.1 and len(stripped) > 10
 
         parts = re.split(pattern, line, flags=re.IGNORECASE)
         obfuscated_part_line = ""
         for part in parts:
-            if re.match(pattern, part, re.IGNORECASE):
+            if part and re.match(pattern, part, re.IGNORECASE):
                 obfuscated_part_line += part
-            else:
+            elif part:
                 for char in part:
-                    if char in char_map and random.random() < 0.9:
+                    if char in char_map and random.random() < 0.8:
                         obfuscated_part_line += f"%{char_map[char]}%"
                     else:
-                        if char.isalpha() and random.random() < 0.15:
+                        if char.isalpha() and random.random() < 0.05:
                             obfuscated_part_line += "^" + (char.upper() if random.random() > 0.5 else char.lower())
                         else:
                             obfuscated_part_line += char
@@ -130,7 +112,7 @@ def obfuscate_batch(input_file, output_file):
         if use_dynamic:
             dyn_var = "____" + generate_random_name(15, used_vars)
             obfuscated_lines.append(f'set "{dyn_var}={obfuscated_part_line.strip()}"\n')
-            obfuscated_lines.append(f'%{dyn_var}%\n')
+            obfuscated_lines.append(f'call %{dyn_var}%\n')
         else:
             obfuscated_lines.append(obfuscated_part_line)
 
