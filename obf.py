@@ -8,14 +8,16 @@ def generate_random_name(length=5, used_names=None):
     if used_names is None:
         used_names = set()
     while True:
+        # Start with a letter/underscore to avoid Batch %0..%9 issues
         chars = "IlO0_"
-        name = "".join(random.choices(chars, k=length))
+        name = random.choice("IlO_") + "".join(random.choices(chars, k=length-1))
         if name not in used_names:
             used_names.add(name)
             return name
 
 def generate_unreadable_string(length=50):
     noise_chars = string.ascii_letters + string.digits + "@#$_+-=[]{}|;:,.<>?/`~"
+    # Safe chars for Batch command line
     safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'")]
     return "".join(random.choices(safe_noise, k=length))
 
@@ -29,48 +31,50 @@ def obfuscate_batch(input_file, output_file):
 
     used_vars = set()
 
+    # 1. Build dynamic mapping pool (Strictly ASCII)
     unique_file_chars = set()
     for line in lines:
         unique_file_chars.update(line)
 
     forbidden = ('\n', '\r', '%', '"', '!', '&', '|', '<', '>', '^', '(', ')', ',', ';', '=', ' ', '\t')
-    mapping_pool_chars = sorted(list((unique_file_chars | set(string.ascii_letters + string.digits + " .\\/-_")) - set(forbidden)))
+    # Build base pool ensuring strictly ASCII
+    mapping_pool_chars = sorted(list((unique_file_chars | set(string.ascii_letters + string.digits + " .\\/-_:")) - set(forbidden)))
+    mapping_pool_chars = [c for c in mapping_pool_chars if ord(c) < 128]
 
-    env_sources = {
-        "COMSPEC": "C:\\Windows\\system32\\cmd.exe",
-        "OS": "Windows_NT",
-        "ALLUSERSPROFILE": "C:\\ProgramData",
-        "SystemRoot": "C:\\Windows"
-    }
-
+    # 2. Multi-layer Pure Batch Encoding (Pool Rotation Chain)
     pools = []
     pool_vars = []
     pool_decoders = []
     num_pools = random.randint(3, 4)
-
     for _ in range(num_pools):
         p_list = list(mapping_pool_chars)
         random.shuffle(p_list)
         pool_str = "".join(p_list)
-
-        shift = random.randint(1, len(pool_str) - 1)
-        encoded = pool_str[shift:] + pool_str[:shift]
+        pools.append(pool_str)
 
         pv = "__" + generate_random_name(8, used_vars)
-        pools.append(pool_str)
         pool_vars.append(pv)
 
-        loop_v = random.choice(string.ascii_uppercase)
-        back_shift = len(pool_str) - shift
+        # Apply 7 layers of random rotation
+        encoded = pool_str
+        total_shift = 0
+        for _ in range(7):
+            s = random.randint(1, len(pool_str) - 1)
+            encoded = encoded[s:] + encoded[:s]
+            total_shift = (total_shift + s) % len(pool_str)
 
-        # Batch needs %%A.
-        # Python literal string '%%' becomes '%'
-        # Python f-string '%%%%' becomes '%%'
-        # So to get %%A in Batch:
-        decoder_cmd = f'set "{pv}={encoded}"\n'
-        decoder_cmd += f'for /L %%%%{loop_v} in (1,1,1) do set "{pv}=%{pv}:~{back_shift}%%%%{pv}:~0,{back_shift}%"\n'
+        loop_v = random.choice(string.ascii_uppercase)
+        back_shift = (len(pool_str) - total_shift) % len(pool_str)
+
+        decoder_cmd = 'set "' + pv + '=' + encoded + '"\n'
+        if back_shift != 0:
+            decoder_cmd += 'call set "' + pv + '=%%' + pv + ':~' + str(back_shift) + '%%%%' + pv + ':~0,' + str(back_shift) + '%%"\n'
         pool_decoders.append(decoder_cmd)
 
+    # 3. Environment Indirection Sources
+    env_sources = {"OS": "Windows_NT", "COMSPEC": "C:\\Windows\\system32\\cmd.exe"}
+
+    # 4. Chained Variable Shadowing
     char_map = {}
     mapping_code = []
     for char in mapping_pool_chars:
@@ -78,14 +82,13 @@ def obfuscate_batch(input_file, output_file):
         for _ in range(random.randint(2, 3)):
             var_name = "_" + generate_random_name(random.randint(6, 12), used_vars)
             shadow_names.append(var_name)
-
             p_idx = random.randint(0, len(pools) - 1)
             target_pv = pool_vars[p_idx]
             char_idx = pools[p_idx].find(char)
 
             if char_idx != -1:
                 method = random.random()
-                if method > 0.8: # Environment Indirection
+                if method > 0.85: # Env Indirection
                     src = None
                     for envar, enval in env_sources.items():
                         idx = enval.find(char)
@@ -93,18 +96,21 @@ def obfuscate_batch(input_file, output_file):
                             src = (envar, idx)
                             break
                     if src:
-                        mapping_code.append(f'if 1==1 set "{var_name}=%{src[0]}:~{src[1]},1%"\n')
+                        mapping_code.append(f'if not 1==0 set "{var_name}=%{src[0]}:~{src[1]},1%"\n')
                     else:
                         mapping_code.append(f'set "{var_name}=%{target_pv}:~{char_idx},1%"\n')
-                elif method > 0.4: # Direct
+                elif method > 0.45: # Direct
                     mapping_code.append(f'set "{var_name}=%{target_pv}:~{char_idx},1%"\n')
-                else: # Chained
+                else: # Chained Shadowing
                     v_link = "_" + generate_random_name(10, used_vars)
-                    mapping_code.append(f'set "{v_link}=%{target_pv}:~{char_idx},1%"\n')
-                    mapping_code.append(f'set "{var_name}=%{v_link}%"\n')
+                    chained_set = f'set "{v_link}=%{target_pv}:~{char_idx},1%"\nset "{var_name}=%{v_link}%"\n'
+                    mapping_code.append(chained_set)
         char_map[char] = shadow_names
     random.shuffle(mapping_code)
 
+    keywords = {"set", "if", "for", "goto", "call", "echo", "pause", "exit", "title", "rem", "chcp", "do", "in", "exist", "defined", "not", "errorlevel"}
+
+    # 5. Control-flow Flattening
     blocks = []
     current_block = []
     nest_level = 0
@@ -113,12 +119,13 @@ def obfuscate_batch(input_file, output_file):
         if not stripped: continue
         if stripped.lower().startswith("@echo off"): continue
         nest_level += line.count('(') - line.count(')')
-        if nest_level == 0 and ((stripped.startswith(":") and not stripped.startswith("::")) or (random.random() < 0.2 and not stripped.lower().startswith("set "))):
+        if nest_level <= 0 and ((stripped.startswith(":") and not stripped.startswith("::")) or (random.random() < 0.25 and not stripped.lower().startswith("set "))):
             if current_block: blocks.append(current_block)
             current_block = []
         current_block.append(line)
     if current_block: blocks.append(current_block)
 
+    # 6. Body Obfuscation with String Fragmentation
     fragments = []
     pattern = r'(%[a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%|%~[a-zA-Z]*[0-9*]|%[0-9*]|%%[a-zA-Z]|![a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^!]*))?!)'
     state_var = "_" + generate_random_name(10, used_vars)
@@ -135,29 +142,38 @@ def obfuscate_batch(input_file, output_file):
             if stripped.startswith(":") and not stripped.startswith("::"):
                 obf_block.append(line + "\n")
                 continue
-            parts = re.split(pattern, line, flags=re.IGNORECASE)
-            obf_parts = []
-            for part in parts:
-                if not part: continue
-                if re.match(pattern, part, re.IGNORECASE):
-                    obf_parts.append(part)
+
+            # Simple tokenization
+            tokens = re.split(r'(\s+|[()&|<>])', line)
+            obf_line_final = ""
+            for token in tokens:
+                if not token: continue
+                if token.lower() in keywords:
+                    kw_obf = "".join(["^" + c if random.random() < 0.2 else c for c in token])
+                    obf_line_final += kw_obf
+                elif re.match(r'\s+|[()&|<>]+', token):
+                    obf_line_final += token
                 else:
-                    i = 0
-                    while i < len(part):
-                        chunk_size = random.randint(2, 4)
-                        chunk = part[i:i+chunk_size]
-                        if random.random() < 0.8:
-                            f_str = "".join([f"%{random.choice(char_map[c])}%" if c in char_map else c for c in chunk])
-                            if len(chunk) > 2 and random.random() < 0.2:
-                                f_var = "____" + generate_random_name(15, used_vars)
-                                fragments.append(f'set "{f_var}={f_str}"\n')
-                                obf_parts.append(f"%{f_var}%")
-                            else:
-                                obf_parts.append(f_str)
+                    parts = re.split(pattern, token, flags=re.IGNORECASE)
+                    for part in parts:
+                        if not part: continue
+                        if re.match(pattern, part, re.IGNORECASE):
+                            obf_line_final += part
                         else:
-                            obf_parts.append("".join(["^"+c if c.isalpha() and random.random() < 0.1 else c for c in chunk]))
-                        i += chunk_size
-            obf_block.append("".join(obf_parts) + "\n")
+                            i = 0
+                            while i < len(part):
+                                chunk_size = random.randint(1, 3)
+                                chunk = part[i:i+chunk_size]
+                                frag_str = "".join([f"%{random.choice(char_map[c])}%" if c in char_map else c for c in chunk])
+                                if len(chunk) > 1 and random.random() < 0.2:
+                                    f_var = "____" + generate_random_name(15, used_vars)
+                                    fragments.append(f'set "{f_var}={frag_str}"\n')
+                                    obf_line_final += f"%{f_var}%"
+                                else:
+                                    obf_line_final += frag_str
+                                i += chunk_size
+            obf_block.append(obf_line_final + "\n")
+
         next_id = block_ids[idx+1] if idx+1 < len(blocks) else end_id
         obf_block.append(f'set /a "{state_var}={next_id}"\n')
         obf_block.append(f"goto :{dispatcher_label}\n")
@@ -169,6 +185,7 @@ def obfuscate_batch(input_file, output_file):
         flattened_blocks_data.append(fake_block)
     random.shuffle(flattened_blocks_data)
 
+    # 7. Final Assembly
     final = ["@echo off\n", "chcp 65001 >nul\n"]
     final.extend(pool_decoders)
     final.extend(mapping_code)
