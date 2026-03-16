@@ -16,7 +16,7 @@ def generate_random_name(length=5, used_names=None):
 
 def generate_unreadable_string(length=50):
     noise_chars = string.ascii_letters + string.digits + "@#$_+-=[]{}|;:,.<>?/`~"
-    safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'")]
+    safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'", '!', '=')]
     return "".join(random.choices(safe_noise, k=length))
 
 def generate_arithmetic(target):
@@ -25,7 +25,7 @@ def generate_arithmetic(target):
     ops = ['+', '-', '*', '^']
     parts = []
     current = target
-    num_parts = random.randint(4, 10)
+    num_parts = random.randint(4, 7)
     for i in range(num_parts - 1):
         op = random.choice(ops)
         if op == '+':
@@ -35,13 +35,13 @@ def generate_arithmetic(target):
             val = random.randint(1, 100)
             parts.append((val, '-')); current += val
         elif op == '*':
-            val = random.randint(2, 8)
+            val = random.randint(2, 5)
             mod = current % val
             if mod != 0:
                 parts.append((mod, '+'))
             parts.append((val, '*')); current //= val
         elif op == '^':
-            val = random.randint(1, 255)
+            val = random.randint(1, 127)
             parts.append((val, '^')); current ^= val
     expr = str(current)
     for val, op in reversed(parts):
@@ -50,11 +50,9 @@ def generate_arithmetic(target):
         elif op == '-': expr = f"({expr}{s}-{s}{val})"
         elif op == '*': expr = f"({expr}{s}*{s}{val})"
         elif op == '^': expr = f"({expr}{s}^{s}{val})"
-    if random.random() < 0.3:
-        n = random.randint(1, 100)
-        expr = f"({expr} + ({n} ^ {n} ^ {n} ^ {n}))"
     if random.random() < 0.2:
-        expr = f"({expr} * (1 + 0))"
+        n = random.randint(1, 50)
+        expr = f"({expr}+({n}-{n}))"
     return expr
 
 def generate_extraction(pool_var, index, target_var, used_vars, length=None):
@@ -62,38 +60,29 @@ def generate_extraction(pool_var, index, target_var, used_vars, length=None):
     arith_idx = generate_arithmetic(index)
     len_str = f",{length}" if length is not None else ""
 
-    methods = [1, 2, 3, 4]
+    methods = [1, 2, 3]
     choice = random.choice(methods)
 
     def noise():
-        if random.random() < 0.4:
-            return f's^et "{generate_random_name(8, used_vars)}={generate_unreadable_string(10)}"\n'
+        if random.random() < 0.3:
+            nv = "_" + generate_random_name(8, used_vars)
+            return f's^et "{nv}={generate_unreadable_string(10)}"\n'
         return ""
 
     if choice == 1:
-        # Standard bridge
-        res = f'{noise()}s^et /a "{idx_var}={arith_idx}"\n{noise()}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
+        return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
     elif choice == 2:
-        # Call bridge
-        res = f's^et /a "{idx_var}={arith_idx}"\n{noise()}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
-    elif choice == 3:
-        # Operator bridge
         tilde_var = "_" + generate_random_name(8, used_vars)
-        res = f's^et "{tilde_var}=~"\n{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
+        return f's^et "{tilde_var}=~"\n{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
     else:
-        # Offset/Extra bridge
         extra = random.randint(1, 5)
         tmp_var = "_" + generate_random_name(12, used_vars)
         if length is not None:
-            res = (f's^et /a "{idx_var}={arith_idx}"\n'
+            return (f's^et /a "{idx_var}={arith_idx}"\n'
                     f'{noise()}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{tmp_var}=%%{pool_var}:~%%a,{length + extra}%%"\n'
                     f's^et "{target_var}=!{tmp_var}:~0,{length}!"\n')
         else:
-            res = f's^et /a "{idx_var}={arith_idx}"\n{noise()}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a%%"\n'
-
-    if random.random() < 0.3:
-        res = f'i^f 0==0 (\n{res})\n'
-    return res
+            return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a%%"\n'
 
 def obfuscate_batch(input_file, output_file):
     try:
@@ -231,6 +220,7 @@ def obfuscate_batch(input_file, output_file):
     state_var        = "_"  + generate_random_name(10, used_vars)
     dispatcher_label = "L_" + generate_random_name(8,  used_vars)
     bridge_labels = ["B_" + generate_random_name(8, used_vars) for _ in range(7)]
+    setup_label   = "S_" + generate_random_name(8, used_vars)
     end_id    = random.randint(10000, 19999)
     block_ids = random.sample(range(1000, 9999), len(blocks))
 
@@ -296,7 +286,7 @@ def obfuscate_batch(input_file, output_file):
 
         next_id = block_ids[idx+1] if idx+1 < len(blocks) else end_id
         obf_block.append(f's^et /a "{state_var}={generate_arithmetic(next_id)}"\n')
-        obf_block.append(f"g^oto :{random.choice(bridge_labels)}\n")
+        obf_block.append(f"g^oto :{dispatcher_label}\n")
         flattened_blocks_data.append(obf_block)
 
     for _ in range(20):
@@ -313,25 +303,30 @@ def obfuscate_batch(input_file, output_file):
         "@e^cho o^ff\n",
         "s^etlocal e^nabledelayedexpansion\n",
         "c^hcp 6^5001 >n^ul\n",
+        f"g^oto :{setup_label}\n",
     ]
     for i, bl in enumerate(bridge_labels):
         target = bridge_labels[i+1] if i+1 < len(bridge_labels) else dispatcher_label
         final.append(f":{bl}\n")
+
+        # Opaque predicates and dead paths
         if random.random() < 0.4:
-            # Add a dead path
             dead_target = "B_" + generate_random_name(8, used_vars)
-            final.append(f'i^f 1==0 g^oto :{dead_target}\n')
+            opaque = random.choice([f"i^f !random! l^ss 0", f"i^f 1==0", f"i^f d^efined _NON_EXISTENT_VAR_"])
+            final.append(f'{opaque} g^oto :{dead_target}\n')
 
         if random.random() < 0.3:
             final.append(f'i^f 1==1 g^oto :{target}\n')
         else:
             final.append(f"g^oto :{target}\n")
+    final.append(f":{setup_label}\n")
     final.extend(pool_decoders)
     final.extend(mapping_code)
     final.extend(fragments)
     final.append(f's^et /a "{state_var}={generate_arithmetic(block_ids[0])}"\n')
+    final.append(f"g^oto :{bridge_labels[0]}\n")
     final.append(f":{dispatcher_label}\n")
-    final.append(f"g^oto :ID_%{state_var}%\n")
+    final.append(f'c^all g^oto :ID_%%{state_var}%%\n')
     final.append(f":ID_{end_id}\n")
     final.append("exit /b\n")
     for b in flattened_blocks_data:
