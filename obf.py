@@ -52,28 +52,32 @@ def generate_arithmetic(target):
 
 def generate_extraction(pool_var, index, target_var, used_vars, length=None):
     idx_var = "_" + generate_random_name(10, used_vars)
-    methods = [1, 2, 3, 4]
-    choice = random.choice(methods)
-
     arith_idx = generate_arithmetic(index)
     len_str = f",{length}" if length is not None else ""
 
+    methods = [1, 2, 3, 4]
+    choice = random.choice(methods)
+
     if choice == 1:
-        return f'set /a "{idx_var}={arith_idx}"\ncall set "{target_var}=%%{pool_var}:~!{idx_var}!{len_str}%%"\n'
+        # Standard bridge
+        return f'set /a "{idx_var}={arith_idx}"\nfor /f "delims=" %%a in ("!{idx_var}!") do set "{target_var}=!{pool_var}:~%%a{len_str}!"\n'
     elif choice == 2:
+        # Call bridge
         return f'set /a "{idx_var}={arith_idx}"\nfor /f "delims=" %%a in ("!{idx_var}!") do call set "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
     elif choice == 3:
+        # Operator bridge
         tilde_var = "_" + generate_random_name(8, used_vars)
-        return f'set "{tilde_var}=~"\nset /a "{idx_var}={arith_idx}"\ncall set "{target_var}=%%{pool_var}:!{tilde_var}!!{idx_var}!{len_str}%%"\n'
+        return f'set "{tilde_var}=~"\nset /a "{idx_var}={arith_idx}"\nfor /f "delims=" %%a in ("!{idx_var}!") do call set "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
     else:
+        # Offset/Extra bridge
+        extra = random.randint(1, 5)
+        tmp_var = "_" + generate_random_name(12, used_vars)
         if length is not None:
-            extra = random.randint(1, 5)
-            tmp_var = "_" + generate_random_name(12, used_vars)
             return (f'set /a "{idx_var}={arith_idx}"\n'
-                    f'call set "{tmp_var}=%%{pool_var}:~!{idx_var}!,{length + extra}%%"\n'
+                    f'for /f "delims=" %%a in ("!{idx_var}!") do set "{tmp_var}=!{pool_var}:~%%a,{length + extra}!"\n'
                     f'set "{target_var}=!{tmp_var}:~0,{length}!"\n')
         else:
-            return f'set /a "{idx_var}={arith_idx}"\ncall set "{target_var}=%%{pool_var}:~!{idx_var}!%%"\n'
+            return f'set /a "{idx_var}={arith_idx}"\nfor /f "delims=" %%a in ("!{idx_var}!") do set "{target_var}=!{pool_var}:~%%a!"\n'
 
 def obfuscate_batch(input_file, output_file):
     try:
@@ -174,8 +178,9 @@ def obfuscate_batch(input_file, output_file):
                     mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
                 else:
                     v_link = "_" + generate_random_name(10, used_vars)
-                    mapping_code.append(generate_extraction(target_pv, char_idx, v_link, used_vars, length=1))
-                    mapping_code.append(f'set "{var_name}=!{v_link}!"\n')
+                    combined = generate_extraction(target_pv, char_idx, v_link, used_vars, length=1)
+                    combined += f'set "{var_name}=!{v_link}!"\n'
+                    mapping_code.append(combined)
         char_map[char] = shadow_names
     random.shuffle(mapping_code)
 
