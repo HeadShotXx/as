@@ -16,39 +16,73 @@ def generate_random_name(length=5, used_names=None):
 
 def generate_unreadable_string(length=50):
     noise_chars = string.ascii_letters + string.digits + "@#$_+-=[]{}|;:,.<>?/`~"
-    safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'")]
+    safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'", '!', '=')]
     return "".join(random.choices(safe_noise, k=length))
 
 def generate_arithmetic(target):
     if random.random() < 0.05:
         return str(target)
-    ops = ['+', '-', '*']
+    ops = ['+', '-', '*', '^']
     parts = []
     current = target
-    num_parts = random.randint(2, 4)
+    num_parts = random.randint(4, 7)
     for i in range(num_parts - 1):
         op = random.choice(ops)
         if op == '+':
-            val = random.randint(1, 50)
+            val = random.randint(1, 100)
             parts.append((val, '+')); current -= val
         elif op == '-':
-            val = random.randint(1, 50)
+            val = random.randint(1, 100)
             parts.append((val, '-')); current += val
         elif op == '*':
-            val = random.randint(2, 6)
+            val = random.randint(2, 5)
             mod = current % val
             if mod != 0:
                 parts.append((mod, '+'))
             parts.append((val, '*')); current //= val
+        elif op == '^':
+            val = random.randint(1, 127)
+            parts.append((val, '^')); current ^= val
     expr = str(current)
     for val, op in reversed(parts):
-        if op == '+':   expr = f"({expr}+{val})"
-        elif op == '-': expr = f"({expr}-{val})"
-        elif op == '*': expr = f"({expr}*{val})"
-    if random.random() < 0.3:
-        n = random.randint(1, 30)
+        s = random.choice([" ", ""])
+        if op == '+':   expr = f"({expr}{s}+{s}{val})"
+        elif op == '-': expr = f"({expr}{s}-{s}{val})"
+        elif op == '*': expr = f"({expr}{s}*{s}{val})"
+        elif op == '^': expr = f"({expr}{s}^{s}{val})"
+    if random.random() < 0.2:
+        n = random.randint(1, 50)
         expr = f"({expr}+({n}-{n}))"
     return expr
+
+def generate_extraction(pool_var, index, target_var, used_vars, length=None):
+    idx_var = "_" + generate_random_name(10, used_vars)
+    arith_idx = generate_arithmetic(index)
+    len_str = f",{length}" if length is not None else ""
+
+    methods = [1, 2, 3]
+    choice = random.choice(methods)
+
+    def noise():
+        if random.random() < 0.3:
+            nv = "_" + generate_random_name(8, used_vars)
+            return f's^et "{nv}={generate_unreadable_string(10)}"\n'
+        return ""
+
+    if choice == 1:
+        return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
+    elif choice == 2:
+        tilde_var = "_" + generate_random_name(8, used_vars)
+        return f's^et "{tilde_var}=~"\n{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
+    else:
+        extra = random.randint(1, 5)
+        tmp_var = "_" + generate_random_name(12, used_vars)
+        if length is not None:
+            return (f's^et /a "{idx_var}={arith_idx}"\n'
+                    f'{noise()}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{tmp_var}=%%{pool_var}:~%%a,{length + extra}%%"\n'
+                    f's^et "{target_var}=!{tmp_var}:~0,{length}!"\n')
+        else:
+            return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a%%"\n'
 
 def obfuscate_batch(input_file, output_file):
     try:
@@ -74,7 +108,7 @@ def obfuscate_batch(input_file, output_file):
     pools      = []
     pool_vars  = []
     pool_decoders = []
-    num_pools = random.randint(3, 4)
+    num_pools = random.randint(5, 8)
 
     for _ in range(num_pools):
         p_list = list(mapping_pool_chars)
@@ -96,16 +130,21 @@ def obfuscate_batch(input_file, output_file):
             ops_chain.append(s)
 
         pool_len     = len(pool_str)
-        decoder_cmds = [f'set "{pv}={current_val}"']
+        # Initialize pool in chunks
+        chunk_size = random.randint(max(1, len(current_val)//4), max(2, len(current_val)//3))
+        chunks = [current_val[i:i+chunk_size] for i in range(0, len(current_val), chunk_size)]
+        decoder_cmds = [f's^et "{pv}={chunks[0]}"']
+        for chunk in chunks[1:]:
+            decoder_cmds.append(f's^et "{pv}=!{pv}!{chunk}"')
 
         for rot_amount in reversed(ops_chain):
             # Undo left-rotation by rot_amount -> rotate right by rot_amount
             split    = (pool_len - rot_amount) % pool_len
             v_suffix = "_" + generate_random_name(8, used_vars)
             v_prefix = "_" + generate_random_name(8, used_vars)
-            decoder_cmds.append(f'call set "{v_suffix}=%%{pv}:~{split}%%"')
-            decoder_cmds.append(f'call set "{v_prefix}=%%{pv}:~0,{split}%%"')
-            decoder_cmds.append(f'set "{pv}=!{v_suffix}!!{v_prefix}!"')
+            decoder_cmds.append(generate_extraction(pv, split, v_suffix, used_vars))
+            decoder_cmds.append(generate_extraction(pv, 0, v_prefix, used_vars, length=split))
+            decoder_cmds.append(f's^et "{pv}=!{v_suffix}!!{v_prefix}!"')
 
         pool_decoders.append("\n".join(decoder_cmds) + "\n")
 
@@ -119,7 +158,7 @@ def obfuscate_batch(input_file, output_file):
     mapping_code = []
     for char in mapping_pool_chars:
         shadow_names = []
-        for _ in range(random.randint(2, 3)):
+        for _ in range(random.randint(3, 5)):
             var_name = "_" + generate_random_name(random.randint(6, 12), used_vars)
             shadow_names.append(var_name)
             p_idx      = random.randint(0, len(pools) - 1)
@@ -136,18 +175,16 @@ def obfuscate_batch(input_file, output_file):
                             src = (envar, idx); break
                     if src:
                         mapping_code.append(
-                            f'call set "{var_name}=%{src[0]}:~{src[1]},1%"\n')
+                            f'c^all s^et "{var_name}=%{src[0]}:~{src[1]},1%"\n')
                     else:
-                        mapping_code.append(
-                            f'call set "{var_name}=%%{target_pv}:~{char_idx},1%%"\n')
+                        mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
                 elif method > 0.45:
-                    mapping_code.append(
-                        f'call set "{var_name}=%%{target_pv}:~{char_idx},1%%"\n')
+                    mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
                 else:
                     v_link = "_" + generate_random_name(10, used_vars)
-                    mapping_code.append(
-                        f'call set "{v_link}=%%{target_pv}:~{char_idx},1%%"\n'
-                        f'set "{var_name}=!{v_link}!"\n')
+                    combined = generate_extraction(target_pv, char_idx, v_link, used_vars, length=1)
+                    combined += f's^et "{var_name}=!{v_link}!"\n'
+                    mapping_code.append(combined)
         char_map[char] = shadow_names
     random.shuffle(mapping_code)
 
@@ -182,6 +219,8 @@ def obfuscate_batch(input_file, output_file):
 
     state_var        = "_"  + generate_random_name(10, used_vars)
     dispatcher_label = "L_" + generate_random_name(8,  used_vars)
+    bridge_labels = ["B_" + generate_random_name(8, used_vars) for _ in range(7)]
+    setup_label   = "S_" + generate_random_name(8, used_vars)
     end_id    = random.randint(10000, 19999)
     block_ids = random.sample(range(1000, 9999), len(blocks))
 
@@ -204,10 +243,12 @@ def obfuscate_batch(input_file, output_file):
 
                 if tl in all_keywords:
                     if tl in no_touch_kw:
-                        obf_line += token
+                        obf_line += "".join(
+                            "^" + c if random.random() < 0.25 else c
+                            for c in token)
                     else:
                         obf_line += "".join(
-                            "^" + c if random.random() < 0.2 else c
+                            "^" + c if random.random() < 0.55 else c
                             for c in token)
                 elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>]+$', token):
                     obf_line += token
@@ -229,7 +270,10 @@ def obfuscate_batch(input_file, output_file):
                                     elif c == '!':
                                         frag += "^!"
                                     else:
-                                        frag += c
+                                        if random.random() < 0.25:
+                                            frag += "^" + c
+                                        else:
+                                            frag += c
                                 if len(chunk) > 1 and random.random() < 0.3:
                                     fv = "____" + generate_random_name(15, used_vars)
                                     fragments.append(f'set "{fv}={frag}"\n')
@@ -241,31 +285,48 @@ def obfuscate_batch(input_file, output_file):
             obf_block.append(obf_line + "\n")
 
         next_id = block_ids[idx+1] if idx+1 < len(blocks) else end_id
-        obf_block.append(f'set /a "{state_var}={generate_arithmetic(next_id)}"\n')
-        obf_block.append(f"goto :{dispatcher_label}\n")
+        obf_block.append(f's^et /a "{state_var}={generate_arithmetic(next_id)}"\n')
+        obf_block.append(f"g^oto :{dispatcher_label}\n")
         flattened_blocks_data.append(obf_block)
 
-    for _ in range(2):
+    for _ in range(20):
         fid = random.randint(100, 999)
         flattened_blocks_data.append([
             f":ID_{fid}\n",
-            f'set "{generate_random_name(10)}={generate_unreadable_string(20)}"\n',
-            f'set /a "{state_var}={generate_arithmetic(random.choice(block_ids))}"\n',
-            f"goto :{dispatcher_label}\n",
+            f's^et "{generate_random_name(10, used_vars)}={generate_unreadable_string(20)}"\n',
+            f's^et /a "{state_var}={generate_arithmetic(random.choice(block_ids))}"\n',
+            f"g^oto :{dispatcher_label}\n",
         ])
     random.shuffle(flattened_blocks_data)
 
     final = [
-        "@echo off\n",
-        "setlocal enabledelayedexpansion\n",
-        "chcp 65001 >nul\n",
+        "@e^cho o^ff\n",
+        "s^etlocal e^nabledelayedexpansion\n",
+        "c^hcp 6^5001 >n^ul\n",
+        f"g^oto :{setup_label}\n",
     ]
+    for i, bl in enumerate(bridge_labels):
+        target = bridge_labels[i+1] if i+1 < len(bridge_labels) else dispatcher_label
+        final.append(f":{bl}\n")
+
+        # Opaque predicates and dead paths
+        if random.random() < 0.4:
+            dead_target = "B_" + generate_random_name(8, used_vars)
+            opaque = random.choice([f"i^f !random! l^ss 0", f"i^f 1==0", f"i^f d^efined _NON_EXISTENT_VAR_"])
+            final.append(f'{opaque} g^oto :{dead_target}\n')
+
+        if random.random() < 0.3:
+            final.append(f'i^f 1==1 g^oto :{target}\n')
+        else:
+            final.append(f"g^oto :{target}\n")
+    final.append(f":{setup_label}\n")
     final.extend(pool_decoders)
     final.extend(mapping_code)
     final.extend(fragments)
-    final.append(f'set /a "{state_var}={generate_arithmetic(block_ids[0])}"\n')
+    final.append(f's^et /a "{state_var}={generate_arithmetic(block_ids[0])}"\n')
+    final.append(f"g^oto :{bridge_labels[0]}\n")
     final.append(f":{dispatcher_label}\n")
-    final.append(f"goto :ID_%{state_var}%\n")
+    final.append(f'c^all g^oto :ID_%%{state_var}%%\n')
     final.append(f":ID_{end_id}\n")
     final.append("exit /b\n")
     for b in flattened_blocks_data:
