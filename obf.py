@@ -19,37 +19,95 @@ def generate_unreadable_string(length=50):
     safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'", '!', '=')]
     return "".join(random.choices(safe_noise, k=length))
 
+def tokenize_line(line):
+    tokens = []
+    current = ""
+    in_quotes = False
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if char == '^' and not in_quotes:
+            # Batch escape character outside quotes
+            current += char
+            if i + 1 < len(line):
+                current += line[i+1]
+                i += 1
+        elif char == '"':
+            current += char
+            if in_quotes:
+                tokens.append(current)
+                current = ""
+                in_quotes = False
+            else:
+                in_quotes = True
+        elif in_quotes:
+            current += char
+        else:
+            if char in '()&|<> \t':
+                if current:
+                    tokens.append(current)
+                    current = ""
+                # Group whitespace
+                if char in ' \t':
+                    start = i
+                    while i + 1 < len(line) and line[i+1] in ' \t':
+                        i += 1
+                    tokens.append(line[start:i+1])
+                else:
+                    tokens.append(char)
+            else:
+                current += char
+        i += 1
+    if current:
+        tokens.append(current)
+    return tokens
+
 def generate_arithmetic(target):
+    # Batch supports 32-bit signed integers: -2,147,483,648 to 2,147,483,647
+    MIN_INT, MAX_INT = -2147483648, 2147483647
+
+    def safe_step(val, res):
+        return MIN_INT <= res <= MAX_INT
+
     if random.random() < 0.05:
         return str(target)
+
     ops = ['+', '-', '*', '^']
     parts = []
     current = target
-    num_parts = random.randint(4, 7)
-    for i in range(num_parts - 1):
+    for _ in range(random.randint(3, 6)):
         op = random.choice(ops)
         if op == '+':
             val = random.randint(1, 100)
-            parts.append((val, '+')); current -= val
+            if safe_step(val, current - val):
+                parts.append((val, '+')); current -= val
         elif op == '-':
             val = random.randint(1, 100)
-            parts.append((val, '-')); current += val
+            if safe_step(val, current + val):
+                parts.append((val, '-')); current += val
         elif op == '*':
             val = random.randint(2, 5)
             mod = current % val
-            if mod != 0:
-                parts.append((mod, '+'))
-            parts.append((val, '*')); current //= val
+            if mod != 0 and safe_step(mod, current - mod):
+                parts.append((mod, '+')); current -= mod
+            if safe_step(val, current // val):
+                parts.append((val, '*')); current //= val
         elif op == '^':
             val = random.randint(1, 127)
-            parts.append((val, '^')); current ^= val
-    expr = str(current)
+            if safe_step(val, current ^ val):
+                parts.append((val, '^')); current ^= val
+
+    expr, sim_val = str(current), current
     for val, op in reversed(parts):
         s = random.choice([" ", ""])
-        if op == '+':   expr = f"({expr}{s}+{s}{val})"
-        elif op == '-': expr = f"({expr}{s}-{s}{val})"
-        elif op == '*': expr = f"({expr}{s}*{s}{val})"
-        elif op == '^': expr = f"({expr}{s}^{s}{val})"
+        if op == '+':   sim_val += val; expr = f"({expr}{s}+{s}{val})"
+        elif op == '-': sim_val -= val; expr = f"({expr}{s}-{s}{val})"
+        elif op == '*': sim_val *= val; expr = f"({expr}{s}*{s}{val})"
+        elif op == '^': sim_val ^= val; expr = f"({expr}{s}^{s}{val})"
+
+        if not (MIN_INT <= sim_val <= MAX_INT):
+            return str(target)
+
     if random.random() < 0.2:
         n = random.randint(1, 50)
         expr = f"({expr}+({n}-{n}))"
@@ -103,7 +161,6 @@ def obfuscate_batch(input_file, output_file):
     mapping_pool_chars = sorted(list(
         (unique_file_chars | base_chars) - forbidden
     ))
-    mapping_pool_chars = [c for c in mapping_pool_chars if ord(c) < 128]
 
     pools      = []
     pool_vars  = []
@@ -200,7 +257,15 @@ def obfuscate_batch(input_file, output_file):
         stripped = line.lstrip()
         if not stripped: continue
         if stripped.lower().startswith("@echo off"): continue
-        nest_level += line.count('(') - line.count(')')
+
+        # Quote-aware nest level calculation
+        line_tokens = tokenize_line(line)
+        for t in line_tokens:
+            if t == '(':
+                nest_level += 1
+            elif t == ')':
+                nest_level -= 1
+
         if nest_level <= 0 and (
             (stripped.startswith(":") and not stripped.startswith("::")) or
             (random.random() < 0.25 and not stripped.lower().startswith("set "))
@@ -234,8 +299,13 @@ def obfuscate_batch(input_file, output_file):
             if stripped.startswith(":") and not stripped.startswith("::"):
                 obf_block.append(line + "\n"); continue
 
-            tokens   = re.split(r'(\s+|[()&|<>])', line)
+            tokens   = tokenize_line(line)
             obf_line = ""
+
+            is_set_command = False
+            first_non_space = next((t for t in tokens if t.strip()), None)
+            if first_non_space and first_non_space.lower() == "set":
+                is_set_command = True
 
             for token in tokens:
                 if not token: continue
@@ -244,13 +314,18 @@ def obfuscate_batch(input_file, output_file):
                 if tl in all_keywords:
                     if tl in no_touch_kw:
                         obf_line += "".join(
-                            "^" + c if random.random() < 0.25 else c
+                            "^" + c if (random.random() < 0.25 and c not in ('%', '"', '=', '!')) else c
                             for c in token)
                     else:
                         obf_line += "".join(
-                            "^" + c if random.random() < 0.55 else c
+                            "^" + c if (random.random() < 0.55 and c not in ('%', '"', '=', '!')) else c
                             for c in token)
                 elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>]+$', token):
+                    if is_set_command and token == '=':
+                        obf_line += token
+                    else:
+                        obf_line += token
+                elif token.startswith('"') and token.endswith('"'):
                     obf_line += token
                 else:
                     parts = re.split(var_pattern, token, flags=re.IGNORECASE)
@@ -269,6 +344,8 @@ def obfuscate_batch(input_file, output_file):
                                         frag += f"!{random.choice(char_map[c])}!"
                                     elif c == '!':
                                         frag += "^!"
+                                    elif c in ('%', '"', '='):
+                                        frag += c
                                     else:
                                         if random.random() < 0.25:
                                             frag += "^" + c
