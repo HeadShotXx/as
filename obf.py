@@ -50,6 +50,31 @@ def generate_arithmetic(target):
         expr = f"({expr}+({n}-{n}))"
     return expr
 
+def generate_extraction(pool_var, index, target_var, used_vars, length=None):
+    idx_var = "_" + generate_random_name(10, used_vars)
+    methods = [1, 2, 3, 4]
+    choice = random.choice(methods)
+
+    arith_idx = generate_arithmetic(index)
+    len_str = f",{length}" if length is not None else ""
+
+    if choice == 1:
+        return f'set /a "{idx_var}={arith_idx}"\ncall set "{target_var}=%%{pool_var}:~!{idx_var}!{len_str}%%"\n'
+    elif choice == 2:
+        return f'set /a "{idx_var}={arith_idx}"\nfor /f "delims=" %%a in ("!{idx_var}!") do call set "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
+    elif choice == 3:
+        tilde_var = "_" + generate_random_name(8, used_vars)
+        return f'set "{tilde_var}=~"\nset /a "{idx_var}={arith_idx}"\ncall set "{target_var}=%%{pool_var}:!{tilde_var}!!{idx_var}!{len_str}%%"\n'
+    else:
+        if length is not None:
+            extra = random.randint(1, 5)
+            tmp_var = "_" + generate_random_name(12, used_vars)
+            return (f'set /a "{idx_var}={arith_idx}"\n'
+                    f'call set "{tmp_var}=%%{pool_var}:~!{idx_var}!,{length + extra}%%"\n'
+                    f'set "{target_var}=!{tmp_var}:~0,{length}!"\n')
+        else:
+            return f'set /a "{idx_var}={arith_idx}"\ncall set "{target_var}=%%{pool_var}:~!{idx_var}!%%"\n'
+
 def obfuscate_batch(input_file, output_file):
     try:
         with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -96,15 +121,21 @@ def obfuscate_batch(input_file, output_file):
             ops_chain.append(s)
 
         pool_len     = len(pool_str)
-        decoder_cmds = [f'set "{pv}={current_val}"']
+
+        # Initialize pool in chunks
+        chunk_size = random.randint(len(current_val)//4, len(current_val)//3)
+        chunks = [current_val[i:i+chunk_size] for i in range(0, len(current_val), chunk_size)]
+        decoder_cmds = [f'set "{pv}={chunks[0]}"']
+        for chunk in chunks[1:]:
+            decoder_cmds.append(f'set "{pv}=!{pv}!{chunk}"')
 
         for rot_amount in reversed(ops_chain):
             # Undo left-rotation by rot_amount -> rotate right by rot_amount
             split    = (pool_len - rot_amount) % pool_len
             v_suffix = "_" + generate_random_name(8, used_vars)
             v_prefix = "_" + generate_random_name(8, used_vars)
-            decoder_cmds.append(f'call set "{v_suffix}=%%{pv}:~{split}%%"')
-            decoder_cmds.append(f'call set "{v_prefix}=%%{pv}:~0,{split}%%"')
+            decoder_cmds.append(generate_extraction(pv, split, v_suffix, used_vars))
+            decoder_cmds.append(generate_extraction(pv, 0, v_prefix, used_vars, length=split))
             decoder_cmds.append(f'set "{pv}=!{v_suffix}!!{v_prefix}!"')
 
         pool_decoders.append("\n".join(decoder_cmds) + "\n")
@@ -138,16 +169,13 @@ def obfuscate_batch(input_file, output_file):
                         mapping_code.append(
                             f'call set "{var_name}=%{src[0]}:~{src[1]},1%"\n')
                     else:
-                        mapping_code.append(
-                            f'call set "{var_name}=%%{target_pv}:~{char_idx},1%%"\n')
+                        mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
                 elif method > 0.45:
-                    mapping_code.append(
-                        f'call set "{var_name}=%%{target_pv}:~{char_idx},1%%"\n')
+                    mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
                 else:
                     v_link = "_" + generate_random_name(10, used_vars)
-                    mapping_code.append(
-                        f'call set "{v_link}=%%{target_pv}:~{char_idx},1%%"\n'
-                        f'set "{var_name}=!{v_link}!"\n')
+                    mapping_code.append(generate_extraction(target_pv, char_idx, v_link, used_vars, length=1))
+                    mapping_code.append(f'set "{var_name}=!{v_link}!"\n')
         char_map[char] = shadow_names
     random.shuffle(mapping_code)
 
