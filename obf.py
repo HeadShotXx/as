@@ -3,6 +3,7 @@ import random
 import string
 import os
 import re
+import copy
 
 def generate_random_name(length=5, used_names=None):
     if used_names is None:
@@ -55,34 +56,102 @@ def generate_arithmetic(target):
         expr = f"({expr}+({n}-{n}))"
     return expr
 
-def generate_extraction(pool_var, index, target_var, used_vars, length=None):
+def to_int32(n):
+    n = n & 0xFFFFFFFF
+    if n > 0x7FFFFFFF:
+        n -= 0x100000000
+    return n
+
+class RollingState:
+    def __init__(self, used_vars):
+        self.rs_var = "_" + generate_random_name(10, used_vars)
+        self.aux_var = "_" + generate_random_name(10, used_vars)
+        self.cnt_var = "_" + generate_random_name(10, used_vars)
+        self.rs_val = random.randint(100, 10000)
+        self.aux_val = random.randint(100, 10000)
+        self.cnt_val = 0
+    def rehash(self):
+        self.rs_val = random.randint(100, 10000)
+        self.aux_val = random.randint(100, 10000)
+        self.cnt_val = random.randint(0, 100)
+        return f's^et /a "{self.rs_var}={self.rs_val}", "{self.aux_var}={self.aux_val}", "{self.cnt_var}={self.cnt_val}"\n'
+
+def generate_advanced_junk(state, data_hint=None, index_hint=None, commutative=False):
+    if state is None: return ""
+    cmds = []
+    num_instr = random.randint(3, 5)
+    for _ in range(num_instr):
+        choice = random.randint(0, 3)
+        if commutative:
+            # Fixed: Only use XOR and only RS to ensure true commutativity in shuffled sections
+            op = '^'
+            val = random.randint(1, 255)
+            if data_hint is not None: val ^= (data_hint % 256)
+            if index_hint is not None: val ^= (index_hint % 256)
+
+            cmds.append(f's^et /a "{state.rs_var}{op}={val}"\n')
+            state.rs_val = to_int32(state.rs_val ^ val)
+        else:
+            if choice == 0: # Cross dependent
+                val = random.randint(1, 100)
+                cmds.append(f's^et /a "{state.rs_var}^=(!{state.aux_var}! + {val})"\n')
+                state.rs_val = to_int32(state.rs_val ^ (state.aux_val + val))
+            elif choice == 1: # Data dependent branch
+                if state.rs_val > state.aux_val:
+                    cmds.append(f'i^f !{state.rs_var}! G^TR !{state.aux_var}! ( s^et /a "{state.rs_var}+=1" ) e^lse ( s^et /a "{state.rs_var}-=1" )\n')
+                    state.rs_val = to_int32(state.rs_val + 1)
+                else:
+                    cmds.append(f'i^f !{state.rs_var}! G^TR !{state.aux_var}! ( s^et /a "{state.rs_var}+=1" ) e^lse ( s^et /a "{state.rs_var}-=1" )\n')
+                    state.rs_val = to_int32(state.rs_val - 1)
+            elif choice == 2: # Delayed effect
+                old_rs = state.rs_val
+                cmds.append(f's^et /a "{state.cnt_var}+=1", "{state.aux_var}^=!{state.rs_var}!"\n')
+                state.cnt_val = to_int32(state.cnt_val + 1)
+                state.aux_val = to_int32(state.aux_val ^ old_rs)
+            else: # Triple domain dependency
+                hint = (data_hint if data_hint else 0) ^ (index_hint if index_hint else 0)
+                hint = hint % 1000
+                cmds.append(f's^et /a "{state.rs_var}=(!{state.rs_var}! ^ !{state.cnt_var}!) + {hint}"\n')
+                state.rs_val = to_int32((state.rs_val ^ state.cnt_val) + hint)
+    return "".join(cmds)
+
+def generate_extraction(pool_var, index, target_var, used_vars, length=None, state_obj=None, commutative=False):
     idx_var = "_" + generate_random_name(10, used_vars)
-    arith_idx = generate_arithmetic(index)
+
+    if state_obj and not commutative:
+        arith_idx = generate_arithmetic(to_int32(index ^ state_obj.rs_val))
+        set_idx_cmd = f's^et /a "{idx_var}=({arith_idx}) ^ !{state_obj.rs_var}!"\n'
+    else:
+        arith_idx = generate_arithmetic(index)
+        set_idx_cmd = f's^et /a "{idx_var}={arith_idx}"\n'
+
     len_str = f",{length}" if length is not None else ""
 
     methods = [1, 2, 3]
     choice = random.choice(methods)
 
     def noise():
+        if state_obj:
+            return generate_advanced_junk(state_obj, index_hint=index, commutative=commutative)
         if random.random() < 0.3:
             nv = "_" + generate_random_name(8, used_vars)
             return f's^et "{nv}={generate_unreadable_string(10)}"\n'
         return ""
 
     if choice == 1:
-        return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
+        return f'{noise()}{set_idx_cmd}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a{len_str}%%"\n'
     elif choice == 2:
         tilde_var = "_" + generate_random_name(8, used_vars)
-        return f's^et "{tilde_var}=~"\n{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
+        return f's^et "{tilde_var}=~"\n{noise()}{set_idx_cmd}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
     else:
         extra = random.randint(1, 5)
         tmp_var = "_" + generate_random_name(12, used_vars)
         if length is not None:
-            return (f's^et /a "{idx_var}={arith_idx}"\n'
+            return (f'{set_idx_cmd}'
                     f'{noise()}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{tmp_var}=%%{pool_var}:~%%a,{length + extra}%%"\n'
                     f's^et "{target_var}=!{tmp_var}:~0,{length}!"\n')
         else:
-            return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a%%"\n'
+            return f'{noise()}{set_idx_cmd}f^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a%%"\n'
 
 def obfuscate_batch(input_file, output_file):
     try:
@@ -93,6 +162,11 @@ def obfuscate_batch(input_file, output_file):
         return
 
     used_vars = set()
+    state_obj = RollingState(used_vars)
+    # Corrected: Store initial state for the Batch header
+    initial_rs = state_obj.rs_val
+    initial_aux = state_obj.aux_val
+    initial_cnt = state_obj.cnt_val
 
     unique_file_chars = set()
     for line in lines:
@@ -142,8 +216,8 @@ def obfuscate_batch(input_file, output_file):
             split    = (pool_len - rot_amount) % pool_len
             v_suffix = "_" + generate_random_name(8, used_vars)
             v_prefix = "_" + generate_random_name(8, used_vars)
-            decoder_cmds.append(generate_extraction(pv, split, v_suffix, used_vars))
-            decoder_cmds.append(generate_extraction(pv, 0, v_prefix, used_vars, length=split))
+            decoder_cmds.append(generate_extraction(pv, split, v_suffix, used_vars, state_obj=state_obj))
+            decoder_cmds.append(generate_extraction(pv, 0, v_prefix, used_vars, length=split, state_obj=state_obj))
             decoder_cmds.append(f's^et "{pv}=!{v_suffix}!!{v_prefix}!"')
 
         pool_decoders.append("\n".join(decoder_cmds) + "\n")
@@ -177,12 +251,15 @@ def obfuscate_batch(input_file, output_file):
                         mapping_code.append(
                             f'c^all s^et "{var_name}=%{src[0]}:~{src[1]},1%"\n')
                     else:
-                        mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
+                        mapping_code.append(generate_advanced_junk(state_obj, data_hint=ord(char), commutative=True))
+                        mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1, state_obj=state_obj, commutative=True))
                 elif method > 0.45:
-                    mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
+                    mapping_code.append(generate_advanced_junk(state_obj, data_hint=ord(char), commutative=True))
+                    mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1, state_obj=state_obj, commutative=True))
                 else:
+                    mapping_code.append(generate_advanced_junk(state_obj, data_hint=ord(char), commutative=True))
                     v_link = "_" + generate_random_name(10, used_vars)
-                    combined = generate_extraction(target_pv, char_idx, v_link, used_vars, length=1)
+                    combined = generate_extraction(target_pv, char_idx, v_link, used_vars, length=1, state_obj=state_obj, commutative=True)
                     combined += f's^et "{var_name}=!{v_link}!"\n'
                     mapping_code.append(combined)
         char_map[char] = shadow_names
@@ -225,9 +302,11 @@ def obfuscate_batch(input_file, output_file):
     block_ids = random.sample(range(1000, 9999), len(blocks))
 
     flattened_blocks_data = []
+    state_at_flow_start = copy.copy(state_obj)
     for idx, block in enumerate(blocks):
         b_id      = block_ids[idx]
         obf_block = [f":ID_{b_id}\n"]
+        obf_block.append(state_obj.rehash()) # Entry sync to fix control flow drift
 
         for line in block:
             stripped = line.lstrip()
@@ -276,7 +355,9 @@ def obfuscate_batch(input_file, output_file):
                                             frag += c
                                 if len(chunk) > 1 and random.random() < 0.3:
                                     fv = "____" + generate_random_name(15, used_vars)
-                                    fragments.append(f'set "{fv}={frag}"\n')
+                                    # Fixed: Inject fragments into the block to avoid state drift
+                                    junk = generate_advanced_junk(state_obj)
+                                    obf_block.append(f'{junk}set "{fv}={frag}"\n')
                                     obf_line += f"!{fv}!"
                                 else:
                                     obf_line += frag
@@ -285,23 +366,30 @@ def obfuscate_batch(input_file, output_file):
             obf_block.append(obf_line + "\n")
 
         next_id = block_ids[idx+1] if idx+1 < len(blocks) else end_id
-        obf_block.append(f's^et /a "{state_var}={generate_arithmetic(next_id)}"\n')
+        obf_block.append(generate_advanced_junk(state_obj))
+        arith_next = generate_arithmetic(to_int32(next_id ^ state_obj.rs_val))
+        obf_block.append(f's^et /a "{state_var}=({arith_next}) ^ !{state_obj.rs_var}!"\n')
         obf_block.append(f"g^oto :{dispatcher_label}\n")
         flattened_blocks_data.append(obf_block)
 
     for _ in range(20):
         fid = random.randint(100, 999)
-        flattened_blocks_data.append([
-            f":ID_{fid}\n",
-            f's^et "{generate_random_name(10, used_vars)}={generate_unreadable_string(20)}"\n',
-            f's^et /a "{state_var}={generate_arithmetic(random.choice(block_ids))}"\n',
-            f"g^oto :{dispatcher_label}\n",
-        ])
+        obf_fake = [f":ID_{fid}\n"]
+        obf_fake.append(state_obj.rehash()) # Entry sync
+        obf_fake.append(generate_advanced_junk(state_obj))
+        obf_fake.append(f's^et "{generate_random_name(10, used_vars)}={generate_unreadable_string(20)}"\n')
+        target_id = random.choice(block_ids)
+        arith_target = generate_arithmetic(to_int32(target_id ^ state_obj.rs_val))
+        obf_fake.append(f's^et /a "{state_var}=({arith_target}) ^ !{state_obj.rs_var}!"\n')
+        obf_fake.append(f"g^oto :{dispatcher_label}\n")
+        flattened_blocks_data.append(obf_fake)
     random.shuffle(flattened_blocks_data)
 
     final = [
         "@e^cho o^ff\n",
         "s^etlocal e^nabledelayedexpansion\n",
+        # Fixed: Initialize with start values, not final values
+        f's^et /a "{state_obj.rs_var}={initial_rs}", "{state_obj.aux_var}={initial_aux}", "{state_obj.cnt_var}={initial_cnt}"\n',
         "c^hcp 6^5001 >n^ul\n",
         f"g^oto :{setup_label}\n",
     ]
@@ -322,8 +410,10 @@ def obfuscate_batch(input_file, output_file):
     final.append(f":{setup_label}\n")
     final.extend(pool_decoders)
     final.extend(mapping_code)
-    final.extend(fragments)
-    final.append(f's^et /a "{state_var}={generate_arithmetic(block_ids[0])}"\n')
+    # final.extend(fragments) # Fragments now injected directly into blocks
+    final.append(generate_advanced_junk(state_at_flow_start))
+    arith_start = generate_arithmetic(to_int32(block_ids[0] ^ state_at_flow_start.rs_val))
+    final.append(f's^et /a "{state_var}=({arith_start}) ^ !{state_at_flow_start.rs_var}!"\n')
     final.append(f"g^oto :{bridge_labels[0]}\n")
     final.append(f":{dispatcher_label}\n")
     final.append(f'c^all g^oto :ID_%%{state_var}%%\n')
