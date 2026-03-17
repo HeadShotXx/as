@@ -93,11 +93,24 @@ def tokenize_line(line):
                     i += 1
             tokens.append(line[start:i])
         elif line[i] == '^' and i + 1 < n:
-            tokens.append(line[i:i+2])
-            i += 2
+            if line[i+1] == '^' and i + 2 < n and line[i+2] == '!':
+                tokens.append('^^!')
+                i += 3
+            else:
+                tokens.append(line[i:i+2])
+                i += 2
         elif i + 1 < n and line[i:i+2] in ('==', '&&', '||', '<<', '>>', '+=', '-=', '*=', '/=', '%=', '&=', '^=', '|='):
             tokens.append(line[i:i+2])
             i += 2
+        elif line[i] in '%!':
+            start = i
+            marker = line[i]
+            i += 1
+            while i < n and (line[i].isalnum() or line[i] in '_#$@*-'):
+                i += 1
+            if i < n and line[i] == marker:
+                i += 1
+            tokens.append(line[start:i])
         elif line[i] in '()&|<>:=,; ':
             if line[i].isspace():
                 start = i
@@ -218,7 +231,7 @@ def obfuscate_batch(input_file, output_file):
     for char in mapping_pool_chars:
         shadow_names = []
         for _ in range(random.randint(3, 5)):
-            var_name = "_" + generate_random_name(random.randint(6, 12), used_vars)
+            var_name = "_" + generate_random_name(random.randint(3, 6), used_vars)
             shadow_names.append(var_name)
             p_idx      = random.randint(0, len(pools) - 1)
             target_pv  = pool_vars[p_idx]
@@ -303,20 +316,21 @@ def obfuscate_batch(input_file, output_file):
                 if not token: continue
                 tl = token.lower()
 
+                # CMD line length limit is 8191. We stay safe under 8000.
+                is_long = len(obf_line) > 2000 # Start tapering early
+
                 if token.startswith('"') and token.endswith('"') and len(token) >= 2:
                     obf_line += token
                 elif token.startswith('^') and len(token) >= 2:
                     obf_line += token
                 elif tl in all_keywords:
-                    if tl in no_touch_kw:
-                        obf_line += "".join(
-                            "^" + c if random.random() < 0.25 and c not in ('"', '!', '=', '%', '^') else c
-                            for c in token)
-                    else:
-                        obf_line += "".join(
-                            "^" + c if random.random() < 0.55 and c not in ('"', '!', '=', '%', '^') else c
-                            for c in token)
+                    prob = 0.0 if is_long else (0.25 if tl in no_touch_kw else 0.55)
+                    obf_line += "".join(
+                        "^" + c if random.random() < prob and c not in ('"', '!', '=', '%', '^') else c
+                        for c in token)
                 elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>:=,;]+$', token):
+                    obf_line += token
+                elif token.startswith('%') or token.startswith('!'):
                     obf_line += token
                 else:
                     parts = re.split(var_pattern, token, flags=re.IGNORECASE)
@@ -336,12 +350,14 @@ def obfuscate_batch(input_file, output_file):
                                     elif c == '!':
                                         frag += "^^!"
                                     else:
-                                        if random.random() < 0.25 and c not in ('"', '!', '=', '%', '^'):
+                                        prob_c = 0.0 if is_long else 0.25
+                                        if random.random() < prob_c and c not in ('"', '!', '=', '%', '^'):
                                             frag += "^" + c
                                         else:
                                             frag += c
-                                if len(chunk) > 1 and random.random() < 0.3:
-                                    fv = "____" + generate_random_name(15, used_vars)
+                                prob_f = 0.0 if is_long else 0.3
+                                if len(chunk) > 1 and random.random() < prob_f:
+                                    fv = "____" + generate_random_name(8, used_vars)
                                     fragments.append(f'set "{fv}={frag}"\n')
                                     obf_line += f"!{fv}!"
                                 else:

@@ -23,6 +23,10 @@ def check_file(filepath):
             print(f"Line {idx}: Unsafe caret before '{match.group(1)}': {line.strip()}")
             errors += 1
 
+        if len(line) > 8191:
+            print(f"Line {idx}: CRITICAL - Line length {len(line)} exceeds CMD limit (8191)")
+            errors += 1
+
     # 3. Check for label existence (Dispatcher jump target)
     labels = [line.strip() for line in lines if line.strip().startswith(':ID_')]
     if not labels:
