@@ -103,14 +103,16 @@ def tokenize_line(line):
             tokens.append(line[i:i+2])
             i += 2
         elif line[i] in '%!':
-            start = i
-            marker = line[i]
-            i += 1
-            while i < n and (line[i].isalnum() or line[i] in '_#$@*-'):
+            # Use regex for robust variable matching
+            var_pattern = r'(%%~[a-zA-Z]+|%%[a-zA-Z]|%~[a-zA-Z0-9]*[0-9*]|%[0-9*]|%[a-zA-Z0-9_#$@*-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%|![a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^!]*))?!)'
+            match = re.match(var_pattern, line[i:])
+            if match:
+                var_token = match.group(0)
+                tokens.append(var_token)
+                i += len(var_token)
+            else:
+                tokens.append(line[i])
                 i += 1
-            if i < n and line[i] == marker:
-                i += 1
-            tokens.append(line[start:i])
         elif line[i] in '()&|<>:=,; ':
             if line[i].isspace():
                 start = i
@@ -261,14 +263,14 @@ def obfuscate_batch(input_file, output_file):
     random.shuffle(mapping_code)
 
     # Block splitter
-    no_touch_kw  = {"if","for","do","in","exist","defined","not","errorlevel"}
-    caret_ok_kw  = {"echo","pause","exit","title","chcp","set","call","goto","rem"}
+    no_touch_kw  = {"if","for","do","in","exist","defined","not","errorlevel","else"}
+    caret_ok_kw  = {"echo","pause","exit","title","chcp","set","call","goto","rem","mkdir","copy","del","msbuild.exe","wscript.exe"}
     all_keywords = no_touch_kw | caret_ok_kw
 
     blocks = []
     current_block = []
     nest_level = 0
-    for line in lines:
+    for idx, line in enumerate(lines):
         stripped = line.lstrip()
         if not stripped: continue
         if stripped.lower().startswith("@echo off"): continue
@@ -276,9 +278,14 @@ def obfuscate_batch(input_file, output_file):
         for t in line_tokens:
             if t == '(': nest_level += 1
             elif t == ')': nest_level -= 1
+
+        next_line_stripped = ""
+        if idx + 1 < len(lines):
+            next_line_stripped = lines[idx + 1].lstrip().lower()
+
         if nest_level <= 0 and (
             (stripped.startswith(":") and not stripped.startswith("::")) or
-            (random.random() < 0.25 and not stripped.lower().startswith("set "))
+            (random.random() < 0.25 and not stripped.lower().startswith("set ") and not next_line_stripped.startswith("else"))
         ):
             if current_block: blocks.append(current_block)
             current_block = []
@@ -287,8 +294,7 @@ def obfuscate_batch(input_file, output_file):
 
     fragments  = []
     var_pattern = (
-        r'(%[a-zA-Z0-9_#$@*-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%'
-        r'|%~[a-zA-Z]*[0-9*]|%[0-9*]|%%[a-zA-Z]'
+        r'(%%~[a-zA-Z]+|%%[a-zA-Z]|%~[a-zA-Z0-9]*[0-9*]|%[0-9*]|%[a-zA-Z0-9_#$@*-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%'
         r'|![a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^!]*))?!)'
     )
 
@@ -331,6 +337,9 @@ def obfuscate_batch(input_file, output_file):
                 elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>:=,;]+$', token):
                     obf_line += token
                 elif token.startswith('%') or token.startswith('!'):
+                    obf_line += token
+                elif any(c in token for c in '/\\<>|'):
+                    # Preserving paths and redirection operators as literals
                     obf_line += token
                 else:
                     parts = re.split(var_pattern, token, flags=re.IGNORECASE)
