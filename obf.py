@@ -83,14 +83,9 @@ def tokenize_line(line):
         if line[i] == '"':
             start = i
             i += 1
-            while i < n:
-                if line[i] == '"':
-                    i += 1
-                    break
-                if line[i] == '^' and i + 1 < n:
-                    i += 2
-                else:
-                    i += 1
+            while i < n and line[i] != '"':
+                i += 1
+            if i < n: i += 1
             tokens.append(line[start:i])
         elif line[i] == '^' and i + 1 < n:
             if line[i+1] == '^' and i + 2 < n and line[i+2] == '!':
@@ -99,13 +94,22 @@ def tokenize_line(line):
             else:
                 tokens.append(line[i:i+2])
                 i += 2
-        elif i + 1 < n and line[i:i+2] in ('==', '&&', '||', '<<', '>>', '+=', '-=', '*=', '/=', '%=', '&=', '^=', '|='):
+        elif line[i] == '^': # Trailing caret
+            tokens.append('^')
+            i += 1
+        elif i + 2 < n and line[i].isdigit() and line[i+1:i+3] == '>>':
+            tokens.append(line[i:i+3])
+            i += 3
+        elif i + 1 < n and line[i].isdigit() and line[i+1] == '>':
             tokens.append(line[i:i+2])
             i += 2
-        elif line[i] in '%!':
-            # Use regex for robust variable matching
-            var_pattern = r'(%%~[a-zA-Z]+|%%[a-zA-Z]|%~[a-zA-Z0-9]*[0-9*]|%[0-9*]|%[a-zA-Z0-9_#$@*-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%|![a-zA-Z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^!]*))?!)'
-            match = re.match(var_pattern, line[i:])
+        elif i + 1 < n and line[i:i+2] in ('&>', '>>', '<<', '&&', '||', '==', '+=', '-=', '*=', '/=', '%=', '&=', '^=', '|='):
+            tokens.append(line[i:i+2])
+            i += 2
+        elif line[i] in '%!$':
+            # Use regex for robust variable matching (Batch variables and MSBuild properties)
+            var_pattern = r'(%%~[a-z]+|%%[a-z]|%~[a-z0-9]*[0-9*]|%[0-9*]|%[a-z0-9_#$@*-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^%]*))?%|![a-z0-9_#$@-]+(?::(?:~[0-9-]+,[0-9-]+|[^=]+=[^!]*))?!|\$\([a-z0-9_#$@.-]+\))'
+            match = re.match(var_pattern, line[i:], re.IGNORECASE)
             if match:
                 var_token = match.group(0)
                 tokens.append(var_token)
@@ -113,6 +117,12 @@ def tokenize_line(line):
             else:
                 tokens.append(line[i])
                 i += 1
+        elif line[i] == ':':
+            start = i
+            i += 1
+            while i < n and (line[i].isalnum() or line[i] in '_#$@*-'):
+                i += 1
+            tokens.append(line[start:i])
         elif line[i] in '()&|<>:=,; ':
             if line[i].isspace():
                 start = i
@@ -124,9 +134,13 @@ def tokenize_line(line):
                 i += 1
         else:
             start = i
-            while i < n and not line[i].isspace() and line[i] not in '"^()&|<>:=,;':
+            while i < n and not line[i].isspace() and line[i] not in '"^()&|<>:=,;%!$':
                 i += 1
-            tokens.append(line[start:i])
+            if start == i: # Safety advance
+                tokens.append(line[i])
+                i += 1
+            else:
+                tokens.append(line[start:i])
     return tokens
 
 def generate_extraction(pool_var, index, target_var, used_vars, length=None):
@@ -169,8 +183,15 @@ def obfuscate_batch(input_file, output_file):
     used_vars = set()
 
     unique_file_chars = set()
+    label_map = {}
     for line in lines:
         unique_file_chars.update(line)
+        stripped = line.lstrip()
+        if stripped.startswith(":") and not stripped.startswith("::"):
+            orig_label = stripped[1:].split()[0]
+            if orig_label.lower() not in ["eof"]:
+                if orig_label not in label_map:
+                    label_map[orig_label] = "V_" + generate_random_name(8, used_vars)
 
     forbidden = set('\n\r%"!&|<>^(),;= \t#@$~[]')
     base_chars = set(string.ascii_letters + string.digits + ".\\/:-_")
@@ -263,8 +284,8 @@ def obfuscate_batch(input_file, output_file):
     random.shuffle(mapping_code)
 
     # Block splitter
-    no_touch_kw  = {"if","for","do","in","exist","defined","not","errorlevel","else"}
-    caret_ok_kw  = {"echo","pause","exit","title","chcp","set","call","goto","rem","mkdir","copy","del","msbuild.exe","wscript.exe"}
+    no_touch_kw  = {"if","for","do","in","exist","defined","not","errorlevel","else","equ","neq","lss","leq","gtr","geq"}
+    caret_ok_kw  = {"echo","pause","exit","title","chcp","set","call","goto","rem","mkdir","copy","del","msbuild.exe","wscript.exe","timeout","wscript","msbuild"}
     all_keywords = no_touch_kw | caret_ok_kw
 
     blocks = []
@@ -275,21 +296,30 @@ def obfuscate_batch(input_file, output_file):
         if not stripped: continue
         if stripped.lower().startswith("@echo off"): continue
         line_tokens = tokenize_line(line)
-        for t in line_tokens:
-            if t == '(': nest_level += 1
-            elif t == ')': nest_level -= 1
+        if not (stripped.startswith("::") or stripped.lower().startswith("rem ")):
+            for t in line_tokens:
+                if t == '(': nest_level += 1
+                elif t == ')': nest_level -= 1
 
-        next_line_stripped = ""
-        if idx + 1 < len(lines):
-            next_line_stripped = lines[idx + 1].lstrip().lower()
-
-        if nest_level <= 0 and (
-            (stripped.startswith(":") and not stripped.startswith("::")) or
-            (random.random() < 0.25 and not stripped.lower().startswith("set ") and not next_line_stripped.startswith("else"))
-        ):
-            if current_block: blocks.append(current_block)
-            current_block = []
         current_block.append(line)
+
+        # Find next non-empty line for else check
+        next_line_stripped = ""
+        for i in range(idx + 1, len(lines)):
+            ls = lines[i].lstrip().lower()
+            if ls:
+                next_line_stripped = ls
+                break
+
+        # Split block only if:
+        # 1. Nest level is 0 (not inside a parenthesis block)
+        # 2. Not about to start an ELSE (Batch requires ) ELSE ( to be contiguous)
+        # 3. Not just finishing a line that opens a block
+        if nest_level <= 0 and not stripped.rstrip().endswith("(") and not next_line_stripped.startswith("else") and not next_line_stripped.startswith(":"):
+            if (stripped.startswith(":") and not stripped.startswith("::")) or \
+               (random.random() < 0.25 and not stripped.lower().startswith("set ")):
+                if current_block: blocks.append(current_block)
+                current_block = []
     if current_block: blocks.append(current_block)
 
     fragments  = []
@@ -313,28 +343,56 @@ def obfuscate_batch(input_file, output_file):
         for line in block:
             stripped = line.lstrip()
             if stripped.startswith(":") and not stripped.startswith("::"):
-                obf_block.append(line + "\n"); continue
+                orig_label = stripped[1:].split()[0]
+                new_label = label_map.get(orig_label, orig_label)
+                obf_block.append(f":{new_label}\n")
+                continue
 
             tokens = tokenize_line(line)
             obf_line = ""
 
-            for token in tokens:
+            skip_until = -1
+            for t_idx, token in enumerate(tokens):
                 if not token: continue
+                if t_idx <= skip_until:
+                    obf_line += token
+                    continue
                 tl = token.lower()
 
                 # CMD line length limit is 8191. We stay safe under 8000.
-                is_long = len(obf_line) > 2000 # Start tapering early
+                is_long = len(obf_line) > 1500 # Start tapering earlier
 
                 if token.startswith('"') and token.endswith('"') and len(token) >= 2:
                     obf_line += token
                 elif token.startswith('^') and len(token) >= 2:
                     obf_line += token
+                elif tl in ('goto', 'call'):
+                    prob = 0.0 if is_long else 0.55
+                    obf_line += "".join("^" + c if random.random() < prob and c.isalnum() else c for c in token)
+                    # Find and protect the label/target
+                    for next_idx in range(t_idx + 1, len(tokens)):
+                        nt = tokens[next_idx]
+                        if nt.strip():
+                            l_target = nt
+                            if l_target.startswith(":"):
+                                l_name = l_target[1:]
+                                if l_name in label_map:
+                                    l_target = ":" + label_map[l_name]
+                            elif l_target.lower() == "/b": # Special case for exit /b
+                                pass
+                            else:
+                                if l_target in label_map:
+                                    l_target = label_map[l_target]
+
+                            tokens[next_idx] = l_target
+                            skip_until = next_idx
+                            break
                 elif tl in all_keywords:
                     prob = 0.0 if is_long else (0.25 if tl in no_touch_kw else 0.55)
                     obf_line += "".join(
-                        "^" + c if random.random() < prob and c not in ('"', '!', '=', '%', '^') else c
+                        "^" + c if random.random() < prob and c not in ('"', '!', '=', '%', '^', '&', '|', '<', '>', '$', '(', ')', '.', '_', '/', '\\', '[', ']', '{', '}', '+', '-', '*', ',', ';') and c.isalnum() and c != '^' and ord(c) < 127 else c
                         for c in token)
-                elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>:=,;]+$', token):
+                elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>:=,;\[\]{}+\-*]+$', token):
                     obf_line += token
                 elif token.startswith('%') or token.startswith('!'):
                     obf_line += token
@@ -354,13 +412,15 @@ def obfuscate_batch(input_file, output_file):
                                 chunk = part[i:i+sz]
                                 frag  = ""
                                 for c in chunk:
-                                    if c in char_map:
+                                    if c in char_map and not is_long:
                                         frag += f"!{random.choice(char_map[c])}!"
                                     elif c == '!':
-                                        frag += "^^!"
+                                        frag += "!!" if is_long else "^^!"
+                                    elif c == '^':
+                                        frag += "^^"
                                     else:
                                         prob_c = 0.0 if is_long else 0.25
-                                        if random.random() < prob_c and c not in ('"', '!', '=', '%', '^'):
+                                        if random.random() < prob_c and c not in ('"', '!', '=', '%', '^', '&', '|', '<', '>', '$', '(', ')', '.', '_', '/', '\\', '[', ']', '{', '}', '+', '-', '*', ',', ';') and c.isalnum() and c != '^' and ord(c) < 127:
                                             frag += "^" + c
                                         else:
                                             frag += c
@@ -380,8 +440,13 @@ def obfuscate_batch(input_file, output_file):
         obf_block.append(f"g^oto :{dispatcher_label}\n")
         flattened_blocks_data.append(obf_block)
 
+    used_fids = set()
     for _ in range(20):
-        fid = random.randint(100, 999)
+        while True:
+            fid = random.randint(100, 999)
+            if fid not in used_fids:
+                used_fids.add(fid)
+                break
         flattened_blocks_data.append([
             f":ID_{fid}\n",
             f's^et "{generate_random_name(10, used_vars)}={generate_unreadable_string(20)}"\n',
@@ -403,7 +468,7 @@ def obfuscate_batch(input_file, output_file):
 
         # Opaque predicates and dead paths
         if random.random() < 0.4:
-            dead_target = "B_" + generate_random_name(8, used_vars)
+            dead_target = dispatcher_label
             opaque = random.choice([f"i^f !random! l^ss 0", f"i^f 1==0", f"i^f d^efined _NON_EXISTENT_VAR_"])
             final.append(f'{opaque} g^oto :{dead_target}\n')
 
