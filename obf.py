@@ -33,22 +33,41 @@ def generate_unreadable_string(length=50):
     safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'", '!', '=')]
     return "".join(random.choices(safe_noise, k=length))
 
+def random_case(s):
+    return "".join(c.upper() if random.random() < 0.5 else c.lower() for c in s)
+
+def generate_junk_command(used_vars):
+    choices = [1, 2, 3, 4, 5]
+    c = random.choice(choices)
+    if c == 1:
+        v = "_" + generate_random_name(8, used_vars)
+        return f'{random_case("set")} /a "{v}={generate_arithmetic(random.randint(0, 1000))}"\n'
+    elif c == 2:
+        return f'{random_case("ver")} >nul\n'
+    elif c == 3:
+        return f'{random_case("type")} nul >nul\n'
+    elif c == 4:
+        v = "_" + generate_random_name(8, used_vars)
+        return f'{random_case("set")} "{v}={generate_unreadable_string(random.randint(5, 15))}"\n'
+    else:
+        return f'{random_case("rem")} {generate_unreadable_string(10)}\n'
+
 def generate_arithmetic(target):
     target = to_int32(target)
     if random.random() < 0.05:
         return str(target)
-    ops = ['+', '-', '*', '^']
+    ops = ['+', '-', '*', '^', '~']
     parts = []
     current = target
-    num_parts = random.randint(4, 7)
+    num_parts = random.randint(6, 10)
     for i in range(num_parts - 1):
         op = random.choice(ops)
         if op == '+':
-            val = random.randint(1, 100)
+            val = random.randint(1, 1000)
             parts.append((val, '+'))
             current = to_int32(current - val)
         elif op == '-':
-            val = random.randint(1, 100)
+            val = random.randint(1, 1000)
             parts.append((val, '-'))
             current = to_int32(current + val)
         elif op == '*':
@@ -60,9 +79,12 @@ def generate_arithmetic(target):
             parts.append((val, '*'))
             current = batch_div(current, val)
         elif op == '^':
-            val = random.randint(1, 127)
+            val = random.randint(1, 1000)
             parts.append((val, '^'))
             current = to_int32(current ^ val)
+        elif op == '~':
+            parts.append((None, '~'))
+            current = to_int32(~current)
     expr = str(current)
     for val, op in reversed(parts):
         s = random.choice([" ", ""])
@@ -70,8 +92,9 @@ def generate_arithmetic(target):
         elif op == '-': expr = f"({expr}{s}-{s}{val})"
         elif op == '*': expr = f"({expr}{s}*{s}{val})"
         elif op == '^': expr = f"({expr}{s}^{s}{val})"
+        elif op == '~': expr = f"(~{expr})"
     if random.random() < 0.2:
-        n = random.randint(1, 50)
+        n = random.randint(1, 500)
         expr = f"({expr}+({n}-{n}))"
     return expr
 
@@ -148,7 +171,7 @@ def generate_extraction(pool_var, index, target_var, used_vars, length=None):
     arith_idx = generate_arithmetic(index)
     len_str = f",{length}" if length is not None else ""
 
-    methods = [1, 2, 3]
+    methods = [1, 2, 3, 4]
     choice = random.choice(methods)
 
     def noise():
@@ -162,7 +185,7 @@ def generate_extraction(pool_var, index, target_var, used_vars, length=None):
     elif choice == 2:
         tilde_var = "_" + generate_random_name(8, used_vars)
         return f's^et "{tilde_var}=~"\n{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:!{tilde_var}!%%a{len_str}%%"\n'
-    else:
+    elif choice == 3:
         extra = random.randint(1, 5)
         tmp_var = "_" + generate_random_name(12, used_vars)
         if length is not None:
@@ -171,6 +194,12 @@ def generate_extraction(pool_var, index, target_var, used_vars, length=None):
                     f's^et "{target_var}=!{tmp_var}:~0,{length}!"\n')
         else:
             return f'{noise()}s^et /a "{idx_var}={arith_idx}"\nf^or /f "delims=" %%a in ("!{idx_var}!") do c^all s^et "{target_var}=%%{pool_var}:~%%a%%"\n'
+    else:
+        # Method 4: use call with an extra layer of indirection
+        v_ext = "_" + generate_random_name(8, used_vars)
+        return (f's^et /a "{idx_var}={arith_idx}"\n'
+                f'{noise()}s^et "{v_ext}=~!{idx_var}!{len_str}"\n'
+                f'f^or /f "delims=" %%a in ("!{v_ext}!") do c^all s^et "{target_var}=%%{pool_var}:%%a%%"\n')
 
 def obfuscate_batch(input_file, output_file):
     try:
@@ -247,6 +276,7 @@ def obfuscate_batch(input_file, output_file):
     env_sources = {
         "OS":      "Windows_NT",
         "COMSPEC": "C:\\Windows\\system32\\cmd.exe",
+        "SystemRoot": "C:\\Windows",
     }
 
     char_map     = {}
@@ -316,9 +346,13 @@ def obfuscate_batch(input_file, output_file):
         # 2. Not about to start an ELSE (Batch requires ) ELSE ( to be contiguous)
         # 3. Not just finishing a line that opens a block
         if nest_level <= 0 and not stripped.rstrip().endswith("(") and not next_line_stripped.startswith("else") and not next_line_stripped.startswith(":"):
+            split_prob = random.uniform(0.1, 0.4)
             if (stripped.startswith(":") and not stripped.startswith("::")) or \
-               (random.random() < 0.25 and not stripped.lower().startswith("set ")):
-                if current_block: blocks.append(current_block)
+               (random.random() < split_prob and not stripped.lower().startswith("set ")):
+                if current_block:
+                    if random.random() < 0.15:
+                        current_block.append(generate_junk_command(used_vars).strip())
+                    blocks.append(current_block)
                 current_block = []
     if current_block: blocks.append(current_block)
 
@@ -367,8 +401,9 @@ def obfuscate_batch(input_file, output_file):
                 elif token.startswith('^') and len(token) >= 2:
                     obf_line += token
                 elif tl in ('goto', 'call'):
-                    prob = 0.0 if is_long else 0.55
-                    obf_line += "".join("^" + c if random.random() < prob and c.isalnum() else c for c in token)
+                    prob = 0.0 if is_long else 0.85
+                    rc_token = random_case(token)
+                    obf_line += "".join("^" + c if random.random() < prob and c.isalnum() else c for c in rc_token)
                     # Find and protect the label/target
                     for next_idx in range(t_idx + 1, len(tokens)):
                         nt = tokens[next_idx]
@@ -388,10 +423,11 @@ def obfuscate_batch(input_file, output_file):
                             skip_until = next_idx
                             break
                 elif tl in all_keywords:
-                    prob = 0.0 if is_long else (0.25 if tl in no_touch_kw else 0.55)
+                    prob = 0.0 if is_long else (0.45 if tl in no_touch_kw else 0.85)
+                    rc_token = random_case(token)
                     obf_line += "".join(
                         "^" + c if random.random() < prob and c not in ('"', '!', '=', '%', '^', '&', '|', '<', '>', '$', '(', ')', '.', '_', '/', '\\', '[', ']', '{', '}', '+', '-', '*', ',', ';') and c.isalnum() and c != '^' and ord(c) < 127 else c
-                        for c in token)
+                        for c in rc_token)
                 elif re.match(r'^\s+$', token) or re.match(r'^[()&|<>:=,;\[\]{}+\-*]+$', token):
                     obf_line += token
                 elif token.startswith('%') or token.startswith('!'):
@@ -419,7 +455,7 @@ def obfuscate_batch(input_file, output_file):
                                     elif c == '^':
                                         frag += "^^"
                                     else:
-                                        prob_c = 0.0 if is_long else 0.25
+                                        prob_c = 0.0 if is_long else 0.45
                                         if random.random() < prob_c and c not in ('"', '!', '=', '%', '^', '&', '|', '<', '>', '$', '(', ')', '.', '_', '/', '\\', '[', ']', '{', '}', '+', '-', '*', ',', ';') and c.isalnum() and c != '^' and ord(c) < 127:
                                             frag += "^" + c
                                         else:
@@ -441,18 +477,20 @@ def obfuscate_batch(input_file, output_file):
         flattened_blocks_data.append(obf_block)
 
     used_fids = set()
-    for _ in range(20):
+    for _ in range(35):
         while True:
             fid = random.randint(100, 999)
             if fid not in used_fids:
                 used_fids.add(fid)
                 break
-        flattened_blocks_data.append([
-            f":ID_{fid}\n",
-            f's^et "{generate_random_name(10, used_vars)}={generate_unreadable_string(20)}"\n',
+        fake_block = [f":ID_{fid}\n"]
+        for _ in range(random.randint(1, 3)):
+            fake_block.append(generate_junk_command(used_vars))
+        fake_block.extend([
             f's^et /a "{state_var}={generate_arithmetic(random.choice(block_ids))}"\n',
             f"g^oto :{dispatcher_label}\n",
         ])
+        flattened_blocks_data.append(fake_block)
     random.shuffle(flattened_blocks_data)
 
     final = [
@@ -467,19 +505,30 @@ def obfuscate_batch(input_file, output_file):
         final.append(f":{bl}\n")
 
         # Opaque predicates and dead paths
-        if random.random() < 0.4:
-            dead_target = dispatcher_label
-            opaque = random.choice([f"i^f !random! l^ss 0", f"i^f 1==0", f"i^f d^efined _NON_EXISTENT_VAR_"])
+        if random.random() < 0.5:
+            dead_target = random.choice(bridge_labels + [dispatcher_label])
+            opaque = random.choice([
+                f'i^f !random! l^ss 0',
+                f'i^f 1==0',
+                f'i^f d^efined _NON_EXISTENT_VAR_{random.randint(0,1000)}',
+                f'i^f "%OS%"=="Linux"',
+                f'i^f 0 g^tr 1'
+            ])
             final.append(f'{opaque} g^oto :{dead_target}\n')
+
+        if random.random() < 0.4:
+            for _ in range(random.randint(1, 2)):
+                final.append(generate_junk_command(used_vars))
 
         if random.random() < 0.3:
             final.append(f'i^f 1==1 g^oto :{target}\n')
         else:
             final.append(f"g^oto :{target}\n")
     final.append(f":{setup_label}\n")
-    final.extend(pool_decoders)
-    final.extend(mapping_code)
-    final.extend(fragments)
+    setup_parts = [pool_decoders, mapping_code, fragments]
+    random.shuffle(setup_parts)
+    for part in setup_parts:
+        final.extend(part)
     final.append(f's^et /a "{state_var}={generate_arithmetic(block_ids[0])}"\n')
     final.append(f"g^oto :{bridge_labels[0]}\n")
     final.append(f":{dispatcher_label}\n")
