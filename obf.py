@@ -29,25 +29,20 @@ def batch_mod(a, b):
     return to_int32(a - (int(a / b) * b))
 
 def generate_unreadable_string(length=50):
-    noise_chars = string.ascii_letters + string.digits + "@#$_+-=[]{}|;:,.<>?/`~"
-    safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'", '!', '=')]
+    noise_chars = string.ascii_letters + string.digits + "@#$_+-={}|;:,.<>?/`~"
+    safe_noise = [c for c in noise_chars if c not in ('%', '"', '^', '`', '&', '|', '<', '>', '(', ')', "'", '!', '=', '[', ']', '{', '}', ';', ',', ' ')]
     return "".join(random.choices(safe_noise, k=length))
 
 def generate_junk_command(used_vars):
-    choices = [1, 2, 3, 4, 5]
+    choices = [1, 2, 3]
     c = random.choice(choices)
     if c == 1:
-        nv = "_" + generate_random_name(6, used_vars)
-        return f's^et /a "{nv}={generate_arithmetic(random.randint(1, 100))}"'
-    elif c == 2:
         return f'v^er >n^ul'
-    elif c == 3:
+    elif c == 2:
         return f't^ype n^ul >n^ul'
-    elif c == 4:
+    else:
         nv = "_" + generate_random_name(6, used_vars)
         return f's^et "{nv}={generate_unreadable_string(10)}"'
-    else:
-        return f'i^f e^xist %n^ot_exi^st% ( r^em {generate_unreadable_string(5)} )'
 
 def generate_arithmetic(target):
     target = to_int32(target)
@@ -177,9 +172,9 @@ def generate_extraction(pool_var, index, target_var, used_vars, length=None):
             nv = "_" + generate_random_name(8, used_vars)
             return f's^et "{nv}={generate_unreadable_string(10)}"\n'
         elif r < 0.3:
-            return f'i^f 0==1 ( r^em {generate_unreadable_string(5)} )\n'
+            return f'r^em {generate_unreadable_string(5)}\n'
         elif r < 0.4:
-            return f'f^or %%i in (1) d^o ( n^ul )\n'
+            return f'v^er >n^ul\n'
         return ""
 
     if choice == 1:
@@ -223,7 +218,7 @@ def obfuscate_batch(input_file, output_file):
                 if orig_label not in label_map:
                     label_map[orig_label] = "V_" + generate_random_name(8, used_vars)
 
-    forbidden = set('\n\r%"!&|<>^(),;= \t#@$~[]')
+    forbidden = set('\n\r%"!&|<>^(),;= \t#@$~')
     base_chars = set(string.ascii_letters + string.digits + ".\\/:-_")
     mapping_pool_chars = sorted(list(
         (unique_file_chars | base_chars) - forbidden
@@ -271,12 +266,16 @@ def obfuscate_batch(input_file, output_file):
         # Initialize pool in chunks
         chunk_size = random.randint(max(1, len(current_val)//4), max(2, len(current_val)//3))
         chunks = [current_val[i:i+chunk_size] for i in range(0, len(current_val), chunk_size)]
-        decoder_cmds = [f's^et "{pv}={chunks[0]}"']
+
+        def escape_chunk(c):
+            return c.replace('^', '^^').replace('!', '^^!')
+
+        decoder_cmds = [f's^et "{pv}={escape_chunk(chunks[0])}"']
         for chunk in chunks[1:]:
             prob = random.random()
             if prob < 0.3:
                 decoder_cmds.append(f'{generate_junk_command(used_vars)}\n')
-            decoder_cmds.append(f's^et "{pv}=!{pv}!{chunk}"')
+            decoder_cmds.append(f's^et "{pv}=!{pv}!{escape_chunk(chunk)}"')
 
         if swap_info:
             idx1, idx2 = swap_info
@@ -493,7 +492,9 @@ def obfuscate_batch(input_file, output_file):
                                         frag += "^^"
                                     else:
                                         prob_c = 0.0 if is_long else 0.45
-                                        if random.random() < prob_c and c not in ('"', '!', '=', '%', '^', '&', '|', '<', '>', '$', '(', ')', '.', '_', '/', '\\', '[', ']', '{', '}', '+', '-', '*', ',', ';') and c.isalnum() and c != '^' and ord(c) < 127:
+                                        if c in ('[', ']', '{', '}'):
+                                            frag += "^" + c
+                                        elif random.random() < prob_c and c not in ('"', '!', '=', '%', '^', '&', '|', '<', '>', '$', '(', ')', '.', '_', '/', '\\', '[', ']', '{', '}', '+', '-', '*', ',', ';') and c.isalnum() and c != '^' and ord(c) < 127:
                                             frag += "^" + c
                                         else:
                                             frag += c
@@ -553,9 +554,9 @@ def obfuscate_batch(input_file, output_file):
             final.append(f'{opaque} g^oto :{dead_target}\n')
 
         if random.random() < 0.3:
-            final.append(f'i^f 1==1 ( {generate_junk_command(used_vars)} & g^oto :{target} )\n')
+            final.append(f'i^f 1==1 ( g^oto :{target} )\n')
         else:
-            final.append(f"{generate_junk_command(used_vars)} & g^oto :{target}\n")
+            final.append(f"g^oto :{target}\n")
     final.append(f":{setup_label}\n")
     final.extend(pool_decoders)
     final.extend(mapping_code)
