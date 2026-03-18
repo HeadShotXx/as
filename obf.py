@@ -37,22 +37,22 @@ def generate_arithmetic(target):
     target = to_int32(target)
     if random.random() < 0.05:
         return str(target)
-    ops = ['+', '-', '*', '^']
+    ops = ['+', '-', '*', '^', '~']
     parts = []
     current = target
-    num_parts = random.randint(4, 7)
+    num_parts = random.randint(8, 14)
     for i in range(num_parts - 1):
         op = random.choice(ops)
         if op == '+':
-            val = random.randint(1, 100)
+            val = random.randint(1, 1000)
             parts.append((val, '+'))
             current = to_int32(current - val)
         elif op == '-':
-            val = random.randint(1, 100)
+            val = random.randint(1, 1000)
             parts.append((val, '-'))
             current = to_int32(current + val)
         elif op == '*':
-            val = random.randint(2, 5)
+            val = random.randint(2, 10)
             mod = batch_mod(current, val)
             if mod != 0:
                 parts.append((mod, '+'))
@@ -60,9 +60,12 @@ def generate_arithmetic(target):
             parts.append((val, '*'))
             current = batch_div(current, val)
         elif op == '^':
-            val = random.randint(1, 127)
+            val = random.randint(1, 65535)
             parts.append((val, '^'))
             current = to_int32(current ^ val)
+        elif op == '~':
+            parts.append((None, '~'))
+            current = to_int32(~current)
     expr = str(current)
     for val, op in reversed(parts):
         s = random.choice([" ", ""])
@@ -70,9 +73,18 @@ def generate_arithmetic(target):
         elif op == '-': expr = f"({expr}{s}-{s}{val})"
         elif op == '*': expr = f"({expr}{s}*{s}{val})"
         elif op == '^': expr = f"({expr}{s}^{s}{val})"
-    if random.random() < 0.2:
+        elif op == '~': expr = f"(~{expr})"
+
+    noise_roll = random.random()
+    if noise_roll < 0.2:
         n = random.randint(1, 50)
         expr = f"({expr}+({n}-{n}))"
+    elif noise_roll < 0.4:
+        n = random.randint(1, 65535)
+        expr = f"({expr}^({n}^{n}))"
+    elif noise_roll < 0.5:
+        n = random.randint(1, 50)
+        expr = f"({expr}+({n}*0))"
     return expr
 
 def tokenize_line(line):
