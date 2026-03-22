@@ -75,6 +75,81 @@ def generate_arithmetic(target):
         expr = f"({expr}+({n}-{n}))"
     return expr
 
+class RollingState:
+    def __init__(self, used_vars):
+        self.rs_var = "_" + generate_random_name(10, used_vars)
+        self.aux_var = "_" + generate_random_name(10, used_vars)
+        self.cnt_var = "_" + generate_random_name(10, used_vars)
+        self.last_rs_var = "_" + generate_random_name(10, used_vars)
+
+        self.rs = random.randint(0, 0x7FFFFFFF)
+        self.aux = random.randint(0, 0x7FFFFFFF)
+        self.cnt = 0
+        self.last_rs = self.rs
+
+    def rehash(self):
+        # Python Simulation (Fixed order)
+        self.last_rs = self.rs
+        self.rs = to_int32(self.rs ^ (self.aux + self.cnt))
+        self.cnt = (self.cnt + 1) & 0x7FFFFFFF
+
+        # Batch code generation (Matching fixed order to prevent state drift)
+        return (
+            f's^et /a "{self.last_rs_var}=!{self.rs_var}!"\n'
+            f's^et /a "{self.rs_var}=(!{self.rs_var}! ^ (!{self.aux_var}! + !{self.cnt_var}!))"\n'
+            f's^et /a "{self.cnt_var}=(!{self.cnt_var}! + 1) & 2147483647"\n'
+        )
+
+def simulate_advanced_junk(case, rs, aux, cnt, last_rs, data, idx):
+    if case == 0: rs = to_int32(rs + data)
+    elif case == 1: aux = to_int32(aux ^ (rs & 0xFFFF))
+    elif case == 2: rs = to_int32(rs ^ (aux + idx))
+    elif case == 3: aux = to_int32(aux + (data * 31))
+    elif case == 4: rs = to_int32(rs ^ last_rs)
+    elif case == 5: cnt = (cnt + (rs & 0xFF)) & 0x7FFFFFFF
+    elif case == 6: aux = to_int32(aux - data)
+    elif case == 7: rs = to_int32(rs * 3 + aux)
+    elif case == 8: aux = to_int32(aux ^ (cnt + data))
+    elif case == 9: rs = to_int32(rs ^ (data * idx))
+    elif case == 10: aux = to_int32(aux + rs - last_rs)
+    elif case == 11: rs = to_int32(rs ^ 0x7FFFFFFF)
+    elif case == 12: aux = to_int32(aux | (data << 8))
+    elif case == 13: rs = to_int32(rs & ~data)
+    elif case == 14: aux = to_int32(aux ^ (idx * idx))
+    elif case == 15: rs = to_int32(rs + (aux >> 4))
+    elif case == 16: aux = to_int32(aux ^ 0x55555555)
+    elif case == 17: rs = to_int32(rs - (cnt & 0x3FF))
+    elif case == 18: aux = to_int32(aux + (last_rs & 0xFFF))
+    elif case == 19: rs = to_int32(rs ^ (aux ^ data ^ idx))
+    return rs, aux, cnt, last_rs
+
+def generate_advanced_junk_internal(case, rs_obj, data_val, idx_val):
+    rv = rs_obj.rs_var
+    av = rs_obj.aux_var
+    cv = rs_obj.cnt_var
+    lv = rs_obj.last_rs_var
+    if case == 0: return f's^et /a "{rv}=!{rv}! + {data_val}"\n'
+    elif case == 1: return f's^et /a "{av}=!{av}! ^ (!{rv}! & 65535)"\n'
+    elif case == 2: return f's^et /a "{rv}=!{rv}! ^ (!{av}! + {idx_val})"\n'
+    elif case == 3: return f's^et /a "{av}=!{av}! + ({data_val} * 31)"\n'
+    elif case == 4: return f's^et /a "{rv}=!{rv}! ^ !{lv}!"\n'
+    elif case == 5: return f's^et /a "{cv}=(!{cv}! + (!{rv}! & 255)) & 2147483647"\n'
+    elif case == 6: return f's^et /a "{av}=!{av}! - {data_val}"\n'
+    elif case == 7: return f's^et /a "{rv}=(!{rv}! * 3) + !{av}!"\n'
+    elif case == 8: return f's^et /a "{av}=!{av}! ^ (!{cv}! + {data_val})"\n'
+    elif case == 9: return f's^et /a "{rv}=!{rv}! ^ ({data_val} * {idx_val})"\n'
+    elif case == 10: return f's^et /a "{av}=!{av}! + !{rv}! - !{lv}!"\n'
+    elif case == 11: return f's^et /a "{rv}=!{rv}! ^ 2147483647"\n'
+    elif case == 12: return f's^et /a "{av}=!{av}! | ({data_val} << 8)"\n'
+    elif case == 13: return f's^et /a "{rv}=!{rv}! & ~{data_val}"\n'
+    elif case == 14: return f's^et /a "{av}=!{av}! ^ ({idx_val} * {idx_val})"\n'
+    elif case == 15: return f's^et /a "{rv}=!{rv}! + (!{av}! >> 4)"\n'
+    elif case == 16: return f's^et /a "{av}=!{av}! ^ 1431655765"\n'
+    elif case == 17: return f's^et /a "{rv}=!{rv}! - (!{cv}! & 1023)"\n'
+    elif case == 18: return f's^et /a "{av}=!{av}! + (!{lv}! & 4095)"\n'
+    elif case == 19: return f's^et /a "{rv}=!{rv}! ^ (!{av}! ^ {data_val} ^ {idx_val})"\n'
+    return ""
+
 def tokenize_line(line):
     tokens = []
     i = 0
@@ -143,9 +218,14 @@ def tokenize_line(line):
                 tokens.append(line[start:i])
     return tokens
 
-def generate_extraction(pool_var, index, target_var, used_vars, length=None):
+def generate_extraction(pool_var, index, target_var, used_vars, length=None, rs_obj=None):
     idx_var = "_" + generate_random_name(10, used_vars)
-    arith_idx = generate_arithmetic(index)
+    if rs_obj:
+        xor_key = random.randint(0, 0xFFFF)
+        runtime_key = to_int32(index ^ (rs_obj.rs ^ rs_obj.cnt ^ xor_key))
+        arith_idx = f"((!{rs_obj.rs_var}! ^ !{rs_obj.cnt_var}! ^ {xor_key}) ^ {runtime_key})"
+    else:
+        arith_idx = generate_arithmetic(index)
     len_str = f",{length}" if length is not None else ""
 
     methods = [1, 2, 3]
@@ -181,6 +261,8 @@ def obfuscate_batch(input_file, output_file):
         return
 
     used_vars = set()
+    rs_obj = RollingState(used_vars)
+    used_vars.update([rs_obj.rs_var, rs_obj.aux_var, rs_obj.cnt_var, rs_obj.last_rs_var])
 
     unique_file_chars = set()
     label_map = {}
@@ -237,8 +319,17 @@ def obfuscate_batch(input_file, output_file):
             split    = (pool_len - rot_amount) % pool_len
             v_suffix = "_" + generate_random_name(8, used_vars)
             v_prefix = "_" + generate_random_name(8, used_vars)
-            decoder_cmds.append(generate_extraction(pv, split, v_suffix, used_vars))
-            decoder_cmds.append(generate_extraction(pv, 0, v_prefix, used_vars, length=split))
+
+            # Junk integration
+            case = random.randint(0, 19)
+            data_val = random.randint(0, 255)
+            idx_val = random.randint(0, 100)
+            decoder_cmds.append(generate_advanced_junk_internal(case, rs_obj, data_val, idx_val))
+            rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs = simulate_advanced_junk(case, rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs, data_val, idx_val)
+            decoder_cmds.append(rs_obj.rehash())
+
+            decoder_cmds.append(generate_extraction(pv, split, v_suffix, used_vars, rs_obj=rs_obj))
+            decoder_cmds.append(generate_extraction(pv, 0, v_prefix, used_vars, length=split, rs_obj=rs_obj))
             decoder_cmds.append(f's^et "{pv}=!{v_suffix}!!{v_prefix}!"')
 
         pool_decoders.append("\n".join(decoder_cmds) + "\n")
@@ -272,12 +363,36 @@ def obfuscate_batch(input_file, output_file):
                         mapping_code.append(
                             f'c^all s^et "{var_name}=%{src[0]}:~{src[1]},1%"\n')
                     else:
-                        mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
+                        # Junk integration
+                        case = random.randint(0, 19)
+                        data_val = ord(char)
+                        idx_val = random.randint(0, 100)
+                        mapping_code.append(generate_advanced_junk_internal(case, rs_obj, data_val, idx_val))
+                        rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs = simulate_advanced_junk(case, rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs, data_val, idx_val)
+                        mapping_code.append(rs_obj.rehash())
+
+                        mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1, rs_obj=rs_obj))
                 elif method > 0.45:
-                    mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1))
+                    # Junk integration
+                    case = random.randint(0, 19)
+                    data_val = ord(char)
+                    idx_val = random.randint(0, 100)
+                    mapping_code.append(generate_advanced_junk_internal(case, rs_obj, data_val, idx_val))
+                    rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs = simulate_advanced_junk(case, rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs, data_val, idx_val)
+                    mapping_code.append(rs_obj.rehash())
+
+                    mapping_code.append(generate_extraction(target_pv, char_idx, var_name, used_vars, length=1, rs_obj=rs_obj))
                 else:
+                    # Junk integration
+                    case = random.randint(0, 19)
+                    data_val = ord(char)
+                    idx_val = random.randint(0, 100)
+                    mapping_code.append(generate_advanced_junk_internal(case, rs_obj, data_val, idx_val))
+                    rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs = simulate_advanced_junk(case, rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs, data_val, idx_val)
+                    mapping_code.append(rs_obj.rehash())
+
                     v_link = "_" + generate_random_name(10, used_vars)
-                    combined = generate_extraction(target_pv, char_idx, v_link, used_vars, length=1)
+                    combined = generate_extraction(target_pv, char_idx, v_link, used_vars, length=1, rs_obj=rs_obj)
                     combined += f's^et "{var_name}=!{v_link}!"\n'
                     mapping_code.append(combined)
         char_map[char] = shadow_names
@@ -339,6 +454,14 @@ def obfuscate_batch(input_file, output_file):
     for idx, block in enumerate(blocks):
         b_id      = block_ids[idx]
         obf_block = [f":ID_{b_id}\n"]
+
+        # Junk integration
+        case = random.randint(0, 19)
+        data_val = b_id & 0xFF
+        idx_val = idx
+        obf_block.append(generate_advanced_junk_internal(case, rs_obj, data_val, idx_val))
+        rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs = simulate_advanced_junk(case, rs_obj.rs, rs_obj.aux, rs_obj.cnt, rs_obj.last_rs, data_val, idx_val)
+        obf_block.append(rs_obj.rehash())
 
         for line in block:
             stripped = line.lstrip()
@@ -427,7 +550,8 @@ def obfuscate_batch(input_file, output_file):
                                 prob_f = 0.0 if is_long else 0.3
                                 if len(chunk) > 1 and random.random() < prob_f:
                                     fv = "____" + generate_random_name(8, used_vars)
-                                    fragments.append(f'set "{fv}={frag}"\n')
+                                    # Relocate fragments into current block
+                                    obf_block.append(f'set "{fv}={frag}"\n')
                                     obf_line += f"!{fv}!"
                                 else:
                                     obf_line += frag
@@ -436,7 +560,9 @@ def obfuscate_batch(input_file, output_file):
             obf_block.append(obf_line + "\n")
 
         next_id = block_ids[idx+1] if idx+1 < len(blocks) else end_id
-        obf_block.append(f's^et /a "{state_var}={generate_arithmetic(next_id)}"\n')
+        # State-coupled transition
+        runtime_next_id = (next_id ^ rs_obj.rs) ^ rs_obj.cnt
+        obf_block.append(f's^et /a "{state_var}=({runtime_next_id} ^ !{rs_obj.rs_var}!) ^ !{rs_obj.cnt_var}!"\n')
         obf_block.append(f"g^oto :{dispatcher_label}\n")
         flattened_blocks_data.append(obf_block)
 
@@ -447,10 +573,19 @@ def obfuscate_batch(input_file, output_file):
             if fid not in used_fids:
                 used_fids.add(fid)
                 break
+        # State-machine synchronization for fake blocks
+        case = random.randint(0, 19)
+        data_val = fid & 0xFF
+        idx_val = random.randint(0, 100)
+        target_id = random.choice(block_ids)
+        runtime_target_id = (target_id ^ rs_obj.rs) ^ rs_obj.cnt
+
         flattened_blocks_data.append([
             f":ID_{fid}\n",
+            generate_advanced_junk_internal(case, rs_obj, data_val, idx_val),
+            rs_obj.rehash(),
             f's^et "{generate_random_name(10, used_vars)}={generate_unreadable_string(20)}"\n',
-            f's^et /a "{state_var}={generate_arithmetic(random.choice(block_ids))}"\n',
+            f's^et /a "{state_var}=({runtime_target_id} ^ !{rs_obj.rs_var}!) ^ !{rs_obj.cnt_var}!"\n',
             f"g^oto :{dispatcher_label}\n",
         ])
     random.shuffle(flattened_blocks_data)
@@ -459,6 +594,10 @@ def obfuscate_batch(input_file, output_file):
         "@e^cho o^ff\n",
         "s^etlocal e^nabledelayedexpansion\n",
         "c^hcp 6^5001 >n^ul\n",
+        f's^et /a "{rs_obj.rs_var}={rs_obj.rs}"\n',
+        f's^et /a "{rs_obj.aux_var}={rs_obj.aux}"\n',
+        f's^et /a "{rs_obj.cnt_var}={rs_obj.cnt}"\n',
+        f's^et /a "{rs_obj.last_rs_var}={rs_obj.last_rs}"\n',
         f's^et "{state_var}=0"\n',
         f"g^oto :{setup_label}\n",
     ]
