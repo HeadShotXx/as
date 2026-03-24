@@ -20,18 +20,6 @@ struct Args {
     target: String,
 }
 
-fn get_loader_offset(dll_bytes: &[u8]) -> Option<usize> {
-    let pe = PE::parse(dll_bytes).ok()?;
-    for export in pe.exports {
-        if let Some(name) = export.name {
-            if name == "ReflectiveLoader" || name.contains("ReflectiveLoader") {
-                return export.offset;
-            }
-        }
-    }
-    None
-}
-
 fn get_process_id_by_name(process_name: &str) -> Option<u32> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -64,35 +52,63 @@ fn get_process_id_by_name(process_name: &str) -> Option<u32> {
     None
 }
 
+fn is_process_64bit(h_process: HANDLE) -> bool {
+    let mut is_wow64: BOOL = 0;
+    unsafe {
+        if IsWow64Process(h_process, &mut is_wow64) == 0 {
+            return false;
+        }
+    }
+    is_wow64 == 0
+}
+
 fn main() {
     let args = Args::parse();
-    println!("Injecting {} into {}...", args.dll.display(), args.target);
+    println!("[*] Reflective Injector: {} into {}...", args.dll.display(), args.target);
 
     let pid = match get_process_id_by_name(&args.target) {
         Some(pid) => pid,
         None => {
-            eprintln!("Could not find process: {}", args.target);
+            eprintln!("[-] Could not find process: {}", args.target);
             return;
         }
     };
-    println!("Found process {} with PID: {}", args.target, pid);
+    println!("[+] Found process {} with PID: {}", args.target, pid);
 
     let dll_bytes = match fs::read(&args.dll) {
         Ok(bytes) => bytes,
         Err(e) => {
-            eprintln!("Could not read DLL file: {}", e);
+            eprintln!("[-] Could not read DLL file: {}", e);
             return;
         }
     };
 
-    let loader_offset = match get_loader_offset(&dll_bytes) {
-        Some(offset) => offset,
-        None => {
-            eprintln!("Could not find ReflectiveLoader export in DLL");
+    let pe = match PE::parse(&dll_bytes) {
+        Ok(pe) => pe,
+        Err(e) => {
+            eprintln!("[-] Could not parse DLL: {}", e);
             return;
         }
     };
-    println!("Found ReflectiveLoader at file offset: 0x{:X}", loader_offset);
+
+    if !pe.is_64 {
+        eprintln!("[-] DLL is not 64-bit. This injector only supports x64.");
+        return;
+    }
+
+    // Find the ReflectiveLoader export by name
+    let loader_offset = match pe.exports.iter().find(|e| e.name.as_deref().map_or(false, |n| n.contains("ReflectiveLoader"))) {
+        Some(export) => export.offset,
+        None => {
+            eprintln!("[-] DLL does not export ReflectiveLoader. Ensure the DLL implements Stephen Fewer's ReflectiveLoader.");
+            return;
+        }
+    };
+
+    if loader_offset.is_none() {
+        eprintln!("[-] ReflectiveLoader export has no file offset. Ensure it is a valid PE export.");
+        return;
+    }
 
     unsafe {
         let process_handle = OpenProcess(
@@ -102,10 +118,18 @@ fn main() {
         );
 
         if process_handle == 0 {
-            eprintln!("Could not open target process: {}", GetLastError());
+            eprintln!("[-] Could not open target process: {}", GetLastError());
             return;
         }
 
+        if !is_process_64bit(process_handle) {
+            eprintln!("[-] Target process is not 64-bit. This injector only supports x64.");
+            CloseHandle(process_handle);
+            return;
+        }
+
+        // Allocate memory for the RAW DLL bytes in the target process.
+        // Stephen Fewer's ReflectiveLoader handles mapping itself from the raw bytes.
         let remote_buffer = VirtualAllocEx(
             process_handle,
             std::ptr::null(),
@@ -115,7 +139,7 @@ fn main() {
         );
 
         if remote_buffer.is_null() {
-            eprintln!("Could not allocate memory in target process: {}", GetLastError());
+            eprintln!("[-] Could not allocate memory in target process: {}", GetLastError());
             CloseHandle(process_handle);
             return;
         }
@@ -130,31 +154,34 @@ fn main() {
         );
 
         if write_result == 0 || bytes_written != dll_bytes.len() {
-            eprintln!("Could not write DLL to target process: {}", GetLastError());
+            eprintln!("[-] Could not write raw DLL to target process: {}", GetLastError());
+            VirtualFreeEx(process_handle, remote_buffer, 0, MEM_RELEASE);
             CloseHandle(process_handle);
             return;
         }
 
-        let thread_start_routine = std::mem::transmute(remote_buffer as usize + loader_offset as usize);
+        // Calculate the thread entry point using the ReflectiveLoader's FILE OFFSET.
+        // The loader's code will be executed starting from its offset within the raw bytes.
+        let thread_start_routine = std::mem::transmute(remote_buffer as usize + loader_offset.unwrap() as usize);
         let mut thread_id = 0;
         let thread_handle = CreateRemoteThread(
             process_handle,
             std::ptr::null(),
             0,
             thread_start_routine,
-            remote_buffer, // Pass base address as parameter for self-relocation
+            remote_buffer, // Stephen Fewer's reflective loader expects the base address of the raw DLL buffer as the parameter.
             0,
             &mut thread_id,
         );
 
         if thread_handle == 0 {
-            eprintln!("Could not create remote thread: {}", GetLastError());
-            CloseHandle(process_handle);
-            return;
+            eprintln!("[-] Could not create remote thread: {}", GetLastError());
+            VirtualFreeEx(process_handle, remote_buffer, 0, MEM_RELEASE);
+        } else {
+            println!("[+] Successfully initiated reflective injection! Thread ID: {}", thread_id);
+            CloseHandle(thread_handle);
         }
 
-        println!("Successfully injected DLL! Thread ID: {}", thread_id);
-        CloseHandle(thread_handle);
         CloseHandle(process_handle);
     }
 }
