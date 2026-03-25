@@ -1,0 +1,3 @@
+    Checking windows-sys v0.48.0
+    Checking chrome_key_extractor v0.1.0 (/app/chrome_key_extractor)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.25s
