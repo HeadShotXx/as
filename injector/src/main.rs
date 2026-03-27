@@ -243,7 +243,7 @@ fn main() {
         if pipe_handle == INVALID_HANDLE_VALUE {
             eprintln!("Failed to create named pipe: {}", GetLastError());
         } else {
-            println!("Named pipe created. Waiting for connection...");
+            println!("Named pipe created (\\.\\pipe\\chrome_extractor). Waiting for DLL connection...");
 
             if ConnectNamedPipe(pipe_handle, ptr::null_mut()) != 0 || GetLastError() == ERROR_PIPE_CONNECTED {
                 println!("DLL connected to pipe. Receiving data...");

