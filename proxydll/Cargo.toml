@@ -7,6 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 base64 = "0.21"
 rusqlite = { version = "0.29", features = ["bundled"] }
@@ -22,5 +23,9 @@ winapi = { version = "0.3", features = [
     "dpapi",
     "winbase",
     "errhandlingapi",
-    "unknwnbase"
+    "unknwnbase",
+    "namedpipeapi",
+    "handleapi",
+    "fileapi",
+    "debugapi"
 ] }

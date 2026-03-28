@@ -1,0 +1,8 @@
+**/target/
+**/*.pdb
+**/*.exe
+**/*.dll
+**/*.lib
+**/*.exp
+**/*.tmp
+**/*.log
