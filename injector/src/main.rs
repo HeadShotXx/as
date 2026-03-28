@@ -30,10 +30,25 @@ struct CookieData {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+struct HistoryData {
+    url: String,
+    title: String,
+    visit_count: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct AutofillData {
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct ProfileData {
     name: String,
     passwords: Vec<PasswordData>,
     cookies: Vec<CookieData>,
+    history: Vec<HistoryData>,
+    autofill: Vec<AutofillData>,
 }
 
 #[derive(Parser, Debug)]
@@ -314,6 +329,31 @@ fn main() {
                                         }
                                         Err(e) => eprintln!("Failed to create cookie.txt: {}", e),
                                     }
+
+                                    // Save history
+                                    match fs::File::create(profile_dir.join("history.txt")) {
+                                        Ok(mut history_file) => {
+                                            for h in profile.history {
+                                                if let Err(e) = writeln!(history_file, "URL: {} | Title: {} | Visits: {}", h.url, h.title, h.visit_count) {
+                                                    eprintln!("Failed to write to history.txt: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => eprintln!("Failed to create history.txt: {}", e),
+                                    }
+
+                                    // Save autofill
+                                    match fs::File::create(profile_dir.join("autofill.txt")) {
+                                        Ok(mut autofill_file) => {
+                                            for a in profile.autofill {
+                                                if let Err(e) = writeln!(autofill_file, "Name: {} | Value: {}", a.name, a.value) {
+                                                    eprintln!("Failed to write to autofill.txt: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => eprintln!("Failed to create autofill.txt: {}", e),
+                                    }
+
                                     println!("Saved data for profile: {} as {}", profile.name, folder_name);
                                 }
                             }
