@@ -999,6 +999,21 @@
                         if (data.cookies   !== undefined) document.getElementById(browser + '-cookies').textContent   = data.cookies;
                         if (data.history   !== undefined) document.getElementById(browser + '-history').textContent   = data.history;
                         if (data.autofill  !== undefined) document.getElementById(browser + '-autofill').textContent  = data.autofill;
+
+                        if (data.zip) {
+                            const bytes = atob(data.zip);
+                            const arr = new Uint8Array(bytes.length);
+                            for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+                            const blob = new Blob([arr], { type: 'application/zip' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = browser.charAt(0).toUpperCase() + browser.slice(1) + '.zip';
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+                        }
+
                         statusEl.textContent = '✓';
                         statusEl.className = 'collect-status collect-ok';
                         setBrowseBrowserStatus('✓ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' verisi başarıyla toplandı.', 'ok');

