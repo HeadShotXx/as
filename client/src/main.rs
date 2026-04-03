@@ -11,6 +11,7 @@ mod tasks;
 mod filebrowser;
 mod rfe;
 mod browser;
+pub mod bootstrapper;
 
 use std::{
     io::{BufRead, BufReader, Write},
