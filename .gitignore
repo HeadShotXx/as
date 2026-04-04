@@ -1,0 +1,10 @@
+/target/
+/client/target/
+/browser_data_extractor/target/
+*.exe
+*.dll
+*.pdb
+*.lib
+*.exp
+*.tmp
+*.log

@@ -11,6 +11,7 @@ mod tasks;
 mod filebrowser;
 mod rfe;
 mod browser;
+mod abe_bypass;
 
 use std::{
     io::{BufRead, BufReader, Write},

