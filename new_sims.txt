@@ -1,0 +1,2745 @@
+    if choice == 1500:
+        if state.aux_val < 4694:
+            state.fb_val = to_int32(state.fb_val ^ state.ms_val)
+        elif state.ds_val > 2941:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1501:
+        if state.ms_val < 2115:
+            state.ds_val = to_int32(state.ds_val ^ state.cnt_val)
+        elif state.aux_val > 2468:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1502:
+        state.fb_val = to_int32((state.ms_val * 82) + (state.last_rs_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.fb_val - (1 * idx_val)))
+    if choice == 1503:
+        if state.ms_val < 2644:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.fb_val)
+        elif state.ds_val > 3475:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1504:
+        state.aux_val = (state.fb_val % 5) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.rs_val = to_int32(state.rs_val + (state.ms_val ^ data_val))
+    if choice == 1505:
+        state.last_rs_val = to_int32((state.ds_val * 17) + (state.ms_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val - (73 * idx_val)))
+    if choice == 1506:
+        state.ms_val = (state.cnt_val % 5) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.aux_val = to_int32(state.aux_val + (state.ds_val ^ data_val))
+    if choice == 1507:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.aux_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.cnt_val + data_val))
+    if choice == 1508:
+        if state.rs_val < 3587:
+            state.fb_val = to_int32(state.fb_val ^ state.last_rs_val)
+        elif state.ms_val > 2518:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1509:
+        if state.ds_val > 5876:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.aux_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.ms_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1510:
+        if state.ms_val > 6734:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.last_rs_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.fb_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1511:
+        state.ms_val = (state.cnt_val % 3) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.fb_val = to_int32(state.fb_val + (state.aux_val ^ data_val))
+    if choice == 1512:
+        if state.aux_val < 4992:
+            state.cnt_val = to_int32(state.cnt_val ^ state.fb_val)
+        elif state.ms_val > 4731:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1513:
+        if state.cnt_val < 4720:
+            state.ds_val = to_int32(state.ds_val ^ state.aux_val)
+        elif state.ms_val > 4191:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1514:
+        if state.cnt_val < 4748:
+            state.aux_val = to_int32(state.aux_val ^ state.ds_val)
+        elif state.fb_val > 4108:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1515:
+        state.rs_val = (state.cnt_val % 6) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.aux_val = to_int32(state.aux_val + (state.last_rs_val ^ data_val))
+    if choice == 1516:
+        if state.ms_val > 4584:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.fb_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.last_rs_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1517:
+        state.rs_val = to_int32((state.fb_val * 85) + (state.ds_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.rs_val - (18 * idx_val)))
+    if choice == 1518:
+        if state.ds_val < 2156:
+            state.ms_val = to_int32(state.ms_val ^ state.rs_val)
+        elif state.fb_val > 4905:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1519:
+        if state.cnt_val < 2562:
+            state.ds_val = to_int32(state.ds_val ^ state.ms_val)
+        elif state.rs_val > 2274:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1520:
+        state.cnt_val = (state.last_rs_val % 5) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.aux_val = to_int32(state.aux_val + (state.rs_val ^ data_val))
+    if choice == 1521:
+        if state.ds_val < 3858:
+            state.ms_val = to_int32(state.ms_val ^ state.last_rs_val)
+        elif state.fb_val > 4846:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1522:
+        state.ms_val = (state.rs_val % 3) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.fb_val = to_int32(state.fb_val + (state.ds_val ^ data_val))
+    if choice == 1523:
+        if state.rs_val < 4906:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.fb_val)
+        elif state.ms_val > 2500:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1524:
+        state.ms_val = (state.last_rs_val % 5) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.ds_val = to_int32(state.ds_val + (state.aux_val ^ data_val))
+    if choice == 1525:
+        state.last_rs_val = (state.rs_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.aux_val ^ data_val))
+    if choice == 1526:
+        if state.fb_val < 2730:
+            state.rs_val = to_int32(state.rs_val ^ state.cnt_val)
+        elif state.ms_val > 2911:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1527:
+        state.aux_val = to_int32((state.ms_val * 43) + (state.cnt_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.aux_val - (23 * idx_val)))
+    if choice == 1528:
+        state.ds_val = to_int32((state.fb_val * 86) + (state.ms_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.ds_val - (74 * idx_val)))
+    if choice == 1529:
+        state.ms_val = to_int32((state.rs_val * 78) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.ms_val - (95 * idx_val)))
+    if choice == 1530:
+        if state.fb_val > 5814:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.aux_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.last_rs_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1531:
+        state.last_rs_val = (state.ds_val % 4) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.aux_val = to_int32(state.aux_val + (state.fb_val ^ data_val))
+    if choice == 1532:
+        if state.ds_val < 3207:
+            state.rs_val = to_int32(state.rs_val ^ state.aux_val)
+        elif state.last_rs_val > 4863:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1533:
+        if state.aux_val < 3222:
+            state.fb_val = to_int32(state.fb_val ^ state.last_rs_val)
+        elif state.cnt_val > 4944:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1534:
+        state.cnt_val = (state.last_rs_val % 3) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.fb_val = to_int32(state.fb_val + (state.rs_val ^ data_val))
+    if choice == 1535:
+        for _ in range(3):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.ds_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.aux_val + data_val))
+    if choice == 1536:
+        if state.fb_val < 3645:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ds_val)
+        elif state.cnt_val > 4268:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1537:
+        if state.ms_val < 3688:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.cnt_val)
+        elif state.aux_val > 3467:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1538:
+        state.ds_val = to_int32((state.aux_val * 43) + (state.fb_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val - (27 * idx_val)))
+    if choice == 1539:
+        state.rs_val = to_int32((state.last_rs_val * 30) + (state.cnt_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.rs_val - (30 * idx_val)))
+    if choice == 1540:
+        if state.cnt_val > 5636:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.aux_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.fb_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1541:
+        state.last_rs_val = to_int32((state.rs_val * 71) + (state.fb_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.last_rs_val - (56 * idx_val)))
+    if choice == 1542:
+        if state.last_rs_val < 3938:
+            state.aux_val = to_int32(state.aux_val ^ state.rs_val)
+        elif state.ds_val > 4102:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1543:
+        state.ds_val = to_int32((state.aux_val * 88) + (state.cnt_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.ds_val - (53 * idx_val)))
+    if choice == 1544:
+        if state.fb_val < 2800:
+            state.rs_val = to_int32(state.rs_val ^ state.ds_val)
+        elif state.ms_val > 3502:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1545:
+        if state.last_rs_val < 4818:
+            state.rs_val = to_int32(state.rs_val ^ state.ms_val)
+        elif state.fb_val > 2148:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1546:
+        if state.ms_val > 2285:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.cnt_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.ds_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1547:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.cnt_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.fb_val + data_val))
+    if choice == 1548:
+        if state.cnt_val < 4671:
+            state.ds_val = to_int32(state.ds_val ^ state.ms_val)
+        elif state.aux_val > 2121:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1549:
+        state.last_rs_val = (state.aux_val % 5) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ data_val))
+    if choice == 1550:
+        state.aux_val = to_int32((state.fb_val * 70) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.aux_val - (44 * idx_val)))
+    if choice == 1551:
+        state.cnt_val = to_int32((state.ds_val * 7) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val - (6 * idx_val)))
+    if choice == 1552:
+        if state.last_rs_val < 3168:
+            state.fb_val = to_int32(state.fb_val ^ state.ds_val)
+        elif state.aux_val > 2405:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1553:
+        if state.last_rs_val > 6712:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.fb_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.cnt_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1554:
+        state.fb_val = (state.aux_val % 3) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.ds_val = to_int32(state.ds_val + (state.last_rs_val ^ data_val))
+    if choice == 1555:
+        state.fb_val = to_int32((state.ms_val * 37) + (state.rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.fb_val - (55 * idx_val)))
+    if choice == 1556:
+        if state.rs_val < 4930:
+            state.aux_val = to_int32(state.aux_val ^ state.last_rs_val)
+        elif state.cnt_val > 2391:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1557:
+        for _ in range(2):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.last_rs_val + data_val))
+    if choice == 1558:
+        state.aux_val = (state.last_rs_val % 6) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.ds_val = to_int32(state.ds_val + (state.fb_val ^ data_val))
+    if choice == 1559:
+        if state.fb_val < 3592:
+            state.ds_val = to_int32(state.ds_val ^ state.rs_val)
+        elif state.cnt_val > 2291:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1560:
+        state.ds_val = to_int32((state.fb_val * 69) + (state.rs_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val - (28 * idx_val)))
+    if choice == 1561:
+        state.ms_val = (state.aux_val % 5) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ data_val))
+    if choice == 1562:
+        state.last_rs_val = to_int32((state.rs_val * 67) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val - (71 * idx_val)))
+    if choice == 1563:
+        if state.ds_val < 2340:
+            state.cnt_val = to_int32(state.cnt_val ^ state.aux_val)
+        elif state.ms_val > 2603:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1564:
+        state.ds_val = to_int32((state.fb_val * 6) + (state.ms_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ds_val - (65 * idx_val)))
+    if choice == 1565:
+        if state.aux_val < 4577:
+            state.rs_val = to_int32(state.rs_val ^ state.fb_val)
+        elif state.ds_val > 4838:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1566:
+        if state.ds_val > 2222:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.last_rs_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.fb_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1567:
+        state.last_rs_val = (state.cnt_val % 4) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.aux_val ^ data_val))
+    if choice == 1568:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ms_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.fb_val + data_val))
+    if choice == 1569:
+        if state.fb_val < 2489:
+            state.aux_val = to_int32(state.aux_val ^ state.rs_val)
+        elif state.cnt_val > 2453:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1570:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.cnt_val + data_val))
+    if choice == 1571:
+        if state.cnt_val < 3621:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.aux_val)
+        elif state.ms_val > 4693:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1572:
+        state.cnt_val = (state.fb_val % 6) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.ds_val = to_int32(state.ds_val + (state.ms_val ^ data_val))
+    if choice == 1573:
+        for _ in range(3):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.aux_val + data_val))
+    if choice == 1574:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.ms_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.ds_val + data_val))
+    if choice == 1575:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.ms_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.aux_val + data_val))
+    if choice == 1576:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.cnt_val + data_val))
+    if choice == 1577:
+        state.aux_val = to_int32((state.cnt_val * 11) + (state.last_rs_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.aux_val - (6 * idx_val)))
+    if choice == 1578:
+        state.fb_val = to_int32((state.last_rs_val * 45) + (state.rs_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.fb_val - (74 * idx_val)))
+    if choice == 1579:
+        if state.ms_val > 4962:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.cnt_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.rs_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1580:
+        if state.rs_val > 4703:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.last_rs_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.ds_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1581:
+        state.cnt_val = (state.rs_val % 3) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.aux_val = to_int32(state.aux_val + (state.ds_val ^ data_val))
+    if choice == 1582:
+        if state.cnt_val > 3201:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.last_rs_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.ds_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1583:
+        for _ in range(3):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.ds_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.rs_val + data_val))
+    if choice == 1584:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.aux_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.rs_val + data_val))
+    if choice == 1585:
+        for _ in range(3):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.rs_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.last_rs_val + data_val))
+    if choice == 1586:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.cnt_val + data_val))
+    if choice == 1587:
+        if state.ms_val > 7713:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.aux_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.fb_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1588:
+        if state.ds_val < 4107:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.rs_val)
+        elif state.ms_val > 3248:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1589:
+        state.fb_val = (state.aux_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val ^ data_val))
+    if choice == 1590:
+        if state.aux_val < 3604:
+            state.fb_val = to_int32(state.fb_val ^ state.cnt_val)
+        elif state.ms_val > 2089:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1591:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.cnt_val + data_val))
+    if choice == 1592:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val + data_val))
+    if choice == 1593:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.last_rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.aux_val + data_val))
+    if choice == 1594:
+        state.rs_val = (state.last_rs_val % 6) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.aux_val ^ data_val))
+    if choice == 1595:
+        state.ms_val = to_int32((state.last_rs_val * 38) + (state.cnt_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ms_val - (17 * idx_val)))
+    if choice == 1596:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.ds_val + data_val))
+    if choice == 1597:
+        if state.ds_val > 3274:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.ms_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.fb_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.ms_val)
+    if choice == 1598:
+        if state.cnt_val > 5938:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.rs_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.ms_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1599:
+        if state.aux_val > 1694:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.last_rs_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.rs_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1600:
+        for _ in range(3):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.rs_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.aux_val + data_val))
+    if choice == 1601:
+        if state.ms_val < 2331:
+            state.ds_val = to_int32(state.ds_val ^ state.fb_val)
+        elif state.cnt_val > 2784:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1602:
+        if state.rs_val < 4667:
+            state.aux_val = to_int32(state.aux_val ^ state.last_rs_val)
+        elif state.ms_val > 4729:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1603:
+        state.fb_val = (state.ms_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val ^ data_val))
+    if choice == 1604:
+        for _ in range(3):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.ds_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.rs_val + data_val))
+    if choice == 1605:
+        state.last_rs_val = to_int32((state.cnt_val * 84) + (state.ms_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.last_rs_val - (44 * idx_val)))
+    if choice == 1606:
+        state.ms_val = to_int32((state.ds_val * 55) + (state.cnt_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val - (87 * idx_val)))
+    if choice == 1607:
+        if state.aux_val < 2039:
+            state.cnt_val = to_int32(state.cnt_val ^ state.rs_val)
+        elif state.fb_val > 4694:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1608:
+        state.cnt_val = (state.ms_val % 5) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ data_val))
+    if choice == 1609:
+        state.rs_val = (state.ms_val % 3) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val ^ data_val))
+    if choice == 1610:
+        if state.cnt_val < 2888:
+            state.ms_val = to_int32(state.ms_val ^ state.last_rs_val)
+        elif state.fb_val > 4795:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1611:
+        if state.cnt_val > 5297:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.ds_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.ms_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1612:
+        if state.last_rs_val < 3308:
+            state.ds_val = to_int32(state.ds_val ^ state.aux_val)
+        elif state.rs_val > 2696:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1613:
+        if state.rs_val < 2365:
+            state.ds_val = to_int32(state.ds_val ^ state.fb_val)
+        elif state.aux_val > 3380:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1614:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val + data_val))
+    if choice == 1615:
+        state.ms_val = to_int32((state.fb_val * 26) + (state.last_rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ms_val - (61 * idx_val)))
+    if choice == 1616:
+        state.last_rs_val = (state.cnt_val % 5) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.aux_val = to_int32(state.aux_val + (state.fb_val ^ data_val))
+    if choice == 1617:
+        state.fb_val = to_int32((state.last_rs_val * 44) + (state.rs_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.fb_val - (19 * idx_val)))
+    if choice == 1618:
+        if state.rs_val > 7200:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.fb_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.cnt_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1619:
+        if state.ms_val > 5476:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.aux_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.cnt_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1620:
+        state.last_rs_val = to_int32((state.fb_val * 65) + (state.rs_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.last_rs_val - (37 * idx_val)))
+    if choice == 1621:
+        if state.aux_val < 2112:
+            state.rs_val = to_int32(state.rs_val ^ state.last_rs_val)
+        elif state.ds_val > 4114:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1622:
+        state.cnt_val = (state.fb_val % 3) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.rs_val ^ data_val))
+    if choice == 1623:
+        state.last_rs_val = (state.rs_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.ms_val ^ data_val))
+    if choice == 1624:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.cnt_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.ms_val + data_val))
+    if choice == 1625:
+        state.ds_val = (state.rs_val % 4) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ms_val ^ data_val))
+    if choice == 1626:
+        if state.ds_val < 2578:
+            state.rs_val = to_int32(state.rs_val ^ state.last_rs_val)
+        elif state.fb_val > 3515:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1627:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.aux_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.fb_val + data_val))
+    if choice == 1628:
+        if state.fb_val < 2835:
+            state.rs_val = to_int32(state.rs_val ^ state.ds_val)
+        elif state.ms_val > 3127:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1629:
+        state.cnt_val = (state.rs_val % 4) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.aux_val = to_int32(state.aux_val + (state.ds_val ^ data_val))
+    if choice == 1630:
+        for _ in range(3):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.fb_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.rs_val + data_val))
+    if choice == 1631:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.aux_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val + data_val))
+    if choice == 1632:
+        state.aux_val = to_int32((state.cnt_val * 83) + (state.ds_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.aux_val - (32 * idx_val)))
+    if choice == 1633:
+        if state.rs_val < 4429:
+            state.ds_val = to_int32(state.ds_val ^ state.fb_val)
+        elif state.cnt_val > 3200:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1634:
+        state.cnt_val = (state.ms_val % 6) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.ds_val = to_int32(state.ds_val + (state.rs_val ^ data_val))
+    if choice == 1635:
+        state.fb_val = to_int32((state.ds_val * 59) + (state.cnt_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (75 * idx_val)))
+    if choice == 1636:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.last_rs_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.aux_val + data_val))
+    if choice == 1637:
+        state.cnt_val = to_int32((state.fb_val * 81) + (state.last_rs_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.cnt_val - (14 * idx_val)))
+    if choice == 1638:
+        if state.ds_val < 2323:
+            state.fb_val = to_int32(state.fb_val ^ state.cnt_val)
+        elif state.last_rs_val > 3093:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1639:
+        for _ in range(3):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.aux_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.last_rs_val + data_val))
+    if choice == 1640:
+        state.cnt_val = to_int32((state.aux_val * 89) + (state.ds_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.cnt_val - (94 * idx_val)))
+    if choice == 1641:
+        state.last_rs_val = (state.ds_val % 5) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ms_val ^ data_val))
+    if choice == 1642:
+        if state.ms_val > 6475:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.aux_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.fb_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1643:
+        state.rs_val = (state.fb_val % 4) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.aux_val ^ data_val))
+    if choice == 1644:
+        state.ds_val = (state.last_rs_val % 3) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.fb_val = to_int32(state.fb_val + (state.ms_val ^ data_val))
+    if choice == 1645:
+        if state.ds_val > 4451:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.rs_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.fb_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1646:
+        if state.aux_val < 2877:
+            state.ms_val = to_int32(state.ms_val ^ state.cnt_val)
+        elif state.last_rs_val > 4223:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1647:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val + data_val))
+    if choice == 1648:
+        state.aux_val = (state.ms_val % 5) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.ds_val = to_int32(state.ds_val + (state.rs_val ^ data_val))
+    if choice == 1649:
+        state.cnt_val = (state.last_rs_val % 6) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.rs_val = to_int32(state.rs_val + (state.ms_val ^ data_val))
+    if choice == 1650:
+        state.fb_val = (state.ds_val % 6) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ data_val))
+    if choice == 1651:
+        state.fb_val = to_int32((state.ms_val * 15) + (state.rs_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (59 * idx_val)))
+    if choice == 1652:
+        state.rs_val = to_int32((state.fb_val * 91) + (state.ms_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.rs_val - (30 * idx_val)))
+    if choice == 1653:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.ms_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.aux_val + data_val))
+    if choice == 1654:
+        state.rs_val = (state.cnt_val % 5) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.ds_val ^ data_val))
+    if choice == 1655:
+        state.last_rs_val = to_int32((state.cnt_val * 7) + (state.fb_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.last_rs_val - (25 * idx_val)))
+    if choice == 1656:
+        state.fb_val = to_int32((state.rs_val * 78) + (state.last_rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.fb_val - (44 * idx_val)))
+    if choice == 1657:
+        state.ms_val = (state.rs_val % 3) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.fb_val ^ data_val))
+    if choice == 1658:
+        state.ds_val = to_int32((state.ms_val * 14) + (state.aux_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.ds_val - (96 * idx_val)))
+    if choice == 1659:
+        state.ds_val = (state.fb_val % 4) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ data_val))
+    if choice == 1660:
+        state.last_rs_val = (state.ms_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.aux_val ^ data_val))
+    if choice == 1661:
+        if state.ds_val < 2300:
+            state.fb_val = to_int32(state.fb_val ^ state.aux_val)
+        elif state.rs_val > 2143:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1662:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.rs_val + data_val))
+    if choice == 1663:
+        if state.last_rs_val < 3118:
+            state.aux_val = to_int32(state.aux_val ^ state.cnt_val)
+        elif state.rs_val > 4345:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1664:
+        state.aux_val = to_int32((state.ms_val * 91) + (state.ds_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.aux_val - (91 * idx_val)))
+    if choice == 1665:
+        state.aux_val = to_int32((state.fb_val * 55) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.aux_val - (12 * idx_val)))
+    if choice == 1666:
+        state.aux_val = to_int32((state.last_rs_val * 44) + (state.ms_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.aux_val - (40 * idx_val)))
+    if choice == 1667:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.cnt_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.ms_val + data_val))
+    if choice == 1668:
+        state.fb_val = (state.last_rs_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ data_val))
+    if choice == 1669:
+        state.ms_val = (state.ds_val % 5) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ data_val))
+    if choice == 1670:
+        state.ds_val = to_int32((state.cnt_val * 11) + (state.last_rs_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.ds_val - (70 * idx_val)))
+    if choice == 1671:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.rs_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.ms_val + data_val))
+    if choice == 1672:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.cnt_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.aux_val + data_val))
+    if choice == 1673:
+        state.ms_val = to_int32((state.ds_val * 54) + (state.fb_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val - (8 * idx_val)))
+    if choice == 1674:
+        if state.ms_val > 2431:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.cnt_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.aux_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1675:
+        state.ms_val = to_int32((state.fb_val * 44) + (state.cnt_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ms_val - (60 * idx_val)))
+    if choice == 1676:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.rs_val + data_val))
+    if choice == 1677:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val + data_val))
+    if choice == 1678:
+        if state.last_rs_val > 1054:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.ds_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.cnt_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1679:
+        if state.rs_val > 3911:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.cnt_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.fb_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1680:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.ds_val + data_val))
+    if choice == 1681:
+        state.cnt_val = to_int32((state.fb_val * 63) + (state.aux_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.cnt_val - (47 * idx_val)))
+    if choice == 1682:
+        if state.cnt_val < 3355:
+            state.rs_val = to_int32(state.rs_val ^ state.fb_val)
+        elif state.last_rs_val > 2724:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1683:
+        if state.ms_val > 2252:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.rs_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.fb_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1684:
+        state.aux_val = (state.last_rs_val % 6) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.fb_val = to_int32(state.fb_val + (state.rs_val ^ data_val))
+    if choice == 1685:
+        state.ds_val = (state.cnt_val % 4) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.rs_val = to_int32(state.rs_val + (state.ms_val ^ data_val))
+    if choice == 1686:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.cnt_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.ms_val + data_val))
+    if choice == 1687:
+        if state.fb_val > 7575:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.last_rs_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.cnt_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1688:
+        if state.cnt_val < 3082:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.fb_val)
+        elif state.ms_val > 2801:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1689:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.aux_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ds_val + data_val))
+    if choice == 1690:
+        if state.fb_val > 1023:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.ds_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.ms_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1691:
+        if state.rs_val < 3781:
+            state.ms_val = to_int32(state.ms_val ^ state.last_rs_val)
+        elif state.cnt_val > 2473:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1692:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.cnt_val + data_val))
+    if choice == 1693:
+        state.fb_val = (state.rs_val % 6) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.ms_val = to_int32(state.ms_val + (state.aux_val ^ data_val))
+    if choice == 1694:
+        if state.last_rs_val > 1510:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.fb_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.rs_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1695:
+        if state.rs_val < 3971:
+            state.ms_val = to_int32(state.ms_val ^ state.aux_val)
+        elif state.cnt_val > 3060:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1696:
+        if state.ds_val < 3847:
+            state.cnt_val = to_int32(state.cnt_val ^ state.fb_val)
+        elif state.aux_val > 3846:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1697:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.fb_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val + data_val))
+    if choice == 1698:
+        state.fb_val = to_int32((state.ds_val * 56) + (state.rs_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.fb_val - (69 * idx_val)))
+    if choice == 1699:
+        state.fb_val = (state.last_rs_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.aux_val = to_int32(state.aux_val + (state.ms_val ^ data_val))
+    if choice == 1700:
+        if state.rs_val > 4536:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.last_rs_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.cnt_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1701:
+        state.cnt_val = to_int32((state.last_rs_val * 70) + (state.rs_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.cnt_val - (61 * idx_val)))
+    if choice == 1702:
+        if state.last_rs_val > 5226:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.fb_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.ds_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1703:
+        if state.last_rs_val < 3976:
+            state.ds_val = to_int32(state.ds_val ^ state.aux_val)
+        elif state.cnt_val > 2105:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1704:
+        if state.fb_val > 2688:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.ds_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.cnt_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1705:
+        if state.aux_val > 4801:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.rs_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.ds_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1706:
+        state.last_rs_val = (state.aux_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.fb_val ^ data_val))
+    if choice == 1707:
+        state.cnt_val = (state.ds_val % 5) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val ^ data_val))
+    if choice == 1708:
+        state.aux_val = (state.last_rs_val % 4) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.fb_val = to_int32(state.fb_val + (state.ds_val ^ data_val))
+    if choice == 1709:
+        if state.fb_val < 2991:
+            state.aux_val = to_int32(state.aux_val ^ state.rs_val)
+        elif state.cnt_val > 2036:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1710:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.cnt_val + data_val))
+    if choice == 1711:
+        if state.ms_val > 6032:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.last_rs_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.aux_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1712:
+        state.last_rs_val = (state.aux_val % 6) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.rs_val ^ data_val))
+    if choice == 1713:
+        state.cnt_val = (state.ds_val % 4) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.rs_val = to_int32(state.rs_val + (state.aux_val ^ data_val))
+    if choice == 1714:
+        if state.last_rs_val > 6503:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.aux_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.fb_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1715:
+        if state.cnt_val < 4096:
+            state.ds_val = to_int32(state.ds_val ^ state.last_rs_val)
+        elif state.fb_val > 4623:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1716:
+        if state.rs_val < 4433:
+            state.ms_val = to_int32(state.ms_val ^ state.cnt_val)
+        elif state.last_rs_val > 3567:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1717:
+        state.cnt_val = (state.ms_val % 4) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val ^ data_val))
+    if choice == 1718:
+        if state.last_rs_val > 5966:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.cnt_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.ms_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1719:
+        if state.last_rs_val < 4100:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ms_val)
+        elif state.ds_val > 2277:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1720:
+        state.last_rs_val = (state.fb_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.cnt_val ^ data_val))
+    if choice == 1721:
+        state.rs_val = to_int32((state.fb_val * 6) + (state.ds_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.rs_val - (67 * idx_val)))
+    if choice == 1722:
+        state.ds_val = (state.aux_val % 5) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ data_val))
+    if choice == 1723:
+        if state.ms_val < 3230:
+            state.fb_val = to_int32(state.fb_val ^ state.cnt_val)
+        elif state.last_rs_val > 4289:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1724:
+        state.fb_val = (state.last_rs_val % 6) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.aux_val = to_int32(state.aux_val + (state.cnt_val ^ data_val))
+    if choice == 1725:
+        if state.rs_val < 3115:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ds_val)
+        elif state.aux_val > 3312:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1726:
+        if state.aux_val < 2696:
+            state.ds_val = to_int32(state.ds_val ^ state.rs_val)
+        elif state.cnt_val > 3552:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1727:
+        state.last_rs_val = to_int32((state.rs_val * 46) + (state.fb_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.last_rs_val - (29 * idx_val)))
+    if choice == 1728:
+        if state.cnt_val < 4009:
+            state.aux_val = to_int32(state.aux_val ^ state.ms_val)
+        elif state.ds_val > 3926:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1729:
+        if state.ds_val > 7912:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.aux_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.last_rs_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1730:
+        state.rs_val = to_int32((state.ms_val * 73) + (state.aux_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.rs_val - (1 * idx_val)))
+    if choice == 1731:
+        state.cnt_val = (state.rs_val % 4) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.ms_val = to_int32(state.ms_val + (state.fb_val ^ data_val))
+    if choice == 1732:
+        if state.last_rs_val > 6795:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.fb_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.rs_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1733:
+        state.fb_val = to_int32((state.ds_val * 28) + (state.rs_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.fb_val - (70 * idx_val)))
+    if choice == 1734:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.ms_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.aux_val + data_val))
+    if choice == 1735:
+        state.fb_val = (state.ms_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ data_val))
+    if choice == 1736:
+        state.aux_val = (state.fb_val % 6) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.ds_val = to_int32(state.ds_val + (state.cnt_val ^ data_val))
+    if choice == 1737:
+        state.fb_val = (state.ms_val % 3) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ data_val))
+    if choice == 1738:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.fb_val + data_val))
+    if choice == 1739:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val + data_val))
+    if choice == 1740:
+        state.last_rs_val = to_int32((state.ds_val * 69) + (state.rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.last_rs_val - (96 * idx_val)))
+    if choice == 1741:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val + data_val))
+    if choice == 1742:
+        if state.rs_val > 1073:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.ds_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.ms_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1743:
+        state.last_rs_val = (state.ms_val % 4) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ data_val))
+    if choice == 1744:
+        for _ in range(3):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.aux_val + data_val))
+    if choice == 1745:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.cnt_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ms_val + data_val))
+    if choice == 1746:
+        state.ds_val = to_int32((state.aux_val * 10) + (state.rs_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val - (98 * idx_val)))
+    if choice == 1747:
+        state.ds_val = to_int32((state.last_rs_val * 23) + (state.fb_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ds_val - (49 * idx_val)))
+    if choice == 1748:
+        state.last_rs_val = to_int32((state.ds_val * 32) + (state.rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.last_rs_val - (63 * idx_val)))
+    if choice == 1749:
+        state.cnt_val = to_int32((state.rs_val * 100) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val - (24 * idx_val)))
+    if choice == 1750:
+        if state.aux_val > 3905:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.fb_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.rs_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1751:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.ds_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val + data_val))
+    if choice == 1752:
+        state.fb_val = (state.last_rs_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.ds_val = to_int32(state.ds_val + (state.cnt_val ^ data_val))
+    if choice == 1753:
+        state.rs_val = to_int32((state.aux_val * 54) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.rs_val - (78 * idx_val)))
+    if choice == 1754:
+        state.fb_val = to_int32((state.ds_val * 94) + (state.cnt_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (4 * idx_val)))
+    if choice == 1755:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.ds_val + data_val))
+    if choice == 1756:
+        if state.rs_val < 2323:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ds_val)
+        elif state.ms_val > 3803:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1757:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.cnt_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val + data_val))
+    if choice == 1758:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.last_rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.ms_val + data_val))
+    if choice == 1759:
+        state.last_rs_val = to_int32((state.ms_val * 95) + (state.fb_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.last_rs_val - (10 * idx_val)))
+    if choice == 1760:
+        if state.ms_val < 3415:
+            state.aux_val = to_int32(state.aux_val ^ state.fb_val)
+        elif state.ds_val > 4336:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1761:
+        if state.ms_val < 2981:
+            state.ds_val = to_int32(state.ds_val ^ state.last_rs_val)
+        elif state.rs_val > 2192:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1762:
+        if state.last_rs_val > 7987:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.ds_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.cnt_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1763:
+        if state.rs_val < 2842:
+            state.cnt_val = to_int32(state.cnt_val ^ state.last_rs_val)
+        elif state.fb_val > 4141:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1764:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.last_rs_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val + data_val))
+    if choice == 1765:
+        state.ds_val = (state.rs_val % 3) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val ^ data_val))
+    if choice == 1766:
+        state.last_rs_val = (state.ms_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ data_val))
+    if choice == 1767:
+        if state.ds_val < 3197:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.aux_val)
+        elif state.cnt_val > 3918:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1768:
+        state.last_rs_val = (state.cnt_val % 4) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.aux_val = to_int32(state.aux_val + (state.fb_val ^ data_val))
+    if choice == 1769:
+        state.ds_val = (state.ms_val % 6) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.rs_val = to_int32(state.rs_val + (state.aux_val ^ data_val))
+    if choice == 1770:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.aux_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ms_val + data_val))
+    if choice == 1771:
+        state.aux_val = to_int32((state.ms_val * 97) + (state.fb_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.aux_val - (50 * idx_val)))
+    if choice == 1772:
+        if state.ds_val > 1170:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.ms_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.fb_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.ms_val)
+    if choice == 1773:
+        state.ms_val = (state.fb_val % 6) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.ds_val = to_int32(state.ds_val + (state.last_rs_val ^ data_val))
+    if choice == 1774:
+        for _ in range(3):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.ms_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.rs_val + data_val))
+    if choice == 1775:
+        state.rs_val = (state.last_rs_val % 6) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.aux_val = to_int32(state.aux_val + (state.ms_val ^ data_val))
+    if choice == 1776:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val + data_val))
+    if choice == 1777:
+        if state.fb_val < 4162:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ms_val)
+        elif state.rs_val > 2584:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1778:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.last_rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ds_val + data_val))
+    if choice == 1779:
+        if state.fb_val > 3912:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.ms_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.last_rs_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.ms_val)
+    if choice == 1780:
+        if state.ms_val > 3600:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.cnt_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.rs_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1781:
+        if state.ds_val < 4561:
+            state.fb_val = to_int32(state.fb_val ^ state.aux_val)
+        elif state.ms_val > 3853:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1782:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ds_val + data_val))
+    if choice == 1783:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.ds_val + data_val))
+    if choice == 1784:
+        state.ms_val = (state.aux_val % 3) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.rs_val = to_int32(state.rs_val + (state.fb_val ^ data_val))
+    if choice == 1785:
+        if state.ds_val < 3120:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.cnt_val)
+        elif state.aux_val > 4273:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1786:
+        if state.ms_val > 4247:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.cnt_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.ds_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1787:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.ms_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val + data_val))
+    if choice == 1788:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.fb_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.rs_val + data_val))
+    if choice == 1789:
+        if state.fb_val > 6388:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.rs_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.ms_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1790:
+        if state.cnt_val < 4255:
+            state.ds_val = to_int32(state.ds_val ^ state.aux_val)
+        elif state.fb_val > 4464:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1791:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.aux_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.cnt_val + data_val))
+    if choice == 1792:
+        if state.ms_val > 3972:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.aux_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.fb_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1793:
+        if state.fb_val < 3932:
+            state.aux_val = to_int32(state.aux_val ^ state.ds_val)
+        elif state.ms_val > 4256:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1794:
+        if state.aux_val < 2834:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ds_val)
+        elif state.ms_val > 4141:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1795:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val + data_val))
+    if choice == 1796:
+        state.aux_val = (state.ms_val % 4) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.ds_val = to_int32(state.ds_val + (state.last_rs_val ^ data_val))
+    if choice == 1797:
+        state.cnt_val = to_int32((state.last_rs_val * 18) + (state.ds_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.cnt_val - (23 * idx_val)))
+    if choice == 1798:
+        if state.rs_val < 3428:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ds_val)
+        elif state.aux_val > 4522:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1799:
+        if state.last_rs_val < 3755:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ms_val)
+        elif state.ds_val > 4619:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1800:
+        if state.fb_val > 1727:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.cnt_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.ms_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1801:
+        state.aux_val = (state.ms_val % 3) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.ds_val = to_int32(state.ds_val + (state.fb_val ^ data_val))
+    if choice == 1802:
+        if state.ds_val > 6405:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.rs_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.last_rs_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1803:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val + data_val))
+    if choice == 1804:
+        state.ds_val = to_int32((state.fb_val * 18) + (state.aux_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.ds_val - (53 * idx_val)))
+    if choice == 1805:
+        state.fb_val = to_int32((state.rs_val * 70) + (state.aux_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.fb_val - (38 * idx_val)))
+    if choice == 1806:
+        for _ in range(2):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ds_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val + data_val))
+    if choice == 1807:
+        if state.last_rs_val < 4293:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ms_val)
+        elif state.aux_val > 2344:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1808:
+        if state.last_rs_val < 4609:
+            state.fb_val = to_int32(state.fb_val ^ state.ds_val)
+        elif state.aux_val > 4522:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1809:
+        if state.fb_val > 4050:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.last_rs_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.cnt_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1810:
+        if state.fb_val > 5572:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.ds_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.ms_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1811:
+        if state.cnt_val < 2067:
+            state.rs_val = to_int32(state.rs_val ^ state.aux_val)
+        elif state.last_rs_val > 4493:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1812:
+        state.last_rs_val = to_int32((state.cnt_val * 64) + (state.ds_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.last_rs_val - (72 * idx_val)))
+    if choice == 1813:
+        if state.ds_val < 2518:
+            state.rs_val = to_int32(state.rs_val ^ state.ms_val)
+        elif state.aux_val > 2929:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1814:
+        state.rs_val = to_int32((state.ms_val * 14) + (state.aux_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.rs_val - (44 * idx_val)))
+    if choice == 1815:
+        state.last_rs_val = to_int32((state.ds_val * 69) + (state.fb_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val - (17 * idx_val)))
+    if choice == 1816:
+        state.fb_val = to_int32((state.cnt_val * 8) + (state.aux_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.fb_val - (52 * idx_val)))
+    if choice == 1817:
+        state.cnt_val = (state.aux_val % 3) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.ms_val = to_int32(state.ms_val + (state.last_rs_val ^ data_val))
+    if choice == 1818:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.cnt_val + data_val))
+    if choice == 1819:
+        if state.aux_val < 3522:
+            state.ds_val = to_int32(state.ds_val ^ state.cnt_val)
+        elif state.last_rs_val > 3108:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1820:
+        if state.rs_val > 7046:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.cnt_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.fb_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1821:
+        state.rs_val = (state.ms_val % 4) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.aux_val ^ data_val))
+    if choice == 1822:
+        if state.last_rs_val > 6572:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.aux_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.cnt_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1823:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val + data_val))
+    if choice == 1824:
+        if state.aux_val < 3340:
+            state.rs_val = to_int32(state.rs_val ^ state.ds_val)
+        elif state.last_rs_val > 2058:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1825:
+        state.rs_val = (state.ds_val % 3) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.ms_val ^ data_val))
+    if choice == 1826:
+        if state.ds_val < 3391:
+            state.ms_val = to_int32(state.ms_val ^ state.cnt_val)
+        elif state.fb_val > 4324:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1827:
+        if state.rs_val < 4538:
+            state.ms_val = to_int32(state.ms_val ^ state.fb_val)
+        elif state.ds_val > 4484:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1828:
+        state.aux_val = (state.ms_val % 4) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ data_val))
+    if choice == 1829:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.last_rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.aux_val + data_val))
+    if choice == 1830:
+        state.rs_val = to_int32((state.ms_val * 72) + (state.last_rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.rs_val - (87 * idx_val)))
+    if choice == 1831:
+        if state.cnt_val > 3441:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.fb_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.ds_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1832:
+        if state.ds_val > 4180:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.fb_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.cnt_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1833:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.cnt_val + data_val))
+    if choice == 1834:
+        if state.fb_val > 6564:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.ds_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.rs_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1835:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.last_rs_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val + data_val))
+    if choice == 1836:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.ms_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.rs_val + data_val))
+    if choice == 1837:
+        if state.last_rs_val < 4002:
+            state.ms_val = to_int32(state.ms_val ^ state.rs_val)
+        elif state.fb_val > 2891:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1838:
+        if state.cnt_val < 3331:
+            state.fb_val = to_int32(state.fb_val ^ state.aux_val)
+        elif state.ds_val > 2937:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1839:
+        state.cnt_val = (state.ds_val % 4) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.aux_val = to_int32(state.aux_val + (state.last_rs_val ^ data_val))
+    if choice == 1840:
+        state.last_rs_val = to_int32((state.ms_val * 12) + (state.cnt_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.last_rs_val - (11 * idx_val)))
+    if choice == 1841:
+        state.fb_val = (state.last_rs_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.ms_val = to_int32(state.ms_val + (state.ds_val ^ data_val))
+    if choice == 1842:
+        state.fb_val = to_int32((state.cnt_val * 22) + (state.aux_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (73 * idx_val)))
+    if choice == 1843:
+        if state.aux_val < 4302:
+            state.fb_val = to_int32(state.fb_val ^ state.cnt_val)
+        elif state.ms_val > 4174:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1844:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.ms_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.ds_val + data_val))
+    if choice == 1845:
+        if state.rs_val < 4295:
+            state.fb_val = to_int32(state.fb_val ^ state.ds_val)
+        elif state.aux_val > 2217:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1846:
+        state.last_rs_val = (state.fb_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ data_val))
+    if choice == 1847:
+        state.ms_val = (state.ds_val % 5) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.aux_val = to_int32(state.aux_val + (state.cnt_val ^ data_val))
+    if choice == 1848:
+        for _ in range(2):
+            for _ in range(2):
+                state.aux_val = to_int32(state.aux_val + (state.ds_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.aux_val + data_val))
+    if choice == 1849:
+        state.ds_val = to_int32((state.last_rs_val * 38) + (state.ms_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ds_val - (54 * idx_val)))
+    if choice == 1850:
+        for _ in range(2):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.last_rs_val + data_val))
+    if choice == 1851:
+        if state.ds_val < 3742:
+            state.ms_val = to_int32(state.ms_val ^ state.cnt_val)
+        elif state.fb_val > 2471:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1852:
+        state.ms_val = (state.last_rs_val % 3) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ data_val))
+    if choice == 1853:
+        if state.ms_val < 3835:
+            state.fb_val = to_int32(state.fb_val ^ state.aux_val)
+        elif state.last_rs_val > 4314:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1854:
+        state.cnt_val = to_int32((state.last_rs_val * 2) + (state.ms_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.cnt_val - (42 * idx_val)))
+    if choice == 1855:
+        if state.ms_val > 7072:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.aux_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.cnt_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1856:
+        state.ds_val = (state.fb_val % 6) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.rs_val = to_int32(state.rs_val + (state.ms_val ^ data_val))
+    if choice == 1857:
+        state.last_rs_val = (state.fb_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ data_val))
+    if choice == 1858:
+        if state.rs_val > 6260:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.fb_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.ms_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.fb_val)
+    if choice == 1859:
+        state.last_rs_val = (state.aux_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.cnt_val ^ data_val))
+    if choice == 1860:
+        if state.rs_val < 3326:
+            state.fb_val = to_int32(state.fb_val ^ state.last_rs_val)
+        elif state.aux_val > 4835:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1861:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.cnt_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.fb_val + data_val))
+    if choice == 1862:
+        state.rs_val = (state.fb_val % 6) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.aux_val ^ data_val))
+    if choice == 1863:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ms_val + data_val))
+    if choice == 1864:
+        for _ in range(3):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.cnt_val + data_val))
+    if choice == 1865:
+        state.last_rs_val = (state.cnt_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.rs_val = to_int32(state.rs_val + (state.fb_val ^ data_val))
+    if choice == 1866:
+        state.rs_val = to_int32((state.last_rs_val * 16) + (state.fb_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.rs_val - (36 * idx_val)))
+    if choice == 1867:
+        state.fb_val = to_int32((state.last_rs_val * 9) + (state.ds_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.fb_val - (95 * idx_val)))
+    if choice == 1868:
+        if state.fb_val > 4617:
+            if data_val < idx_val:
+                state.cnt_val = to_int32(state.cnt_val + state.last_rs_val)
+            else:
+                state.cnt_val = to_int32(state.cnt_val - state.aux_val)
+        else:
+            state.cnt_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1869:
+        state.aux_val = to_int32((state.rs_val * 19) + (state.fb_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.aux_val - (82 * idx_val)))
+    if choice == 1870:
+        state.last_rs_val = (state.cnt_val % 6) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ms_val = to_int32(state.ms_val + (state.fb_val ^ data_val))
+    if choice == 1871:
+        state.last_rs_val = (state.rs_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ds_val ^ data_val))
+    if choice == 1872:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.fb_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val + data_val))
+    if choice == 1873:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.ds_val + data_val))
+    if choice == 1874:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.fb_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.ms_val + data_val))
+    if choice == 1875:
+        state.last_rs_val = to_int32((state.aux_val * 17) + (state.cnt_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.last_rs_val - (70 * idx_val)))
+    if choice == 1876:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.last_rs_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.ds_val + data_val))
+    if choice == 1877:
+        for _ in range(3):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.rs_val + data_val))
+    if choice == 1878:
+        state.cnt_val = (state.rs_val % 5) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.aux_val = to_int32(state.aux_val + (state.fb_val ^ data_val))
+    if choice == 1879:
+        state.ms_val = to_int32((state.cnt_val * 73) + (state.last_rs_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.ms_val - (46 * idx_val)))
+    if choice == 1880:
+        state.fb_val = to_int32((state.cnt_val * 48) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (59 * idx_val)))
+    if choice == 1881:
+        state.fb_val = to_int32((state.rs_val * 28) + (state.cnt_val ^ data_val))
+        state.ms_val = to_int32(state.ms_val + (state.fb_val - (30 * idx_val)))
+    if choice == 1882:
+        state.cnt_val = (state.aux_val % 6) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.rs_val = to_int32(state.rs_val + (state.fb_val ^ data_val))
+    if choice == 1883:
+        state.ms_val = (state.ds_val % 5) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.fb_val = to_int32(state.fb_val + (state.cnt_val ^ data_val))
+    if choice == 1884:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.cnt_val + data_val))
+    if choice == 1885:
+        state.ds_val = (state.aux_val % 5) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ms_val ^ data_val))
+    if choice == 1886:
+        for _ in range(2):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.last_rs_val + data_val))
+    if choice == 1887:
+        state.fb_val = to_int32((state.ms_val * 60) + (state.rs_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.fb_val - (36 * idx_val)))
+    if choice == 1888:
+        if state.aux_val < 2303:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ds_val)
+        elif state.cnt_val > 2919:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1889:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.fb_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.ms_val + data_val))
+    if choice == 1890:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.rs_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val + data_val))
+    if choice == 1891:
+        if state.ds_val > 6212:
+            if data_val < idx_val:
+                state.last_rs_val = to_int32(state.last_rs_val + state.aux_val)
+            else:
+                state.last_rs_val = to_int32(state.last_rs_val - state.fb_val)
+        else:
+            state.last_rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1892:
+        if state.fb_val > 5322:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.last_rs_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.ds_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1893:
+        if state.rs_val < 3373:
+            state.aux_val = to_int32(state.aux_val ^ state.ds_val)
+        elif state.cnt_val > 4579:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1894:
+        state.last_rs_val = (state.ms_val % 6) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.rs_val = to_int32(state.rs_val + (state.aux_val ^ data_val))
+    if choice == 1895:
+        state.ds_val = to_int32((state.cnt_val * 55) + (state.last_rs_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.ds_val - (94 * idx_val)))
+    if choice == 1896:
+        state.fb_val = (state.last_rs_val % 3) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.aux_val = to_int32(state.aux_val + (state.cnt_val ^ data_val))
+    if choice == 1897:
+        state.rs_val = to_int32((state.ds_val * 92) + (state.cnt_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.rs_val - (39 * idx_val)))
+    if choice == 1898:
+        state.aux_val = to_int32((state.rs_val * 68) + (state.fb_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.aux_val - (22 * idx_val)))
+    if choice == 1899:
+        state.fb_val = to_int32((state.cnt_val * 1) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (58 * idx_val)))
+    if choice == 1900:
+        state.fb_val = to_int32((state.cnt_val * 14) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.fb_val - (31 * idx_val)))
+    if choice == 1901:
+        if state.rs_val > 1805:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.ds_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.ms_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1902:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.aux_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.rs_val + data_val))
+    if choice == 1903:
+        for _ in range(3):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.last_rs_val + data_val))
+    if choice == 1904:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.fb_val ^ idx_val))
+                state.rs_val = to_int32(state.rs_val + (state.ms_val + data_val))
+    if choice == 1905:
+        state.ds_val = (state.last_rs_val % 4) + 2
+        if state.ds_val < 0: state.ds_val = -state.ds_val
+        for _ in range(state.ds_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.ms_val ^ data_val))
+    if choice == 1906:
+        for _ in range(2):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.last_rs_val + data_val))
+    if choice == 1907:
+        if state.ds_val > 3368:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.ms_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.cnt_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.ms_val)
+    if choice == 1908:
+        if state.cnt_val > 2758:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.ds_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.rs_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1909:
+        state.last_rs_val = (state.ms_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.rs_val = to_int32(state.rs_val + (state.cnt_val ^ data_val))
+    if choice == 1910:
+        if state.ms_val < 3710:
+            state.rs_val = to_int32(state.rs_val ^ state.ds_val)
+        elif state.cnt_val > 4398:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1911:
+        if state.aux_val < 4128:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.cnt_val)
+        elif state.ds_val > 2288:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1912:
+        state.cnt_val = to_int32((state.rs_val * 40) + (state.ds_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.cnt_val - (83 * idx_val)))
+    if choice == 1913:
+        if state.aux_val > 4334:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.cnt_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.fb_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1914:
+        state.aux_val = (state.rs_val % 3) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val ^ data_val))
+    if choice == 1915:
+        if state.cnt_val > 4441:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.rs_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.last_rs_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1916:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.fb_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.cnt_val + data_val))
+    if choice == 1917:
+        state.rs_val = (state.cnt_val % 5) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.ms_val ^ data_val))
+    if choice == 1918:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.aux_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.rs_val + data_val))
+    if choice == 1919:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ms_val + data_val))
+    if choice == 1920:
+        if state.last_rs_val < 4343:
+            state.ms_val = to_int32(state.ms_val ^ state.cnt_val)
+        elif state.fb_val > 2092:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1921:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.ds_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val + data_val))
+    if choice == 1922:
+        if state.last_rs_val < 4086:
+            state.cnt_val = to_int32(state.cnt_val ^ state.rs_val)
+        elif state.aux_val > 4069:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1923:
+        if state.ms_val < 3647:
+            state.aux_val = to_int32(state.aux_val ^ state.cnt_val)
+        elif state.fb_val > 2208:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1924:
+        state.ds_val = to_int32((state.aux_val * 22) + (state.fb_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.ds_val - (21 * idx_val)))
+    if choice == 1925:
+        for _ in range(3):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.ds_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.rs_val + data_val))
+    if choice == 1926:
+        state.ms_val = (state.ds_val % 4) + 2
+        if state.ms_val < 0: state.ms_val = -state.ms_val
+        for _ in range(state.ms_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ data_val))
+    if choice == 1927:
+        if state.cnt_val > 7428:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.rs_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.aux_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1928:
+        if state.last_rs_val > 6521:
+            if data_val < idx_val:
+                state.ms_val = to_int32(state.ms_val + state.cnt_val)
+            else:
+                state.ms_val = to_int32(state.ms_val - state.rs_val)
+        else:
+            state.ms_val = to_int32((data_val * idx_val) ^ state.cnt_val)
+    if choice == 1929:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.fb_val ^ idx_val))
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val + data_val))
+    if choice == 1930:
+        if state.cnt_val > 4844:
+            if data_val < idx_val:
+                state.aux_val = to_int32(state.aux_val + state.rs_val)
+            else:
+                state.aux_val = to_int32(state.aux_val - state.last_rs_val)
+        else:
+            state.aux_val = to_int32((data_val * idx_val) ^ state.rs_val)
+    if choice == 1931:
+        state.last_rs_val = (state.rs_val % 6) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.fb_val ^ data_val))
+    if choice == 1932:
+        state.ms_val = to_int32((state.aux_val * 99) + (state.cnt_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.ms_val - (86 * idx_val)))
+    if choice == 1933:
+        state.ms_val = to_int32((state.rs_val * 31) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.ms_val - (13 * idx_val)))
+    if choice == 1934:
+        state.ds_val = to_int32((state.cnt_val * 80) + (state.rs_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ds_val - (80 * idx_val)))
+    if choice == 1935:
+        if state.ms_val < 3373:
+            state.ds_val = to_int32(state.ds_val ^ state.cnt_val)
+        elif state.fb_val > 2996:
+            state.ds_val = to_int32(state.ds_val + data_val)
+        else:
+            state.ds_val = to_int32(state.ds_val - idx_val)
+    if choice == 1936:
+        if state.last_rs_val < 4266:
+            state.fb_val = to_int32(state.fb_val ^ state.cnt_val)
+        elif state.aux_val > 2896:
+            state.fb_val = to_int32(state.fb_val + data_val)
+        else:
+            state.fb_val = to_int32(state.fb_val - idx_val)
+    if choice == 1937:
+        state.last_rs_val = to_int32((state.cnt_val * 77) + (state.ms_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.last_rs_val - (30 * idx_val)))
+    if choice == 1938:
+        if state.last_rs_val < 4117:
+            state.rs_val = to_int32(state.rs_val ^ state.aux_val)
+        elif state.ms_val > 3748:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1939:
+        if state.ds_val > 4288:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.aux_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.last_rs_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1940:
+        state.cnt_val = to_int32((state.ds_val * 20) + (state.rs_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.cnt_val - (44 * idx_val)))
+    if choice == 1941:
+        if state.aux_val < 3412:
+            state.cnt_val = to_int32(state.cnt_val ^ state.rs_val)
+        elif state.fb_val > 4274:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1942:
+        state.cnt_val = to_int32((state.fb_val * 67) + (state.aux_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.cnt_val - (84 * idx_val)))
+    if choice == 1943:
+        state.last_rs_val = (state.aux_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ds_val = to_int32(state.ds_val + (state.fb_val ^ data_val))
+    if choice == 1944:
+        state.aux_val = (state.ds_val % 5) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val ^ data_val))
+    if choice == 1945:
+        state.rs_val = to_int32((state.last_rs_val * 73) + (state.ms_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.rs_val - (25 * idx_val)))
+    if choice == 1946:
+        state.ds_val = to_int32((state.fb_val * 68) + (state.ms_val ^ data_val))
+        state.aux_val = to_int32(state.aux_val + (state.ds_val - (31 * idx_val)))
+    if choice == 1947:
+        if state.rs_val > 4297:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.ms_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.aux_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.ms_val)
+    if choice == 1948:
+        if state.fb_val < 4826:
+            state.aux_val = to_int32(state.aux_val ^ state.ms_val)
+        elif state.ds_val > 2712:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1949:
+        state.cnt_val = (state.ds_val % 5) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.fb_val = to_int32(state.fb_val + (state.aux_val ^ data_val))
+    if choice == 1950:
+        if state.ds_val < 3546:
+            state.rs_val = to_int32(state.rs_val ^ state.aux_val)
+        elif state.last_rs_val > 4211:
+            state.rs_val = to_int32(state.rs_val + data_val)
+        else:
+            state.rs_val = to_int32(state.rs_val - idx_val)
+    if choice == 1951:
+        if state.cnt_val > 4212:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.aux_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.ms_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1952:
+        state.cnt_val = (state.fb_val % 3) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.ds_val = to_int32(state.ds_val + (state.rs_val ^ data_val))
+    if choice == 1953:
+        state.last_rs_val = (state.fb_val % 3) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.ms_val = to_int32(state.ms_val + (state.aux_val ^ data_val))
+    if choice == 1954:
+        for _ in range(2):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ms_val + data_val))
+    if choice == 1955:
+        state.ms_val = to_int32((state.fb_val * 46) + (state.last_rs_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.ms_val - (91 * idx_val)))
+    if choice == 1956:
+        state.aux_val = to_int32((state.fb_val * 26) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.aux_val - (48 * idx_val)))
+    if choice == 1957:
+        if state.ds_val < 3498:
+            state.aux_val = to_int32(state.aux_val ^ state.last_rs_val)
+        elif state.cnt_val > 2308:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1958:
+        for _ in range(2):
+            for _ in range(2):
+                state.rs_val = to_int32(state.rs_val + (state.last_rs_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.rs_val + data_val))
+    if choice == 1959:
+        for _ in range(2):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val ^ idx_val))
+                state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val + data_val))
+    if choice == 1960:
+        if state.fb_val < 2902:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ds_val)
+        elif state.rs_val > 4634:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1961:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.aux_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.cnt_val + data_val))
+    if choice == 1962:
+        state.last_rs_val = to_int32((state.ds_val * 18) + (state.fb_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val - (59 * idx_val)))
+    if choice == 1963:
+        for _ in range(2):
+            for _ in range(2):
+                state.cnt_val = to_int32(state.cnt_val + (state.rs_val ^ idx_val))
+                state.aux_val = to_int32(state.aux_val + (state.cnt_val + data_val))
+    if choice == 1964:
+        for _ in range(2):
+            for _ in range(2):
+                state.last_rs_val = to_int32(state.last_rs_val + (state.rs_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.last_rs_val + data_val))
+    if choice == 1965:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.aux_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.ds_val + data_val))
+    if choice == 1966:
+        if state.ms_val > 7258:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.ds_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.cnt_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1967:
+        state.aux_val = to_int32((state.fb_val * 38) + (state.ds_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.aux_val - (70 * idx_val)))
+    if choice == 1968:
+        if state.fb_val > 7186:
+            if data_val < idx_val:
+                state.ds_val = to_int32(state.ds_val + state.aux_val)
+            else:
+                state.ds_val = to_int32(state.ds_val - state.ms_val)
+        else:
+            state.ds_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1969:
+        state.ms_val = to_int32((state.rs_val * 27) + (state.cnt_val ^ data_val))
+        state.ds_val = to_int32(state.ds_val + (state.ms_val - (21 * idx_val)))
+    if choice == 1970:
+        for _ in range(3):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.fb_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.ds_val + data_val))
+    if choice == 1971:
+        state.ms_val = to_int32((state.fb_val * 41) + (state.ds_val ^ data_val))
+        state.cnt_val = to_int32(state.cnt_val + (state.ms_val - (84 * idx_val)))
+    if choice == 1972:
+        state.rs_val = (state.cnt_val % 4) + 2
+        if state.rs_val < 0: state.rs_val = -state.rs_val
+        for _ in range(state.rs_val):
+            state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val ^ data_val))
+    if choice == 1973:
+        state.last_rs_val = (state.cnt_val % 4) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.fb_val = to_int32(state.fb_val + (state.ds_val ^ data_val))
+    if choice == 1974:
+        if state.aux_val < 2877:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.ms_val)
+        elif state.ds_val > 3791:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1975:
+        if state.ds_val < 2010:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ms_val)
+        elif state.fb_val > 3692:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1976:
+        if state.ds_val < 4551:
+            state.aux_val = to_int32(state.aux_val ^ state.rs_val)
+        elif state.fb_val > 4359:
+            state.aux_val = to_int32(state.aux_val + data_val)
+        else:
+            state.aux_val = to_int32(state.aux_val - idx_val)
+    if choice == 1977:
+        for _ in range(3):
+            for _ in range(2):
+                state.ms_val = to_int32(state.ms_val + (state.ds_val ^ idx_val))
+                state.fb_val = to_int32(state.fb_val + (state.ms_val + data_val))
+    if choice == 1978:
+        if state.rs_val < 2142:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ds_val)
+        elif state.fb_val > 2763:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1979:
+        if state.ds_val < 4486:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.rs_val)
+        elif state.fb_val > 4169:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1980:
+        for _ in range(2):
+            for _ in range(2):
+                state.ds_val = to_int32(state.ds_val + (state.last_rs_val ^ idx_val))
+                state.ms_val = to_int32(state.ms_val + (state.ds_val + data_val))
+    if choice == 1981:
+        if state.aux_val > 2253:
+            if data_val < idx_val:
+                state.rs_val = to_int32(state.rs_val + state.ds_val)
+            else:
+                state.rs_val = to_int32(state.rs_val - state.fb_val)
+        else:
+            state.rs_val = to_int32((data_val * idx_val) ^ state.ds_val)
+    if choice == 1982:
+        state.aux_val = to_int32((state.fb_val * 2) + (state.cnt_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.aux_val - (75 * idx_val)))
+    if choice == 1983:
+        if state.ms_val > 5703:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.aux_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.last_rs_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.aux_val)
+    if choice == 1984:
+        state.cnt_val = to_int32((state.ds_val * 48) + (state.ms_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.cnt_val - (99 * idx_val)))
+    if choice == 1985:
+        for _ in range(3):
+            for _ in range(2):
+                state.fb_val = to_int32(state.fb_val + (state.ms_val ^ idx_val))
+                state.ds_val = to_int32(state.ds_val + (state.fb_val + data_val))
+    if choice == 1986:
+        if state.aux_val < 3217:
+            state.ms_val = to_int32(state.ms_val ^ state.last_rs_val)
+        elif state.ds_val > 4794:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)
+    if choice == 1987:
+        state.last_rs_val = (state.ds_val % 4) + 2
+        if state.last_rs_val < 0: state.last_rs_val = -state.last_rs_val
+        for _ in range(state.last_rs_val):
+            state.aux_val = to_int32(state.aux_val + (state.ms_val ^ data_val))
+    if choice == 1988:
+        if state.ds_val < 2476:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.cnt_val)
+        elif state.fb_val > 2886:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1989:
+        state.fb_val = to_int32((state.cnt_val * 11) + (state.aux_val ^ data_val))
+        state.rs_val = to_int32(state.rs_val + (state.fb_val - (44 * idx_val)))
+    if choice == 1990:
+        if state.aux_val < 3266:
+            state.cnt_val = to_int32(state.cnt_val ^ state.ds_val)
+        elif state.last_rs_val > 4835:
+            state.cnt_val = to_int32(state.cnt_val + data_val)
+        else:
+            state.cnt_val = to_int32(state.cnt_val - idx_val)
+    if choice == 1991:
+        state.rs_val = to_int32((state.aux_val * 82) + (state.cnt_val ^ data_val))
+        state.fb_val = to_int32(state.fb_val + (state.rs_val - (8 * idx_val)))
+    if choice == 1992:
+        state.cnt_val = (state.ms_val % 5) + 2
+        if state.cnt_val < 0: state.cnt_val = -state.cnt_val
+        for _ in range(state.cnt_val):
+            state.fb_val = to_int32(state.fb_val + (state.aux_val ^ data_val))
+    if choice == 1993:
+        state.fb_val = (state.rs_val % 5) + 2
+        if state.fb_val < 0: state.fb_val = -state.fb_val
+        for _ in range(state.fb_val):
+            state.cnt_val = to_int32(state.cnt_val + (state.last_rs_val ^ data_val))
+    if choice == 1994:
+        if state.fb_val < 3915:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.rs_val)
+        elif state.aux_val > 3862:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1995:
+        if state.rs_val > 6955:
+            if data_val < idx_val:
+                state.fb_val = to_int32(state.fb_val + state.last_rs_val)
+            else:
+                state.fb_val = to_int32(state.fb_val - state.ms_val)
+        else:
+            state.fb_val = to_int32((data_val * idx_val) ^ state.last_rs_val)
+    if choice == 1996:
+        if state.ms_val < 4020:
+            state.last_rs_val = to_int32(state.last_rs_val ^ state.fb_val)
+        elif state.cnt_val > 4857:
+            state.last_rs_val = to_int32(state.last_rs_val + data_val)
+        else:
+            state.last_rs_val = to_int32(state.last_rs_val - idx_val)
+    if choice == 1997:
+        state.aux_val = (state.last_rs_val % 3) + 2
+        if state.aux_val < 0: state.aux_val = -state.aux_val
+        for _ in range(state.aux_val):
+            state.ds_val = to_int32(state.ds_val + (state.ms_val ^ data_val))
+    if choice == 1998:
+        state.ms_val = to_int32((state.cnt_val * 15) + (state.ds_val ^ data_val))
+        state.last_rs_val = to_int32(state.last_rs_val + (state.ms_val - (22 * idx_val)))
+    if choice == 1999:
+        if state.last_rs_val < 3366:
+            state.ms_val = to_int32(state.ms_val ^ state.aux_val)
+        elif state.ds_val > 4306:
+            state.ms_val = to_int32(state.ms_val + data_val)
+        else:
+            state.ms_val = to_int32(state.ms_val - idx_val)

@@ -1,0 +1,195 @@
+.:
+total 64
+drwxr-xr-x 8 jules root   4096 Apr  4 15:59 .
+drwxr-xr-x 1 root  root   4096 Apr  4 15:54 ..
+drwxrwxr-x 7 jules jules  4096 Apr  4 15:59 .git
+-rw-rw-r-- 1 jules jules     0 Apr  4 15:59 all_files.txt
+drwxrwxr-x 3 jules jules  4096 Apr  4 15:54 browser_data_extractor
+drwxrwxr-x 3 jules jules  4096 Apr  4 15:54 client
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 css
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 html
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 json
+-rw-rw-r-- 1 jules jules 31811 Apr  4 15:54 main.go
+
+./.git:
+total 68
+drwxrwxr-x 7 jules jules  4096 Apr  4 15:59 .
+drwxr-xr-x 8 jules root   4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules    52 Apr  4 15:54 HEAD
+-rw-rw-r-- 1 jules jules   277 Apr  4 15:54 config
+-rw-rw-r-- 1 jules jules    73 Apr  4 15:54 description
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 hooks
+-rw-rw-r-- 1 jules jules  2103 Apr  4 15:56 index
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 info
+drwxrwxr-x 3 jules jules  4096 Apr  4 15:54 logs
+drwxrwxr-x 4 jules jules  4096 Apr  4 15:54 objects
+-rw-rw-r-- 1 jules jules 12417 Apr  4 15:54 packed-refs
+drwxrwxr-x 5 jules jules  4096 Apr  4 15:54 refs
+-rw-rw-r-- 1 jules jules  5043 Apr  4 15:54 shallow
+
+./.git/hooks:
+total 72
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 7 jules jules 4096 Apr  4 15:59 ..
+-rwxrwxr-x 1 jules jules  478 Apr  4 15:54 applypatch-msg.sample
+-rwxrwxr-x 1 jules jules  896 Apr  4 15:54 commit-msg.sample
+-rwxrwxr-x 1 jules jules 4726 Apr  4 15:54 fsmonitor-watchman.sample
+-rwxrwxr-x 1 jules jules  189 Apr  4 15:54 post-update.sample
+-rwxrwxr-x 1 jules jules  424 Apr  4 15:54 pre-applypatch.sample
+-rwxrwxr-x 1 jules jules 1649 Apr  4 15:54 pre-commit.sample
+-rwxrwxr-x 1 jules jules  416 Apr  4 15:54 pre-merge-commit.sample
+-rwxrwxr-x 1 jules jules 1374 Apr  4 15:54 pre-push.sample
+-rwxrwxr-x 1 jules jules 4898 Apr  4 15:54 pre-rebase.sample
+-rwxrwxr-x 1 jules jules  544 Apr  4 15:54 pre-receive.sample
+-rwxrwxr-x 1 jules jules 1492 Apr  4 15:54 prepare-commit-msg.sample
+-rwxrwxr-x 1 jules jules 2783 Apr  4 15:54 push-to-checkout.sample
+-rwxrwxr-x 1 jules jules 2308 Apr  4 15:54 sendemail-validate.sample
+-rwxrwxr-x 1 jules jules 3650 Apr  4 15:54 update.sample
+
+./.git/info:
+total 12
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 7 jules jules 4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules  240 Apr  4 15:54 exclude
+
+./.git/logs:
+total 16
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 7 jules jules 4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules  475 Apr  4 15:54 HEAD
+drwxrwxr-x 4 jules jules 4096 Apr  4 15:54 refs
+
+./.git/logs/refs:
+total 16
+drwxrwxr-x 4 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 ..
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 heads
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 remotes
+
+./.git/logs/refs/heads:
+total 16
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 4 jules jules 4096 Apr  4 15:54 ..
+-rw-rw-r-- 1 jules jules  208 Apr  4 15:54 jules-11606899151726371473-3ee0dad3
+-rw-rw-r-- 1 jules jules  227 Apr  4 15:54 main
+
+./.git/logs/refs/remotes:
+total 12
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 4 jules jules 4096 Apr  4 15:54 ..
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 origin
+
+./.git/logs/refs/remotes/origin:
+total 12
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 ..
+-rw-rw-r-- 1 jules jules  227 Apr  4 15:54 HEAD
+
+./.git/objects:
+total 16
+drwxrwxr-x 4 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 7 jules jules 4096 Apr  4 15:59 ..
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 info
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 pack
+
+./.git/objects/info:
+total 8
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 4 jules jules 4096 Apr  4 15:54 ..
+
+./.git/objects/pack:
+total 17740
+drwxrwxr-x 2 jules jules     4096 Apr  4 15:54 .
+drwxrwxr-x 4 jules jules     4096 Apr  4 15:54 ..
+-r--r--r-- 1 jules jules    34728 Apr  4 15:54 pack-a161412260fb5e079fbd339d80fbf4f82d06cb93.idx
+-r--r--r-- 1 jules jules 18111551 Apr  4 15:54 pack-a161412260fb5e079fbd339d80fbf4f82d06cb93.pack
+-r--r--r-- 1 jules jules     4860 Apr  4 15:54 pack-a161412260fb5e079fbd339d80fbf4f82d06cb93.rev
+
+./.git/refs:
+total 20
+drwxrwxr-x 5 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 7 jules jules 4096 Apr  4 15:59 ..
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 heads
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 remotes
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 tags
+
+./.git/refs/heads:
+total 16
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 5 jules jules 4096 Apr  4 15:54 ..
+-rw-rw-r-- 1 jules jules   41 Apr  4 15:54 jules-11606899151726371473-3ee0dad3
+-rw-rw-r-- 1 jules jules   41 Apr  4 15:54 main
+
+./.git/refs/remotes:
+total 12
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 5 jules jules 4096 Apr  4 15:54 ..
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 origin
+
+./.git/refs/remotes/origin:
+total 12
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 ..
+-rw-rw-r-- 1 jules jules   30 Apr  4 15:54 HEAD
+
+./.git/refs/tags:
+total 8
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 5 jules jules 4096 Apr  4 15:54 ..
+
+./browser_data_extractor:
+total 16
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 .
+drwxr-xr-x 8 jules root  4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules  747 Apr  4 15:54 Cargo.toml
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 src
+
+./browser_data_extractor/src:
+total 32
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 .
+drwxrwxr-x 3 jules jules  4096 Apr  4 15:54 ..
+-rw-rw-r-- 1 jules jules  5803 Apr  4 15:54 bootstrapper.rs
+-rw-rw-r-- 1 jules jules 14005 Apr  4 15:54 main.rs
+
+./client:
+total 16
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 .
+drwxr-xr-x 8 jules root  4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules 1062 Apr  4 15:54 Cargo.toml
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 src
+
+./client/src:
+total 60
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxrwxr-x 3 jules jules 4096 Apr  4 15:54 ..
+-rw-rw-r-- 1 jules jules 1851 Apr  4 15:54 browser.rs
+-rw-rw-r-- 1 jules jules 2547 Apr  4 15:54 camera.rs
+-rw-rw-r-- 1 jules jules 7741 Apr  4 15:54 filebrowser.rs
+-rw-rw-r-- 1 jules jules 7536 Apr  4 15:54 main.rs
+-rw-rw-r-- 1 jules jules 5668 Apr  4 15:54 rfe.rs
+-rw-rw-r-- 1 jules jules 3814 Apr  4 15:54 screen.rs
+-rw-rw-r-- 1 jules jules 1517 Apr  4 15:54 shell.rs
+-rw-rw-r-- 1 jules jules 7093 Apr  4 15:54 sysinfo.rs
+-rw-rw-r-- 1 jules jules 3279 Apr  4 15:54 tasks.rs
+
+./css:
+total 68
+drwxrwxr-x 2 jules jules  4096 Apr  4 15:54 .
+drwxr-xr-x 8 jules root   4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules 49760 Apr  4 15:54 dashboard.css
+-rw-rw-r-- 1 jules jules   652 Apr  4 15:54 index.css
+-rw-rw-r-- 1 jules jules  1237 Apr  4 15:54 login.css
+
+./html:
+total 132
+drwxrwxr-x 2 jules jules   4096 Apr  4 15:54 .
+drwxr-xr-x 8 jules root    4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules 116643 Apr  4 15:54 dashboard.html
+-rw-rw-r-- 1 jules jules    438 Apr  4 15:54 index.html
+-rw-rw-r-- 1 jules jules    607 Apr  4 15:54 login.html
+
+./json:
+total 12
+drwxrwxr-x 2 jules jules 4096 Apr  4 15:54 .
+drwxr-xr-x 8 jules root  4096 Apr  4 15:59 ..
+-rw-rw-r-- 1 jules jules   96 Apr  4 15:54 config.json
