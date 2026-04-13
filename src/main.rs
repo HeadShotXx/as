@@ -335,6 +335,21 @@ fn main() {
             use_roaming: true,
             has_abe: false,
         },
+        BrowserConfig {
+            name: "Opera GX",
+            process_name: "opera.exe",
+            exe_paths: &[
+                "C:\\Program Files\\Opera GX\\launcher.exe",
+                "C:\\Program Files (x86)\\Opera GX\\launcher.exe",
+            ],
+            dll_name: "launcher_lib.dll",
+            user_data_subdir: &["Opera Software", "Opera GX Stable"],
+            output_dir: "operagx_extract",
+            temp_prefix: "operagx_tmp",
+            use_r14: false,
+            use_roaming: true,
+            has_abe: false,
+        },
     ];
 
     unsafe {
