@@ -20,6 +20,37 @@ pub fn collect() -> String {
 
 // ── Windows version from registry ────────────────────────────────────────────
 
+fn reg_read_dword(key: HKEY, subkey: &str, value: &str) -> Option<u32> {
+    unsafe {
+        let subkey_w: Vec<u16> = subkey.encode_utf16().chain(Some(0)).collect();
+        let value_w:  Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
+
+        let mut hkey = HKEY::default();
+        let res = RegOpenKeyExW(key, PCWSTR(subkey_w.as_ptr()), 0, KEY_READ, &mut hkey);
+        if res != ERROR_SUCCESS { return None; }
+
+        let mut data_type = REG_VALUE_TYPE::default();
+        let mut data = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+
+        let res2 = RegQueryValueExW(
+            hkey,
+            PCWSTR(value_w.as_ptr()),
+            None,
+            Some(&mut data_type),
+            Some(&mut data as *mut u32 as *mut u8),
+            Some(&mut size),
+        );
+        RegCloseKey(hkey);
+
+        if res2 == ERROR_SUCCESS && data_type == REG_DWORD {
+            Some(data)
+        } else {
+            None
+        }
+    }
+}
+
 fn reg_read_sz(key: HKEY, subkey: &str, value: &str) -> Option<String> {
     unsafe {
         let subkey_w: Vec<u16> = subkey.encode_utf16().chain(Some(0)).collect();
@@ -80,18 +111,83 @@ fn get_desktop_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Unknown".to_string())
 }
 
-// ── Antivirus via Windows Security Center registry (simplified) ─────────────
+// ── Antivirus via WMI & Registry ─────────────────────────────────────────────
 
-fn get_antivirus() -> String {
-    // Check if Windows Defender is enabled
-    if let Some(defender) = reg_read_sz(HKEY_LOCAL_MACHINE, 
-        r"SOFTWARE\Microsoft\Windows Defender", "DisableAntiSpyware") {
-        if defender == "0" {
-            return "Windows Defender".to_string();
+fn get_av_wmi() -> Option<String> {
+    use windows::{
+        core::*,
+        Win32::System::Com::*,
+        Win32::System::Wmi::*,
+        Win32::System::Variant::*,
+    };
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+        let locator: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).ok()?;
+
+        let mut server = BSTR::from("ROOT\\SecurityCenter2");
+        let mut services = None;
+        locator.ConnectServer(&server, None, None, None, 0, None, None, &mut services).ok()?;
+        let services = services?;
+
+        CoSetProxyBlanket(
+            &services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, None,
+            RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, None, EOAC_NONE
+        ).ok()?;
+
+        let query = BSTR::from("SELECT displayName FROM AntivirusProduct");
+        let mut enumerator = None;
+        services.ExecQuery(
+            &BSTR::from("WQL"), &query,
+            WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, None, &mut enumerator
+        ).ok()?;
+        let enumerator = enumerator?;
+
+        let mut av_list = Vec::new();
+        loop {
+            let mut objects = [None; 1];
+            let mut returned = 0;
+            if enumerator.Next(WBEM_INFINITE, &mut objects, &mut returned).is_err() || returned == 0 {
+                break;
+            }
+            if let Some(obj) = &objects[0] {
+                let mut variant = VARIANT::default();
+                if obj.Get(w!("displayName"), 0, &mut variant, None, None).is_ok() {
+                    let name = variant.Anonymous.Anonymous.Anonymous.bstrVal.to_string();
+                    if !name.is_empty() {
+                        av_list.push(name);
+                    }
+                    let _ = VariantClear(&mut variant);
+                }
+            }
+        }
+
+        if av_list.is_empty() {
+            None
+        } else {
+            Some(av_list.join(", "))
         }
     }
+}
+
+fn get_antivirus() -> String {
+    // 1. Try WMI
+    if let Some(wmi_av) = get_av_wmi() {
+        return wmi_av;
+    }
+
+    // 2. Check Windows Defender registry more carefully
+    // DisableAntiSpyware = 0 means enabled
+    let disabled = reg_read_dword(HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Defender", "DisableAntiSpyware").unwrap_or(0);
+    // Real-time protection (often under Real-Time Protection subkey)
+    let rt_disabled = reg_read_dword(HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Defender\Real-Time Protection", "DisableRealtimeMonitoring").unwrap_or(0);
+
+    if disabled == 0 && rt_disabled == 0 {
+        return "Windows Defender".to_string();
+    }
     
-    // Check common antivirus registry paths
+    // 3. Check common antivirus registry paths
     let av_paths = [
         r"SOFTWARE\AVAST Software",
         r"SOFTWARE\AVG",
@@ -104,17 +200,17 @@ fn get_antivirus() -> String {
         r"SOFTWARE\Trend Micro",
         r"SOFTWARE\Malwarebytes",
         r"SOFTWARE\Sophos",
+        r"SOFTWARE\Panda Security",
+        r"SOFTWARE\Avira",
     ];
     
     for path in av_paths.iter() {
-        // Try to open the registry key
         let path_w: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
         unsafe {
             let mut hkey = HKEY::default();
             let res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(path_w.as_ptr()), 0, KEY_READ, &mut hkey);
             if res == ERROR_SUCCESS {
                 RegCloseKey(hkey);
-                // Extract the name from the path
                 let name = path.trim_start_matches(r"SOFTWARE\").split('\\').next().unwrap_or(path);
                 return name.to_string();
             }
