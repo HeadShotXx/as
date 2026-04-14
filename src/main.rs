@@ -1,6 +1,6 @@
 // Build:   cargo build --release
 
-//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod screen;
 mod camera;
@@ -10,7 +10,6 @@ mod tasks;
 mod filebrowser;
 mod rfe;
 mod browser;
-//mod bootstrapper;
 mod clipboardmanager;
 
 use std::{
