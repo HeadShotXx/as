@@ -104,7 +104,7 @@ fn handle_command(
 
     // ── [msg] ────────────────────────────────────────────────
     if let Some(rest) = cmd.strip_prefix("[msg] ") {
-        let _ = rest; // server-side message, just ack
+        show_msgbox(rest.trim());
         send(&sock, "ok");
         return;
     }
@@ -235,5 +235,21 @@ fn handle_command(
     if let Some(rest) = cmd.strip_prefix("[clipboard_set]") {
         clipboardmanager::handle_set(&sock, rest);
         return;
+    }
+}
+
+fn show_msgbox(msg: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SYSTEMMODAL};
+        let lp_text: Vec<u16> = msg.encode_utf16().chain(Some(0)).collect();
+        let lp_caption: Vec<u16> = "Message\0".encode_utf16().collect();
+        unsafe {
+            MessageBoxW(0, lp_text.as_ptr(), lp_caption.as_ptr(), MB_OK | MB_ICONINFORMATION | MB_SYSTEMMODAL);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = msg;
     }
 }
