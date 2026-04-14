@@ -1,11 +1,17 @@
 // PowerShell and CMD execution — Windows only
 
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 pub fn run_powershell(cmd: &str) -> String {
-    let result = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", cmd])
-        .output();
+    let mut cmd_obj = Command::new("powershell");
+    cmd_obj.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd]);
+
+    #[cfg(target_os = "windows")]
+    cmd_obj.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let result = cmd_obj.output();
 
     match result {
         Ok(o) => {
@@ -22,9 +28,13 @@ pub fn run_powershell(cmd: &str) -> String {
 }
 
 pub fn run_cmd(cmd: &str) -> String {
-    let result = Command::new("cmd")
-        .args(["/c", cmd])
-        .output();
+    let mut cmd_obj = Command::new("cmd");
+    cmd_obj.args(["/c", cmd]);
+
+    #[cfg(target_os = "windows")]
+    cmd_obj.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let result = cmd_obj.output();
 
     match result {
         Ok(o) => {
