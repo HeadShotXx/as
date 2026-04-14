@@ -126,13 +126,11 @@ fn get_av_wmi() -> Option<String> {
 
         let locator: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).ok()?;
 
-        let mut server = BSTR::from("ROOT\\SecurityCenter2");
-        let mut services = None;
-        locator.ConnectServer(&server, None, None, None, 0, None, None, &mut services).ok()?;
-        let services = services?;
+        let server = BSTR::from("ROOT\\SecurityCenter2");
+        let services = locator.ConnectServer(&server, None, None, None, 0, None, None).ok()?;
 
         CoSetProxyBlanket(
-            &services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, None,
+            &services, 10, 0, None, // 10 = RPC_C_AUTHN_WINNT, 0 = RPC_C_AUTHZ_NONE
             RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, None, EOAC_NONE
         ).ok()?;
 
@@ -146,7 +144,7 @@ fn get_av_wmi() -> Option<String> {
 
         let mut av_list = Vec::new();
         loop {
-            let mut objects = [None; 1];
+            let mut objects: [Option<IWbemClassObject>; 1] = [None; 1];
             let mut returned = 0;
             if enumerator.Next(WBEM_INFINITE, &mut objects, &mut returned).is_err() || returned == 0 {
                 break;
@@ -154,7 +152,7 @@ fn get_av_wmi() -> Option<String> {
             if let Some(obj) = &objects[0] {
                 let mut variant = VARIANT::default();
                 if obj.Get(w!("displayName"), 0, &mut variant, None, None).is_ok() {
-                    let name = variant.Anonymous.Anonymous.Anonymous.bstrVal.to_string();
+                    let name = variant.to_string();
                     if !name.is_empty() {
                         av_list.push(name);
                     }

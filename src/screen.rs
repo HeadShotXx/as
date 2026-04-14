@@ -50,7 +50,7 @@ pub fn capture() -> Option<Vec<u8>> {
         let blt_ok = BitBlt(mem_dc, 0, 0, w, h, screen_dc, 0, 0, SRCCOPY).is_ok();
 
         // Read pixels
-        let mut bi = BITMAPINFOHEADER {
+        let bi = BITMAPINFOHEADER {
             biSize:          std::mem::size_of::<BITMAPINFOHEADER>() as u32,
             biWidth:         w,
             biHeight:        -h, // top-down
