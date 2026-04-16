@@ -628,7 +628,14 @@
                                             <label class="settings-label">Note</label>
                                             <textarea id="cs-note-input" class="settings-input" style="min-height: 80px; resize: vertical;" placeholder="Client Note"></textarea>
                                         </div>
-                                        <button class="settings-save-btn" onclick="saveClientSettings()">Değişiklikleri Kaydet</button>
+                                        <div class="settings-field">
+                                            <label class="settings-label">Reconnect Delay (ms)</label>
+                                            <div class="settings-input-row">
+                                                <input type="number" id="cs-delay-input" class="settings-input" placeholder="5000" min="1000" />
+                                                <button class="settings-save-btn" onclick="setClientDelay()">Uygula</button>
+                                            </div>
+                                        </div>
+                                        <button class="settings-save-btn" style="width: 100%; margin-top: 10px;" onclick="saveClientSettings()">Kimlik Bilgilerini Kaydet</button>
                                     </div>
 
                                     <!-- Sağ: Sistem Bilgileri -->
@@ -1033,12 +1040,11 @@
 
         async function saveSettings(type) {
             const statusEl = document.getElementById('settings-' + type + '-status');
-            const inputEl  = document.getElementById(type === 'key' ? 'settings-auth-key' : 'settings-' + type + '-port' || 'settings-' + type);
-            // Handling for FPS or key which might not be ports
-            let targetInput = document.getElementById('settings-' + type + '-port');
-            if (!targetInput) targetInput = document.getElementById('settings-' + type);
-            if (!targetInput && type === 'key') targetInput = document.getElementById('settings-auth-key');
+            let targetInput = document.getElementById('settings-' + type + '-port') ||
+                             document.getElementById('settings-' + type) ||
+                             document.getElementById('settings-auth-key');
 
+            if (!targetInput) return;
             const val = targetInput.value.trim();
 
             if (!val) {
@@ -2576,6 +2582,38 @@
                     refreshClients();
                 } else {
                     statusEl.textContent = '✕ Hata: ' + await res.text();
+                    statusEl.className = 'cs-action-status cs-status-err';
+                }
+            } catch (e) {
+                statusEl.textContent = '✕ Bağlantı hatası.';
+                statusEl.className = 'cs-action-status cs-status-err';
+            }
+        }
+
+        async function setClientDelay() {
+            if (!selectedID) return;
+            const delay = document.getElementById('cs-delay-input').value.trim();
+            const statusEl = document.getElementById('cs-action-status');
+            if (!delay || isNaN(delay) || delay < 1000) {
+                statusEl.textContent = '✕ Geçersiz süre (min 1000ms).';
+                statusEl.className = 'cs-action-status cs-status-err';
+                return;
+            }
+
+            statusEl.textContent = '⏳ Komut gönderiliyor...';
+            statusEl.className = 'cs-action-status cs-status-loading';
+
+            try {
+                const res = await fetch('/api/send', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, cmd: '[set_delay]' + delay })
+                });
+                if (res.ok) {
+                    statusEl.textContent = '✓ Reconnect delay güncellendi.';
+                    statusEl.className = 'cs-action-status cs-status-ok';
+                } else {
+                    statusEl.textContent = '✕ Hata: ' + res.status;
                     statusEl.className = 'cs-action-status cs-status-err';
                 }
             } catch (e) {

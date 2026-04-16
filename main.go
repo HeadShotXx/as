@@ -387,9 +387,10 @@ func handleTCPClient(conn net.Conn) {
 	// Büyük dosya transferleri için buffer boyutu:
 	// filebrowser.rs MAX_DOWNLOAD_BYTES = 50MB → base64 encode → ~67MB tek satır
 	// browser zip transferleri de büyük olabilir
-	const maxScanBuf = 150 * 1024 * 1024 // 150 MB
-	scanBuf := make([]byte, maxScanBuf)
-	scanner.Buffer(scanBuf, maxScanBuf)
+	const maxScanBuf = 150 * 1024 * 1024 // Max line size: 150 MB
+	// Use a small initial buffer (64KB) but allow it to grow up to maxScanBuf.
+	// This prevents immediate pre-allocation of 150MB per client.
+	scanner.Buffer(make([]byte, 64*1024), maxScanBuf)
 
 	for scanner.Scan() {
 		line := scanner.Text()
