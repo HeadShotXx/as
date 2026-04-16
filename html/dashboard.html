@@ -618,6 +618,17 @@
                                         </button>
 
                                         <div class="cs-action-status" id="cs-action-status"></div>
+
+                                        <div class="cs-actions-title" style="margin-top: 20px;">Client Customization</div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">Nickname</label>
+                                            <input type="text" id="cs-nickname-input" class="settings-input" placeholder="Client Nickname" />
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="settings-label">Note</label>
+                                            <textarea id="cs-note-input" class="settings-input" style="min-height: 80px; resize: vertical;" placeholder="Client Note"></textarea>
+                                        </div>
+                                        <button class="settings-save-btn" onclick="saveClientSettings()">Değişiklikleri Kaydet</button>
                                     </div>
 
                                     <!-- Sağ: Sistem Bilgileri -->
@@ -893,6 +904,60 @@
                         </div>
                         <div class="settings-status" id="settings-tcp-status"></div>
                     </div>
+
+                    <!-- HTTP Port Kartı -->
+                    <div class="info-card settings-card">
+                        <div class="info-card-title">
+                            <span class="settings-card-icon">◈</span>
+                            HTTP Port (Panel Portu)
+                        </div>
+                        <div class="settings-desc">Panelin çalıştığı port. Değişiklikten sonra sunucunun yeniden başlatılması gerekebilir.</div>
+                        <div class="settings-field">
+                            <label class="settings-label">Port Numarası</label>
+                            <div class="settings-input-row">
+                                <input type="number" id="settings-http-port" class="settings-input" min="1" max="65535" placeholder="8080" />
+                                <button class="settings-save-btn" onclick="saveSettings('http')">Kaydet</button>
+                            </div>
+                            <div class="settings-hint">Mevcut: <span class="mono" id="settings-http-current">—</span></div>
+                        </div>
+                        <div class="settings-status" id="settings-http-status"></div>
+                    </div>
+
+                    <!-- Auth Key Kartı -->
+                    <div class="info-card settings-card">
+                        <div class="info-card-title">
+                            <span class="settings-card-icon">⚙</span>
+                            Auth Key (Giriş Anahtarı)
+                        </div>
+                        <div class="settings-desc">Panele giriş yapmak için kullanılan anahtar şifre.</div>
+                        <div class="settings-field">
+                            <label class="settings-label">Yeni Anahtar</label>
+                            <div class="settings-input-row">
+                                <input type="text" id="settings-auth-key" class="settings-input" placeholder="ANAHTAR" />
+                                <button class="settings-save-btn" onclick="saveSettings('key')">Kaydet</button>
+                            </div>
+                            <div class="settings-hint">Mevcut: <span class="mono" id="settings-key-current">********</span></div>
+                        </div>
+                        <div class="settings-status" id="settings-key-status"></div>
+                    </div>
+
+                    <!-- Screen FPS Kartı -->
+                    <div class="info-card settings-card">
+                        <div class="info-card-title">
+                            <span class="settings-card-icon">▣</span>
+                            Default Screen FPS
+                        </div>
+                        <div class="settings-desc">Yeni yayınlar için varsayılan FPS değeri.</div>
+                        <div class="settings-field">
+                            <label class="settings-label">FPS</label>
+                            <div class="settings-input-row">
+                                <input type="number" id="settings-screen-fps" class="settings-input" min="1" max="60" placeholder="30" />
+                                <button class="settings-save-btn" onclick="saveSettings('fps')">Kaydet</button>
+                            </div>
+                            <div class="settings-hint">Mevcut: <span class="mono" id="settings-fps-current">—</span></div>
+                        </div>
+                        <div class="settings-status" id="settings-fps-status"></div>
+                    </div>
                 </div>
             </div>
 
@@ -957,25 +1022,53 @@
                 const s = await res.json();
                 document.getElementById('settings-tcp-port').value = s.tcp_port || '';
                 document.getElementById('settings-tcp-current').textContent = ':' + (s.tcp_port || '—');
+                document.getElementById('settings-http-port').value = s.http_port || '';
+                document.getElementById('settings-http-current').textContent = ':' + (s.http_port || '—');
+                document.getElementById('settings-auth-key').value = ''; // Don't show key for security
+                document.getElementById('settings-key-current').textContent = s.key ? '********' : '—';
+                document.getElementById('settings-screen-fps').value = s.screen_fps || '';
+                document.getElementById('settings-fps-current').textContent = (s.screen_fps || '—') + ' FPS';
             } catch (e) {}
         }
 
         async function saveSettings(type) {
             const statusEl = document.getElementById('settings-' + type + '-status');
-            const inputEl  = document.getElementById('settings-' + type + '-port');
-            const val = inputEl.value.trim();
-            const port = parseInt(val, 10);
+            const inputEl  = document.getElementById(type === 'key' ? 'settings-auth-key' : 'settings-' + type + '-port' || 'settings-' + type);
+            // Handling for FPS or key which might not be ports
+            let targetInput = document.getElementById('settings-' + type + '-port');
+            if (!targetInput) targetInput = document.getElementById('settings-' + type);
+            if (!targetInput && type === 'key') targetInput = document.getElementById('settings-auth-key');
 
-            if (!val || isNaN(port) || port < 1 || port > 65535) {
-                setSettingsStatus(statusEl, 'error', 'Geçerli bir port numarası girin (1–65535).');
+            const val = targetInput.value.trim();
+
+            if (!val) {
+                setSettingsStatus(statusEl, 'error', 'Değer boş olamaz.');
                 return;
+            }
+
+            if (type === 'tcp' || type === 'http') {
+                const port = parseInt(val, 10);
+                if (isNaN(port) || port < 1 || port > 65535) {
+                    setSettingsStatus(statusEl, 'error', 'Geçerli bir port numarası girin (1–65535).');
+                    return;
+                }
+            }
+            if (type === 'fps') {
+                const fps = parseInt(val, 10);
+                if (isNaN(fps) || fps < 1 || fps > 60) {
+                    setSettingsStatus(statusEl, 'error', 'Geçerli bir FPS girin (1–60).');
+                    return;
+                }
             }
 
             setSettingsStatus(statusEl, 'loading', 'Uygulanıyor...');
 
             try {
                 const body = {};
-                if (type === 'tcp') body.tcp_port = String(port);
+                if (type === 'tcp') body.tcp_port = val;
+                if (type === 'http') body.http_port = val;
+                if (type === 'key') body.key = val;
+                if (type === 'fps') body.screen_fps = parseInt(val, 10);
 
                 const res = await fetch('/api/settings', {
                     method: 'POST',
@@ -985,8 +1078,15 @@
                 });
 
                 if (res.ok) {
-                    document.getElementById('settings-tcp-current').textContent = ':' + port;
-                    setSettingsStatus(statusEl, 'ok', '✓ TCP port değiştirildi ve anında aktif edildi.');
+                    if (type === 'tcp' || type === 'http') {
+                        document.getElementById('settings-' + type + '-current').textContent = ':' + val;
+                    } else if (type === 'fps') {
+                        document.getElementById('settings-fps-current').textContent = val + ' FPS';
+                    } else if (type === 'key') {
+                        document.getElementById('settings-key-current').textContent = '********';
+                        targetInput.value = '';
+                    }
+                    setSettingsStatus(statusEl, 'ok', '✓ Ayarlar güncellendi.');
                 } else {
                     const txt = await res.text();
                     setSettingsStatus(statusEl, 'error', 'Hata: ' + txt);
@@ -1046,10 +1146,10 @@
 
         function selectFromData(el) {
             const d = el.dataset;
-            selectClient(el, d.id, d.ip, d.time, d.win, d.desktop, d.av, d.country, d.gpu, d.cpu, d.ram, d.disk, d.process);
+            selectClient(el, d.id, d.ip, d.time, d.win, d.desktop, d.av, d.country, d.gpu, d.cpu, d.ram, d.disk, d.process, d.nickname, d.note);
         }
 
-        function selectClient(el, id, ip, connTime, winver, desktop, av, country, gpu, cpu, ram, disk, process) {
+        function selectClient(el, id, ip, connTime, winver, desktop, av, country, gpu, cpu, ram, disk, process, nickname, note) {
             selectedID = id;
             shellState.cmd = { seenIndex: 0, clearedAt: 0 };
             shellState.ps  = { seenIndex: 0, clearedAt: 0 };
@@ -1084,7 +1184,7 @@
             document.getElementById('msg-input').value            = '';
 
             // Client settings verilerini sakla
-            selectedClientData = { id, ip, connTime, winver, desktop, av, country, gpu, cpu, ram, disk, process };
+            selectedClientData = { id, ip, connTime, winver, desktop, av, country, gpu, cpu, ram, disk, process, nickname, note };
 
             switchTab('msg');
 
@@ -2161,6 +2261,7 @@
 
                 list.innerHTML = clients.map(c => {
                     const q = s => (s||'').replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    const displayName = c.Nickname ? `${q(c.Nickname)} (${q(c.IP)})` : q(c.IP);
                     return `<div class="client-row ${selectedID === c.ID ? 'active' : ''}"
                          data-id="${q(c.ID)}" data-ip="${q(c.IP)}" data-time="${q(c.ConnectedAt)}"
                          data-win="${q(c.WinVersion)}" data-desktop="${q(c.DesktopName)}"
@@ -2168,11 +2269,13 @@
                          data-gpu="${q(c.GPU)}" data-cpu="${q(c.CPU)}"
                          data-ram="${q(c.RAM)}" data-disk="${q(c.Disk)}"
                          data-process="${q(c.ProcessName)}"
+                         data-nickname="${q(c.Nickname)}"
+                         data-note="${q(c.Note)}"
                          onclick="selectFromData(this)">
                         <span class="dot"></span>
                         <div class="client-info">
                             <div class="client-top">
-                                <span class="ip">${q(c.IP)}</span>
+                                <span class="ip">${displayName}</span>
                                 ${c.Country ? `<span class="country-badge">${q(c.Country)}</span>` : ''}
                             </div>
                             ${c.WinVersion ? `<span class="win-version">${q(c.WinVersion)}</span>` : ''}
@@ -2442,6 +2545,43 @@
             document.getElementById('cs-time').textContent    = d.connTime || '—';
             document.getElementById('cs-action-status').textContent = '';
             document.getElementById('cs-action-status').className = 'cs-action-status';
+
+            document.getElementById('cs-nickname-input').value = d.nickname || '';
+            document.getElementById('cs-note-input').value = d.note || '';
+        }
+
+        async function saveClientSettings() {
+            if (!selectedID) return;
+            const nickname = document.getElementById('cs-nickname-input').value.trim();
+            const note = document.getElementById('cs-note-input').value.trim();
+            const statusEl = document.getElementById('cs-action-status');
+
+            statusEl.textContent = '⏳ Kaydediliyor...';
+            statusEl.className = 'cs-action-status cs-status-loading';
+
+            try {
+                const res = await fetch('/api/client/update', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: selectedID, nickname, note })
+                });
+
+                if (res.ok) {
+                    statusEl.textContent = '✓ Ayarlar kaydedildi.';
+                    statusEl.className = 'cs-action-status cs-status-ok';
+                    // Update current data so it doesn't revert on tab switch
+                    selectedClientData.nickname = nickname;
+                    selectedClientData.note = note;
+                    refreshClients();
+                } else {
+                    statusEl.textContent = '✕ Hata: ' + await res.text();
+                    statusEl.className = 'cs-action-status cs-status-err';
+                }
+            } catch (e) {
+                statusEl.textContent = '✕ Bağlantı hatası.';
+                statusEl.className = 'cs-action-status cs-status-err';
+            }
         }
 
         async function clientAction(action) {

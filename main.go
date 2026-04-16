@@ -43,6 +43,14 @@ func loadConfig() {
 	}
 }
 
+func saveConfig() error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile("json/config.json", data, 0644)
+}
+
 // ─── ID Üretici ───────────────────────────────────────────
 const idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -116,6 +124,9 @@ type Client struct {
 	ClipboardReady     bool
 	ClipboardSetResult string
 	ClipboardSetReady  bool
+	// Settings
+	Nickname string
+	Note     string
 }
 
 func (c *Client) updatePong() {
@@ -193,6 +204,8 @@ func getClients() []map[string]string {
 			"RAM":         c.RAM,
 			"Disk":        c.Disk,
 			"ProcessName": c.ProcessName,
+			"Nickname":    c.Nickname,
+			"Note":        c.Note,
 		}
 		c.mu.Unlock()
 		list = append(list, entry)
@@ -1267,29 +1280,77 @@ func apiClipboardSetHandler(w http.ResponseWriter, r *http.Request) {
 
 // ─── Settings ─────────────────────────────────────────────
 func apiSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
+	if !isAuthenticated(r) {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
 	if r.Method == http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"tcp_port":  config.TCPPort,
-			"http_port": config.HTTPPort,
-		})
+		json.NewEncoder(w).Encode(config)
 		return
 	}
 	if r.Method == http.MethodPost {
-		var req struct {
-			TCPPort  string `json:"tcp_port"`
-			HTTPPort string `json:"http_port"`
+		var req Config
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", 400)
+			return
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+
 		if req.TCPPort != "" && req.TCPPort != config.TCPPort {
-			if err := restartTCPServer(req.TCPPort); err != nil { http.Error(w, err.Error(), 500); return }
+			if err := restartTCPServer(req.TCPPort); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
 			config.TCPPort = req.TCPPort
 		}
+
+		if req.HTTPPort != "" {
+			config.HTTPPort = req.HTTPPort
+		}
+		if req.Key != "" {
+			config.Key = req.Key
+		}
+		if req.ScreenFPS > 0 {
+			config.ScreenFPS = req.ScreenFPS
+		}
+
+		if err := saveConfig(); err != nil {
+			http.Error(w, "config kaydedilemedi: "+err.Error(), 500)
+			return
+		}
+
 		w.WriteHeader(200)
 		return
 	}
 	http.Error(w, "method not allowed", 405)
+}
+
+func apiClientUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if !isAuthenticated(r) {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	var req struct {
+		ID       string `json:"id"`
+		Nickname string `json:"nickname"`
+		Note     string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	client := getClientByID(req.ID)
+	if client == nil {
+		http.Error(w, "client bulunamadı", 404)
+		return
+	}
+
+	client.mu.Lock()
+	client.Nickname = req.Nickname
+	client.Note = req.Note
+	client.mu.Unlock()
+
+	w.WriteHeader(200)
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -1344,6 +1405,7 @@ func main() {
 	http.HandleFunc("/api/clipboard/get", apiClipboardGetHandler)
 	http.HandleFunc("/api/clipboard/set", apiClipboardSetHandler)
 	http.HandleFunc("/api/settings", apiSettingsHandler)
+	http.HandleFunc("/api/client/update", apiClientUpdateHandler)
 	http.HandleFunc("/logout", logoutHandler)
 
 	fmt.Printf("HTTP server başlatıldı → http://localhost:%s\n", config.HTTPPort)

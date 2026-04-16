@@ -1,6 +1,1 @@
-{
-  "key": "MYKEY-1234-ABCD",
-  "http_port": "8080",
-  "tcp_port": "4444",
-  "screen_fps": 30
-}
+{"key": "MYKEY-1234-ABCD", "http_port": "8080", "tcp_port": "4444", "screen_fps": 30}
