@@ -126,6 +126,12 @@ func main() {
 	// Apply Patch
 	copy(exeData[index:index+ConfigLen], patchBlock)
 
-	// Output Base64
-	fmt.Println(base64.StdEncoding.EncodeToString(exeData))
+	// Save to file
+	outputName := "client_patched.exe"
+	err = os.WriteFile(outputName, exeData, 0755)
+	if err != nil {
+		log.Fatalf("Error writing output file: %v", err)
+	}
+
+	fmt.Printf("Build successful: %s\n", outputName)
 }
