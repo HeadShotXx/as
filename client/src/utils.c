@@ -263,6 +263,40 @@ cleanup:
     return pbPlain;
 }
 
+unsigned char* aes_256_cbc_decrypt_raw(const unsigned char* cipher, size_t len, size_t* out_len, const unsigned char* key, const unsigned char* iv) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbResult = 0, cbPlain = 0;
+    PBYTE pbKeyObject = NULL, pbPlain = NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) goto cleanup;
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
+    pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
+
+    BYTE ivCopy[16];
+    memcpy(ivCopy, iv, 16);
+
+    if (BCryptDecrypt(hKey, (PBYTE)cipher, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) {
+        goto cleanup;
+    }
+    pbPlain = malloc(cbPlain + 1);
+    memcpy(ivCopy, iv, 16);
+    if (BCryptDecrypt(hKey, (PBYTE)cipher, (DWORD)len, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, 0) != 0) {
+        goto cleanup;
+    }
+
+    if (out_len) *out_len = cbResult;
+
+cleanup:
+    if (hKey) BCryptDestroyKey(hKey);
+    if (pbKeyObject) free(pbKeyObject);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    return pbPlain;
+}
+
 static int is_leap(unsigned long long y) {
     return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
 }

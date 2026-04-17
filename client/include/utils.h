@@ -37,6 +37,7 @@ typedef struct {
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem);
 char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned char* key, const unsigned char* iv);
 unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, const unsigned char* key, const unsigned char* iv);
+unsigned char* aes_256_cbc_decrypt_raw(const unsigned char* cipher, size_t len, size_t* out_len, const unsigned char* key, const unsigned char* iv);
 
 // Time helpers
 void get_formatted_time(unsigned long long secs, char* out_buf);
