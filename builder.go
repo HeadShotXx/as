@@ -65,6 +65,12 @@ func main() {
 	// Patch binary
 	copy(exeData[index+16:], encryptedConfig)
 
-	// Output patched binary as base64
-	fmt.Print(base64.StdEncoding.EncodeToString(exeData))
+	// Output patched binary to client.exe
+	err = ioutil.WriteFile("client.exe", exeData, 0644)
+	if err != nil {
+		fmt.Printf("Error writing client.exe: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Build successful: client.exe")
 }
