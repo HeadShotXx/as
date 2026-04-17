@@ -55,12 +55,20 @@ func main() {
 	mode.CryptBlocks(encryptedConfig, paddedConfig)
 
 	// Search for marker
-	marker := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F}
-	index := bytes.Index(exeData, marker)
-	if index == -1 {
+	marker := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC}
+
+	// Ensure the marker exists exactly once
+	count := bytes.Count(exeData, marker)
+	if count == 0 {
 		fmt.Println("Error: Marker not found in binary")
 		os.Exit(1)
 	}
+	if count > 1 {
+		fmt.Printf("Error: Marker found %d times, binary is ambiguous\n", count)
+		os.Exit(1)
+	}
+
+	index := bytes.Index(exeData, marker)
 
 	// Patch binary
 	copy(exeData[index+16:], encryptedConfig)

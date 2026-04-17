@@ -300,13 +300,15 @@ void load_config() {
     if (!hData) return;
 
     unsigned char* pData = (unsigned char*)LockResource(hData);
-    DWORD dwSize = SizeofResource(NULL, hRes);
+    if (!pData) return;
 
+    DWORD dwSize = SizeofResource(NULL, hRes);
     if (dwSize < 2048) return;
 
     unsigned char marker[16];
     SET_MARKER(marker);
 
+    // Marker verification to ensure we are at the right data
     if (memcmp(pData, marker, 16) != 0) return;
 
     unsigned char* encrypted_config = pData + 16;
@@ -323,21 +325,31 @@ void load_config() {
 
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (!pbKeyObject) goto cleanup;
+
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
 
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
 
     unsigned char* decrypted = (unsigned char*)malloc(2032 + 1);
+    if (!decrypted) goto cleanup;
+
     DWORD cbPlain = 0;
+    // BCRYPT_BLOCK_PADDING is not used here as the builder provides a exactly 2032 bytes zero-padded buffer
     if (BCryptDecrypt(hKey, encrypted_config, 2032, NULL, ivCopy, 16, decrypted, 2032, &cbPlain, 0) == 0) {
         decrypted[cbPlain] = 0;
         cJSON* root = cJSON_Parse((char*)decrypted);
         if (root) {
             cJSON* ip = cJSON_GetObjectItem(root, "ip");
             cJSON* port = cJSON_GetObjectItem(root, "port");
-            if (ip && ip->valuestring) strncpy(g_host, ip->valuestring, 255);
-            if (port) g_port = port->valueint;
+            if (ip && ip->type == cJSON_String) {
+                strncpy(g_host, ip->valuestring, sizeof(g_host) - 1);
+                g_host[sizeof(g_host) - 1] = 0;
+            }
+            if (port && port->type == cJSON_Number) {
+                g_port = port->valueint;
+            }
             cJSON_Delete(root);
         }
     }

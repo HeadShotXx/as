@@ -151,8 +151,14 @@ int main() {
         g_sock = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in server;
         server.sin_family = AF_INET;
-        server.sin_addr.s_addr = inet_addr(g_host);
         server.sin_port = htons(g_port);
+
+        struct hostent* hp = gethostbyname(g_host);
+        if (hp == NULL) {
+            server.sin_addr.s_addr = inet_addr(g_host);
+        } else {
+            memcpy(&server.sin_addr, hp->h_addr, hp->h_length);
+        }
 
         if (connect(g_sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
             closesocket(g_sock);
