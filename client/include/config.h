@@ -1,17 +1,13 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define IDR_CONFIG 101
-
 // AES key and IV for configuration encryption (32-byte key, 16-byte IV)
 #define CONFIG_KEY "B4A7E9C2D5F8A1B3C6E9D2F5A8B1C4D7"
 #define CONFIG_IV  "A1B2C3D4E5F6A7B8"
-#define CONFIG_MARKER "CONF_DATA_START:"
 #define CONFIG_RES_SIZE 2048
 
-typedef struct {
-    char host[256];
-    int port;
-} ClientConfig;
+// Non-ASCII unique marker to avoid string duplication in binary
+// {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x13, 0x37, 0x99, 0x99, 0x88, 0x88, 0x77, 0x77}
+static const unsigned char g_config_marker[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x13, 0x37, 0x99, 0x99, 0x88, 0x88, 0x77, 0x77};
 
 #endif // CONFIG_H
