@@ -158,23 +158,17 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
                     if (CryptEncrypt(hRSAKey, 0, TRUE, 0, NULL, &encLen, 0)) {
                         BYTE* encBuf = malloc(encLen);
 
-                        // Windows RSA expects Little Endian, Go expects Big Endian.
-                        // Reverse input for PKCS1v15 compatibility.
-                        BYTE* reversedInput = malloc(len);
-                        for(size_t i=0; i<len; i++) reversedInput[i] = data[len-1-i];
-
-                        memcpy(encBuf, reversedInput, len);
+                        memcpy(encBuf, data, len);
                         DWORD dataLen = (DWORD)len;
                         if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
-                            // Reverse output to Big Endian for Go
-                            for(DWORD i=0; i<dataLen/2; i++) {
-                                BYTE t = encBuf[i];
-                                encBuf[i] = encBuf[dataLen-1-i];
-                                encBuf[dataLen-1-i] = t;
+                            // Reverse output for Big Endian compatibility with Go
+                            for (DWORD i = 0; i < dataLen / 2; i++) {
+                                BYTE temp = encBuf[i];
+                                encBuf[i] = encBuf[dataLen - 1 - i];
+                                encBuf[dataLen - 1 - i] = temp;
                             }
                             out = base64_encode(encBuf, dataLen, NULL);
                         }
-                        free(reversedInput);
                         free(encBuf);
                     }
                     CryptDestroyKey(hRSAKey);
