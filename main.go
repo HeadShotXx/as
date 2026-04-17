@@ -509,8 +509,13 @@ func handleTCPClient(conn net.Conn) {
 	}
 
 	sessionData, err := rsaDecrypt(hs.Session)
-	if err != nil || len(sessionData) != 48 {
-		log.Printf("[TCP] RSA decrypt hatası veya geçersiz session verisi")
+	if err != nil {
+		log.Printf("[TCP] RSA decrypt hatası: %v", err)
+		conn.Close()
+		return
+	}
+	if len(sessionData) != 48 {
+		log.Printf("[TCP] Geçersiz session verisi uzunluğu: %d (48 beklenen)", len(sessionData))
 		conn.Close()
 		return
 	}

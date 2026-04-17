@@ -5,6 +5,7 @@
 #include <ctype.h>
 
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "crypt32.lib")
 
 char* base64_encode(const unsigned char* data, size_t input_length, size_t* output_length) {
     DWORD out_len = 0;
@@ -156,14 +157,24 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
                     // Get required size
                     if (CryptEncrypt(hRSAKey, 0, TRUE, 0, NULL, &encLen, 0)) {
                         BYTE* encBuf = malloc(encLen);
-                        memcpy(encBuf, data, len);
+
+                        // Windows RSA expects Little Endian, Go expects Big Endian.
+                        // Reverse input for PKCS1v15 compatibility.
+                        BYTE* reversedInput = malloc(len);
+                        for(size_t i=0; i<len; i++) reversedInput[i] = data[len-1-i];
+
+                        memcpy(encBuf, reversedInput, len);
                         DWORD dataLen = (DWORD)len;
                         if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
-                            // Reverse for Little Endian to Big Endian if needed by Go?
-                            // No, PKCS1 in Windows is usually compatible if handled right.
-                            // Actually, RSA encryption result needs to be reversed for some Go versions/libs but PKCS1v15 is standard.
+                            // Reverse output to Big Endian for Go
+                            for(DWORD i=0; i<dataLen/2; i++) {
+                                BYTE t = encBuf[i];
+                                encBuf[i] = encBuf[dataLen-1-i];
+                                encBuf[dataLen-1-i] = t;
+                            }
                             out = base64_encode(encBuf, dataLen, NULL);
                         }
+                        free(reversedInput);
                         free(encBuf);
                     }
                     CryptDestroyKey(hRSAKey);
@@ -238,7 +249,7 @@ unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, cons
     if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, NULL, 0, &cbPlain, BCRYPT_BLOCK_PADDING) != 0) {
         goto cleanup;
     }
-    pbPlain = malloc(cbPlain);
+    pbPlain = malloc(cbPlain + 1); // +1 for null terminator
     memcpy(ivCopy, iv, 16);
     if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, BCRYPT_BLOCK_PADDING) != 0) {
         goto cleanup;
