@@ -193,14 +193,6 @@ char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
 
-    // Padding (PKCS7)
-    DWORD blockSize = 16;
-    DWORD padLen = blockSize - (len % blockSize);
-    DWORD paddedLen = len + padLen;
-    PBYTE paddedPlain = malloc(paddedLen);
-    memcpy(paddedPlain, plain, len);
-    for (DWORD i = (DWORD)len; i < paddedLen; i++) paddedPlain[i] = (BYTE)padLen;
-
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
 
@@ -216,7 +208,6 @@ char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned
     out = base64_encode(pbCipherText, cbResult, NULL);
 
 cleanup:
-    if (paddedPlain) free(paddedPlain);
     if (pbCipherText) free(pbCipherText);
     if (hKey) BCryptDestroyKey(hKey);
     if (pbKeyObject) free(pbKeyObject);

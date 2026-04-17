@@ -49,9 +49,19 @@ func loadRSAPrivateKey() {
 	}
 	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		log.Fatal(err)
+		// Try PKCS#8
+		priv8, err8 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err8 != nil {
+			log.Fatalf("failed to parse private key: %v (also tried PKCS#8: %v)", err, err8)
+		}
+		var ok bool
+		rsaPrivKey, ok = priv8.(*rsa.PrivateKey)
+		if !ok {
+			log.Fatal("not an RSA private key")
+		}
+	} else {
+		rsaPrivKey = priv
 	}
-	rsaPrivKey = priv
 }
 
 // ─── Config ───────────────────────────────────────────────
