@@ -81,10 +81,14 @@ void str_trim(char* s) {
 extern SessionKey g_session;
 
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
+    sock_send_ex(sock, mutex, "response", msg);
+}
+
+void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) {
     if (mutex) WaitForSingleObject(mutex, INFINITE);
 
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "type", "response");
+    cJSON_AddStringToObject(root, "type", type);
     cJSON_AddStringToObject(root, "payload", msg);
     char *json_msg = cJSON_PrintUnformatted(root);
 
