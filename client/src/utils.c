@@ -279,12 +279,12 @@ unsigned char* aes_256_cbc_decrypt_raw(const unsigned char* cipher, size_t len, 
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
 
-    if (BCryptDecrypt(hKey, (PBYTE)cipher, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbPlain, BCRYPT_BLOCK_PADDING) != 0) {
+    if (BCryptDecrypt(hKey, (PBYTE)cipher, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) {
         goto cleanup;
     }
     pbPlain = malloc(cbPlain + 1);
     memcpy(ivCopy, iv, 16);
-    if (BCryptDecrypt(hKey, (PBYTE)cipher, (DWORD)len, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, BCRYPT_BLOCK_PADDING) != 0) {
+    if (BCryptDecrypt(hKey, (PBYTE)cipher, (DWORD)len, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, 0) != 0) {
         goto cleanup;
     }
 
