@@ -18,6 +18,11 @@ void str_trim(char* s);
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg);
 void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg);
 
+// Config
+void load_config_from_resource();
+extern char g_host[256];
+extern int g_port;
+
 // Hybrid Encryption
 #define RSA_PUB_KEY "-----BEGIN PUBLIC KEY-----\n"\
 "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuYRrLUofWNv/EU3mNLah\n"\
