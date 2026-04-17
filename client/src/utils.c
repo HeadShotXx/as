@@ -84,7 +84,11 @@ void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
     if (mutex) WaitForSingleObject(mutex, INFINITE);
 
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "type", "response");
+    if (strcmp(msg, "pong") == 0) {
+        cJSON_AddStringToObject(root, "type", "pong");
+    } else {
+        cJSON_AddStringToObject(root, "type", "response");
+    }
     cJSON_AddStringToObject(root, "payload", msg);
     char *json_msg = cJSON_PrintUnformatted(root);
 
@@ -158,7 +162,11 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
                     if (CryptEncrypt(hRSAKey, 0, TRUE, 0, NULL, &encLen, 0)) {
                         BYTE* encBuf = malloc(encLen);
 
-                        memcpy(encBuf, data, len);
+                        // Reverse input for Big Endian compatibility with Go
+                        BYTE* revInput = malloc(len);
+                        for (size_t i = 0; i < len; i++) revInput[i] = data[len - 1 - i];
+
+                        memcpy(encBuf, revInput, len);
                         DWORD dataLen = (DWORD)len;
                         if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
                             // Reverse output for Big Endian compatibility with Go
@@ -169,6 +177,7 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
                             }
                             out = base64_encode(encBuf, dataLen, NULL);
                         }
+                        free(revInput);
                         free(encBuf);
                     }
                     CryptDestroyKey(hRSAKey);

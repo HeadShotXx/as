@@ -19,13 +19,13 @@ void sock_send(SOCKET sock, HANDLE mutex, const char* msg);
 
 // Hybrid Encryption
 #define RSA_PUB_KEY "-----BEGIN PUBLIC KEY-----\n"\
-"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuYRrLUofWNv/EU3mNLah\n"\
-"JQb9i7dbOi35/KGzyYsPd2HcufAa36GvQowUhGQyIWDfXqes7MkTQOE6/oNed1Ri\n"\
-"QqNJBI7dexup5W54G4NIzl8BuY34A0jxsrKvZ5ZfYm/hDXMG7i1Qmqz3q7YU4AMH\n"\
-"lpIZkfHgcvDNTj5AosN88HRgvfo8M8l8U8+jdCbJa4LSBS7Q0gYwuzUJedm6Cw9Y\n"\
-"MgSxi1Dlgy/t6S3M2bPx2EFGQttagPBL8LFT+kGPQSsRpTkniNLOME8Bmk5muQCV\n"\
-"JIJDxn9zppu5zYYcDgzQLRPfN+VxoVIby9JapCMQBELyM2KponzjW7TEOKHkjRql\n"\
-"9QIDAQAB\n"\
+"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxiOwUwHZruZqNdqAHhrG\n"\
+"yEV8J8F4xfoQ/wXCXE9nt0kx2UzMw9Ky4KT0+n9PlXk9JZ1xV4lORsQ7Xv9tRwJF\n"\
+"b5guoRDnxkugALmppIXw6A9mo6FnzdcsvyXqdminFuwIUVxlKu5HxJqpDupyeB3M\n"\
+"DULhVYz22r96kwHoZPa3qp/S5WlcKRjcqru52Gu7uNJb1j1HHw7+I/TlyThUgeiI\n"\
+"buk6ybt44QcYK1/NNlIIuniy+ftpnbGFDDiv+rAIkZU7Nk0Wo9uHgKtcnvgFTssm\n"\
+"zjxtpPmNxtSqkRQJCSr6Q94piZ1/f/U/ptQ6n6ywYFNFrbpc0unFudnKl6qxyeNq\n"\
+"QQIDAQAB\n"\
 "-----END PUBLIC KEY-----"
 
 typedef struct {

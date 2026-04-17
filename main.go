@@ -582,6 +582,9 @@ func handleTCPClient(conn net.Conn) {
 			continue
 		}
 
+		// Any valid message is proof of life
+		client.updatePong()
+
 		switch msg.Type {
 		case "pong":
 			client.updatePong()

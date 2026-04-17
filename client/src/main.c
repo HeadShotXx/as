@@ -184,13 +184,27 @@ int main() {
         _snprintf(sysinfo_msg, sizeof(sysinfo_msg), "[sysinfo]%s", info);
         sock_send(g_sock, g_send_mutex, sysinfo_msg);
 
-        char buf[8192];
+        char* recv_buf = malloc(16384);
+        int recv_buf_cap = 16384;
+        int recv_buf_len = 0;
+
+        char chunk[4096];
         int n;
-        while ((n = recv(g_sock, buf, sizeof(buf) - 1, 0)) > 0) {
-            buf[n] = 0;
-            char* saveptr;
-            char* line = strtok_r(buf, "\n", &saveptr);
-            while (line) {
+        while ((n = recv(g_sock, chunk, sizeof(chunk), 0)) > 0) {
+            if (recv_buf_len + n + 1 > recv_buf_cap) {
+                recv_buf_cap = recv_buf_len + n + 16384;
+                recv_buf = realloc(recv_buf, recv_buf_cap);
+            }
+            memcpy(recv_buf + recv_buf_len, chunk, n);
+            recv_buf_len += n;
+            recv_buf[recv_buf_len] = 0;
+
+            char* line_start = recv_buf;
+            char* line_end;
+            while ((line_end = strchr(line_start, '\n')) != NULL) {
+                *line_end = 0;
+                char* line = line_start;
+
                 cJSON* packet = cJSON_Parse(line);
                 if (packet) {
                     cJSON* data = cJSON_GetObjectItem(packet, "data");
@@ -248,9 +262,18 @@ int main() {
                     }
                     cJSON_Delete(packet);
                 }
-                line = strtok_r(NULL, "\n", &saveptr);
+                line_start = line_end + 1;
+            }
+
+            // Move remaining data to start of buffer
+            int processed = (int)(line_start - recv_buf);
+            if (processed > 0) {
+                memmove(recv_buf, line_start, recv_buf_len - processed);
+                recv_buf_len -= processed;
+                recv_buf[recv_buf_len] = 0;
             }
         }
+        free(recv_buf);
 
         closesocket(g_sock);
         if (g_screen_stop) SetEvent(g_screen_stop);
