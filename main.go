@@ -581,6 +581,7 @@ func handleTCPClient(conn net.Conn) {
 			log.Printf("[TCP][%s] Message JSON hatası: %v", id, err)
 			continue
 		}
+		client.updatePong()
 
 		switch msg.Type {
 		case "pong":

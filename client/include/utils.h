@@ -16,6 +16,7 @@ void str_trim(char* s);
 
 // Networking helper
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg);
+void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg);
 
 // Hybrid Encryption
 #define RSA_PUB_KEY "-----BEGIN PUBLIC KEY-----\n"\

