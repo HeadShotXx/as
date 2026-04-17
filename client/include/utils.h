@@ -41,4 +41,9 @@ unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, cons
 // Time helpers
 void get_formatted_time(unsigned long long secs, char* out_buf);
 
+// Config
+extern char g_host[256];
+extern int g_port;
+void load_config_from_resource();
+
 #endif
