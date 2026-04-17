@@ -61,9 +61,16 @@ func main() {
 		log.Fatalf("Error reading base64.txt: %v", err)
 	}
 
+	// Clean base64 data from whitespace/newlines
+	cleanB64 := strings.Map(func(r rune) rune {
+		if strings.ContainsRune(" \n\r\t", r) {
+			return -1
+		}
+		return r
+	}, string(b64Data))
+
 	// Decode EXE
-	trimmedB64 := strings.TrimSpace(string(b64Data))
-	exeData, err := base64.StdEncoding.DecodeString(trimmedB64)
+	exeData, err := base64.StdEncoding.DecodeString(cleanB64)
 	if err != nil {
 		log.Fatalf("Error decoding base64: %v", err)
 	}
@@ -93,6 +100,9 @@ func main() {
 	index := bytes.Index(exeData, Marker)
 	if index == -1 {
 		log.Fatalf("Marker not found in EXE")
+	}
+	if bytes.LastIndex(exeData, Marker) != index {
+		log.Printf("Warning: Multiple markers found, patching the first one.")
 	}
 
 	// Apply Patch

