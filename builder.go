@@ -220,8 +220,8 @@ func main() {
 							j++
 						}
 						length := j - i
-						// Increased minimum length to 6 to reduce false positives
-						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
+						// Increased minimum length to 10 to reduce false positives and save space
+						if length >= 10 && j < len(sectionData) && sectionData[j] == 0 {
 							// Found a potential string
 							rva := sec.VirtualAddress + uint32(i)
 
