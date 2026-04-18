@@ -220,10 +220,11 @@ func main() {
 							j++
 						}
 						length := j - i
-						// Increased minimum length to 10 to reduce false positives and save space
-						if length >= 10 && j < len(sectionData) && sectionData[j] == 0 {
-							// Found a potential string
-							rva := sec.VirtualAddress + uint32(i)
+						// Increased minimum length to 25 and added interesting check to save space
+						if length >= 25 && j < len(sectionData) && sectionData[j] == 0 {
+							if isInteresting(string(sectionData[i:j])) {
+								// Found a potential string
+								rva := sec.VirtualAddress + uint32(i)
 
 							// Skip if it is in the Import Table
 							if rva >= importRVA && rva < importRVA+importSize {
@@ -299,22 +300,58 @@ func main() {
 	// Resource layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...][EncodedPool...]
 	// StringTableEntry: [RVA(4)][OrigLen(4)][EncLen(4)][PoolOffset(4)] = 16 bytes
 	tableStart := targetIndex + len(marker) + 2032
-	tableSize := 4 + len(stringTable)*16 + len(encodedPool)
 
-	if tableStart+tableSize <= targetIndex + len(marker) + capacity {
-		binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(len(stringTable)))
-		for i, entry := range stringTable {
-			entryOffset := tableStart + 4 + i*16
-			binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
-			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.OrigLen)
-			binary.LittleEndian.PutUint32(patchedData[entryOffset+8:entryOffset+12], entry.EncLen)
-			binary.LittleEndian.PutUint32(patchedData[entryOffset+12:entryOffset+16], entry.PoolOffset)
+	maxCapacity := capacity - 2032
+	currentTableSize := 4 + len(stringTable)*16 + len(encodedPool)
+
+	if currentTableSize > maxCapacity {
+		fmt.Printf("[!] Warning: Obfuscation data too large (%d > %d). Pruning string table...\n", currentTableSize, maxCapacity)
+		// Prune the table until it fits (90% to be safe)
+		safeLimit := int(float64(maxCapacity) * 0.9)
+		prunedTable := make([]StringEntry, 0)
+		prunedPool := make([]byte, 0)
+		currentSize := 4
+		for _, entry := range stringTable {
+			entrySize := 16 + int(entry.EncLen)
+			if currentSize+entrySize <= safeLimit {
+				newEntry := entry
+				newEntry.PoolOffset = uint32(len(prunedPool))
+				prunedTable = append(prunedTable, newEntry)
+				start := entry.PoolOffset
+				end := entry.PoolOffset + entry.EncLen
+				prunedPool = append(prunedPool, encodedPool[start:end]...)
+				currentSize += entrySize
+			} else {
+				// Undo XOR for strings that don't fit into the obfuscation table
+				// to ensure the binary remains functional.
+				// Find section offset for this RVA
+				for _, sec := range f.Sections {
+					if entry.RVA >= sec.VirtualAddress && entry.RVA < sec.VirtualAddress+sec.Size {
+						offset := sec.Offset + (entry.RVA - sec.VirtualAddress)
+						for k := 0; k < int(entry.OrigLen); k++ {
+							patchedData[offset+uint32(k)] ^= xorKey
+						}
+						break
+					}
+				}
+			}
 		}
-		copy(patchedData[tableStart+4+len(stringTable)*16:], encodedPool)
-		fmt.Printf("[+] Wrote string table and pool (%d entries, %d bytes total)\n", len(stringTable), tableSize)
-	} else {
-		log.Fatalf("[-] Error: Obfuscation data too large for remaining space (%d > %d).", tableSize, capacity - 2032)
+		stringTable = prunedTable
+		encodedPool = prunedPool
+
+		fmt.Printf("[+] Pruned to %d strings (%d bytes)\n", len(stringTable), 4+len(stringTable)*16+len(encodedPool))
 	}
+
+	binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(len(stringTable)))
+	for i, entry := range stringTable {
+		entryOffset := tableStart + 4 + i*16
+		binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
+		binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.OrigLen)
+		binary.LittleEndian.PutUint32(patchedData[entryOffset+8:entryOffset+12], entry.EncLen)
+		binary.LittleEndian.PutUint32(patchedData[entryOffset+12:entryOffset+16], entry.PoolOffset)
+	}
+	copy(patchedData[tableStart+4+len(stringTable)*16:], encodedPool)
+	fmt.Printf("[+] Wrote string table and pool (%d entries, %d bytes total)\n", len(stringTable), 4 + len(stringTable)*16 + len(encodedPool))
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
 	if err != nil {
@@ -368,6 +405,18 @@ func encodeBaseN(data []byte, alphabet string) []byte {
 		res[i], res[j] = res[j], res[i]
 	}
 	return res
+}
+
+func isInteresting(s string) bool {
+	// Focus on strings that look like paths, URLs, commands, or registry keys
+	if strings.ContainsAny(s, "/\\.:_[]") {
+		return true
+	}
+	// Also include strings with spaces (likely messages or commands)
+	if strings.Contains(s, " ") {
+		return true
+	}
+	return false
 }
 
 func isPrintable(b byte) bool {
