@@ -6,9 +6,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Base64
+// Encoding
 char* base64_encode(const unsigned char* data, size_t input_length, size_t* output_length);
 unsigned char* base64_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base32_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base16_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* baseN_decode(const char* data, size_t input_length, size_t* output_length, const char* alphabet, int base);
+
+#define ALPHABET_BASE58 "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+#define ALPHABET_BASE62 "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+#define ALPHABET_BASE85 "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#"
+#define ALPHABET_BASE91 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_" "\x60" "{|}~\""
 
 // String helpers
 char* str_replace(const char* orig, const char* rep, const char* with);
@@ -44,6 +52,7 @@ void get_formatted_time(unsigned long long secs, char* out_buf);
 // Config
 extern char g_host[256];
 extern int g_port;
+extern unsigned char g_xor_key[16];
 void load_config_from_resource();
 void transparent_decryption();
 
