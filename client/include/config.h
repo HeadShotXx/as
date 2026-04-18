@@ -2,12 +2,9 @@
 #define CONFIG_H
 
 #define CONFIG_RESOURCE_ID 101
-
 #define CONFIG_KEY "B4A7E9C2D5F8A1B3C6E9D2F5A8B1C4D7"
 #define CONFIG_IV "A1B2C3D4E5F6A7B8"
 
-// Marker: DE AD BE EF 11 22 33 44 55 66 77 88 99 AA BB CC
-// Using volatile and byte-by-byte assignment in a block to prevent compiler from emitting the literal 16-byte sequence in the code section.
 #define SET_MARKER(m) do { \
     volatile unsigned char* p = (volatile unsigned char*)(m); \
     p[0] = 0xDE - 1; p[0]++; \
@@ -27,5 +24,14 @@
     p[14] = 0xBB - 1; p[14]++; \
     p[15] = 0xCC - 1; p[15]++; \
 } while(0)
+
+typedef struct {
+    int transform_count;
+    int transform_order[16]; // 0:XOR1, 1:AES, 2:B64, 4:Hex, 9:XOR2
+    unsigned char xor_key1;
+    unsigned char xor_key2;
+    unsigned char aes_key[32];
+    unsigned char aes_iv[16];
+} ObfMetadata;
 
 #endif
