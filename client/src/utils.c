@@ -1,15 +1,15 @@
 #include "utils.h"
 #include "config.h"
 #include "cJSON.h"
+#include <wincrypt.h>
+#include <bcrypt.h>
+#include <ctype.h>
 
 char* xor_str(char* s) {
-    // Thread-local storage for buffer pool
     static __thread char buffers[32][1024];
     static __thread int next_buf = 0;
 
-    // Check if the builder has processed this string
     if (memcmp(s, XOR_PROCESSED_MARKER, 4) != 0) {
-        // If not processed (e.g. during development), strip the XOR_MARKER + length placeholder if present
         if (memcmp(s, XOR_MARKER, 4) == 0) return s + 5;
         return s;
     }
@@ -17,7 +17,6 @@ char* xor_str(char* s) {
     char* out = buffers[next_buf];
     next_buf = (next_buf + 1) % 32;
 
-    // String length is stored in the 5th byte (marker[4])
     unsigned char len = (unsigned char)s[4];
     char* data = s + 5;
 
@@ -28,9 +27,18 @@ char* xor_str(char* s) {
     out[i] = 0;
     return out;
 }
-#include <wincrypt.h>
-#include <bcrypt.h>
-#include <ctype.h>
+
+wchar_t* xor_str_w(char* s) {
+    static __thread wchar_t buffers[32][1024];
+    static __thread int next_buf = 0;
+
+    char* decrypted = xor_str(s);
+    wchar_t* out = buffers[next_buf];
+    next_buf = (next_buf + 1) % 32;
+
+    MultiByteToWideChar(CP_UTF8, 0, decrypted, -1, out, 1024);
+    return out;
+}
 
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "crypt32.lib")

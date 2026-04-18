@@ -1,4 +1,5 @@
 #include "clipboard.h"
+#include "utils.h"
 #include <stdio.h>
 
 void handle_clipboard_get(SOCKET sock, HANDLE mutex) {

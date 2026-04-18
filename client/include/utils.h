@@ -38,9 +38,18 @@ typedef struct {
 #define XOR_MARKER "\xFE\xED\xFA\xCE"
 #define XOR_PROCESSED_MARKER "\xCE\xFA\xED\xFE"
 #define XOR_KEY 0xAB
-#define _S(x) xor_str(XOR_MARKER "\x00" x)
 
+#define _S(x) xor_str(XOR_MARKER "\x00" x)
+#define _W(x) xor_str_w(XOR_MARKER "\x00" x)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 char* xor_str(char* s);
+wchar_t* xor_str_w(char* s);
+#ifdef __cplusplus
+}
+#endif
 
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem);
 char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned char* key, const unsigned char* iv);

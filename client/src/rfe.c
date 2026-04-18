@@ -1,4 +1,5 @@
 #include "rfe.h"
+#include "utils.h"
 #include <winhttp.h>
 #include <stdio.h>
 
@@ -26,13 +27,13 @@ static int winhttp_download(const char* url, const char* dest_path) {
     wcsncpy(host, urlComp.lpszHostName, urlComp.dwHostNameLength);
     host[urlComp.dwHostNameLength] = 0;
 
-    HINTERNET hSession = WinHttpOpen(_S("client/1.0"), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET hSession = WinHttpOpen(_W("client/1.0"), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return 0;
     HINTERNET hConnect = WinHttpConnect(hSession, host, urlComp.nPort, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return 0; }
 
     DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, _S("GET"), urlComp.lpszUrlPath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, _W("GET"), urlComp.lpszUrlPath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return 0; }
 
     if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&

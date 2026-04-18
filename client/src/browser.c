@@ -1,4 +1,5 @@
 #include "browser.h"
+#include "utils.h"
 #include <stdio.h>
 #include <tlhelp32.h>
 #include <bcrypt.h>

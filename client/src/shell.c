@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 

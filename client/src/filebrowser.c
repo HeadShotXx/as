@@ -1,4 +1,5 @@
 #include "filebrowser.h"
+#include "utils.h"
 #include <stdio.h>
 #include <io.h>
 #include <direct.h>
