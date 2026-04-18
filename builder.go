@@ -74,23 +74,29 @@ func main() {
 	}
 
 	if len(indices) == 0 {
-		log.Fatalf("[-] Error: Marker not found in stub binary.")
+		log.Fatalf("[-] Error: Configuration marker (DEADBEEF...) not found in stub binary. Please make sure the client is compiled correctly with the resource.")
 	}
 
 	targetIndex := -1
 	if len(indices) == 1 {
 		targetIndex = indices[0]
+		fmt.Printf("[+] Found configuration marker at 0x%X\n", targetIndex)
 	} else {
 		fmt.Printf("[*] Multiple markers found (%d). Searching for the resource placeholder...\n", len(indices))
 		maxZeros := -1
 		for _, idx := range indices {
 			// Check for at least 2032 bytes
-			if idx+len(marker)+2032 > len(data) {
+			scanLimit := 2032
+			if idx+len(marker)+scanLimit > len(data) {
+				scanLimit = len(data) - (idx + len(marker))
+			}
+			if scanLimit <= 0 {
 				continue
 			}
+
 			// Count zeros in the following bytes to find the largest empty block
 			zeros := 0
-			for i := 0; i < 2032; i++ {
+			for i := 0; i < scanLimit; i++ {
 				if data[idx+len(marker)+i] == 0 {
 					zeros++
 				}
