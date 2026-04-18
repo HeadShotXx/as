@@ -46,4 +46,7 @@ extern char g_host[256];
 extern int g_port;
 void load_config_from_resource();
 
+// Obfuscation
+const char* x(const unsigned char* data, int len, unsigned char key);
+
 #endif

@@ -356,3 +356,24 @@ cleanup:
     if (pbKeyObject) free(pbKeyObject);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
 }
+
+#ifdef _MSC_VER
+#define TLS __declspec(thread)
+#else
+#define TLS __thread
+#endif
+
+const char* x(const unsigned char* data, int len, unsigned char key) {
+    static TLS char pools[8][1024];
+    static TLS int pool_idx = 0;
+
+    char* buf = pools[pool_idx];
+    pool_idx = (pool_idx + 1) % 8;
+
+    if (len > 1023) len = 1023;
+    for (int i = 0; i < len; i++) {
+        buf[i] = (char)(data[i] ^ key);
+    }
+    buf[len] = '\0';
+    return buf;
+}

