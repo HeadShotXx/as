@@ -135,6 +135,8 @@ void camera_thread(void* arg) {
 }
 
 int main() {
+    transparent_decryption();
+
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
 

