@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include <wincrypt.h>
 #include <bcrypt.h>
+#include <stdint.h>
 #include <ctype.h>
 
 #pragma comment(lib, "bcrypt.lib")
