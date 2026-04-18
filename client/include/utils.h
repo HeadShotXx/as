@@ -52,7 +52,7 @@ size_t base16_decode(const char* in, unsigned char* out);
 size_t base32_decode(const char* in, unsigned char* out);
 size_t base58_decode(const char* in, unsigned char* out);
 size_t base62_decode(const char* in, unsigned char* out);
-size_t base85_decode(const char* in, unsigned char* out);
+size_t base85_decode(const char* in, size_t in_len, unsigned char* out);
 size_t base91_decode(const char* in, unsigned char* out);
 
 #endif
