@@ -360,6 +360,7 @@ func main() {
 
 	fmt.Println("[+] Successfully built client.exe")
 }
+}
 
 const (
 	ALPHABET_BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
