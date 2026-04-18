@@ -5,16 +5,21 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"debug/pe"
+	"encoding/ascii85"
+	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"math/big"
 	"os"
-	"time"
 	"strings"
+	"time"
 )
 
 const (
@@ -160,8 +165,11 @@ func main() {
 
 	// 2. Detect strings and build string table
 	type StringEntry struct {
-		RVA    uint32
-		Length uint32
+		RVA        uint32
+		OrigLen    uint32
+		EncodedLen uint32
+		StepCount  int32
+		Steps      [16]byte
 	}
 	var stringTable []StringEntry
 
@@ -223,13 +231,25 @@ func main() {
 							}
 
 							if !isMarker {
-								stringTable = append(stringTable, StringEntry{
-									RVA:    rva,
-									Length: uint32(length),
-								})
-								// XOR the string in patchedData
-								for k := 0; k < length; k++ {
-									patchedData[start+uint32(i)+uint32(k)] ^= xorKey
+								origString := sectionData[i:j]
+								encoded, steps := multiStepEncode(origString, xorKey)
+
+								if len(encoded) <= int(length) {
+									entry := StringEntry{
+										RVA:        rva,
+										OrigLen:    uint32(length),
+										EncodedLen: uint32(len(encoded)),
+										StepCount:  int32(len(steps)),
+									}
+									copy(entry.Steps[:], steps)
+									stringTable = append(stringTable, entry)
+
+									// Write encoded data back to patchedData
+									copy(patchedData[start+uint32(i):], encoded)
+									// Zero out the rest of the original string space if any
+									for k := len(encoded); k < int(length); k++ {
+										patchedData[start+uint32(i)+uint32(k)] = 0
+									}
 								}
 							}
 							i = j + 1
@@ -250,14 +270,18 @@ func main() {
 	// Resource layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
 	// We need to write this after the 2032 bytes of encrypted config
 	tableStart := targetIndex + len(marker) + 2032
-	tableSize := 4 + len(stringTable)*8
 
-	if tableStart+tableSize <= targetIndex + len(marker) + capacity {
+	tableSize := 4 + len(stringTable)*32
+
+	if tableStart+tableSize <= targetIndex+len(marker)+capacity {
 		binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(len(stringTable)))
 		for i, entry := range stringTable {
-			entryOffset := tableStart + 4 + i*8
+			entryOffset := tableStart + 4 + i*32
 			binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
-			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.Length)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.OrigLen)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+8:entryOffset+12], entry.EncodedLen)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+12:entryOffset+16], uint32(entry.StepCount))
+			copy(patchedData[entryOffset+16:entryOffset+32], entry.Steps[:])
 		}
 		fmt.Printf("[+] Wrote string table (%d entries, %d bytes)\n", len(stringTable), tableSize)
 	} else {
@@ -276,6 +300,131 @@ func isPrintable(b byte) bool {
 	return b >= 32 && b <= 126
 }
 
+// --- Advanced Encoding Logic ---
+
+const (
+	StepXOR  = 0
+	StepB64  = 1
+	StepB32  = 2
+	StepB16  = 3
+	StepB58  = 4
+	StepB62  = 5
+	StepB85  = 6
+	StepB91  = 7
+)
+
+func multiStepEncode(data []byte, xorKey byte) ([]byte, []byte) {
+	steps := []byte{StepXOR} // Start with XOR
+	current := make([]byte, len(data))
+	copy(current, data)
+	for i := range current {
+		current[i] ^= xorKey
+	}
+
+	// Add random base encodings
+	numBases := rand.Intn(3) + 1
+	for i := 0; i < numBases; i++ {
+		baseType := byte(rand.Intn(7) + 1) // 1-7
+		var next []byte
+		switch baseType {
+		case StepB64:
+			next = []byte(base64.StdEncoding.EncodeToString(current))
+		case StepB32:
+			next = []byte(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(current))
+		case StepB16:
+			next = []byte(strings.ToUpper(hex.EncodeToString(current)))
+		case StepB58:
+			next = []byte(base58Encode(current))
+		case StepB62:
+			next = []byte(base62Encode(current))
+		case StepB85:
+			buf := make([]byte, ascii85.MaxEncodedLen(len(current)))
+			n := ascii85.Encode(buf, current)
+			next = buf[:n]
+		case StepB91:
+			next = []byte(base91Encode(current))
+		}
+
+		if len(next) > 0 && len(next) <= 1024 { // Sanity check
+			current = next
+			steps = append(steps, baseType)
+		}
+	}
+
+	// End with XOR
+	for i := range current {
+		current[i] ^= xorKey
+	}
+	steps = append(steps, StepXOR)
+
+	return current, steps
+}
+
+// Helper Encoders
+
+func base58Encode(input []byte) string {
+	alphabet := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	return baseNEncode(input, alphabet, 58)
+}
+
+func base62Encode(input []byte) string {
+	alphabet := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	return baseNEncode(input, alphabet, 62)
+}
+
+func baseNEncode(input []byte, alphabet string, base int) string {
+	if len(input) == 0 {
+		return ""
+	}
+	n := new(big.Int).SetBytes(input)
+	b := big.NewInt(int64(base))
+	var res []byte
+	for n.Cmp(big.NewInt(0)) > 0 {
+		var m big.Int
+		n.QuoRem(n, b, &m)
+		res = append(res, alphabet[m.Int64()])
+	}
+	for _, v := range input {
+		if v != 0 {
+			break
+		}
+		res = append(res, alphabet[0])
+	}
+	for i, j := 0, len(res)-1; i < j; i, j = i+1, j-1 {
+		res[i], res[j] = res[j], res[i]
+	}
+	return string(res)
+}
+
+func base91Encode(input []byte) string {
+	alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\""
+	var res []byte
+	var b uint32
+	var n uint32
+	for _, v := range input {
+		b |= uint32(v) << n
+		n += 8
+		if n >= 13 {
+			v := b & 8191
+			if v > 88 {
+				b >>= 13
+				n -= 13
+			} else {
+				v = b & 16383
+				b >>= 14
+				n -= 14
+			}
+			res = append(res, alphabet[v%91], alphabet[v/91])
+		}
+	}
+	if n > 0 {
+		res = append(res, alphabet[b%91])
+		if n > 7 || b > 90 {
+			res = append(res, alphabet[b/91])
+		}
+	}
+	return string(res)
+}
 func encrypt(plaintext []byte) []byte {
 	block, err := aes.NewCipher([]byte(ConfigKey))
 	if err != nil {
