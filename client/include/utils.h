@@ -13,6 +13,7 @@ unsigned char* base64_decode(const char* data, size_t input_length, size_t* outp
 // String helpers
 char* str_replace(const char* orig, const char* rep, const char* with);
 void str_trim(char* s);
+char* xor_str(const char* str);
 
 // Networking helper
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg);

