@@ -324,14 +324,21 @@ void transparent_decryption() {
         DWORD rva = *(DWORD*)(string_table + (i * 8));
         DWORD len = *(DWORD*)(string_table + (i * 8) + 4);
 
+        if (rva == 0 || len == 0 || len > 1024) continue;
+
         unsigned char* addr = (unsigned char*)hMod + rva;
 
-        DWORD old_protect;
-        if (VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old_protect)) {
-            for (DWORD j = 0; j < len; j++) {
-                addr[j] ^= key;
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
+            if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
+                DWORD old_protect;
+                if (VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+                    for (DWORD j = 0; j < len; j++) {
+                        addr[j] ^= key;
+                    }
+                    VirtualProtect(addr, len, old_protect, &old_protect);
+                }
             }
-            VirtualProtect(addr, len, old_protect, &old_protect);
         }
     }
 }

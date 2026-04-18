@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"os"
 	"time"
+	"strings"
 )
 
 const (
@@ -83,10 +84,11 @@ func main() {
 		fmt.Printf("[*] Multiple markers found (%d). Searching for the resource placeholder...\n", len(indices))
 		maxZeros := -1
 		for _, idx := range indices {
+			// Check for at least 2032 bytes
 			if idx+len(marker)+2032 > len(data) {
 				continue
 			}
-			// Count zeros in the following 2032 bytes
+			// Count zeros in the following bytes to find the largest empty block
 			zeros := 0
 			for i := 0; i < 2032; i++ {
 				if data[idx+len(marker)+i] == 0 {
@@ -99,6 +101,16 @@ func main() {
 			}
 		}
 	}
+
+	// Calculate capacity of the zero-fill area
+	capacity := 0
+	for i := targetIndex + len(marker); i < len(data); i++ {
+		if data[i] != 0 {
+			break
+		}
+		capacity++
+	}
+	fmt.Printf("[+] Found resource placeholder at 0x%X (Capacity: %d bytes)\n", targetIndex, capacity)
 
 	if targetIndex == -1 {
 		log.Fatalf("[-] Error: Could not identify the correct configuration placeholder.")
@@ -164,7 +176,7 @@ func main() {
 
 		for _, sec := range f.Sections {
 			// Only scan data sections
-			if sec.Name == ".rdata" || sec.Name == ".data" {
+			if strings.Contains(sec.Name, ".rdata") || strings.Contains(sec.Name, ".data") {
 				fmt.Printf("[*] Scanning section %s for strings...\n", sec.Name)
 				start := sec.Offset
 				end := sec.Offset + sec.Size
@@ -181,12 +193,19 @@ func main() {
 							j++
 						}
 						length := j - i
+						// Increased minimum length to 6 to reduce false positives
 						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
 							// Found a potential string
 							rva := sec.VirtualAddress + uint32(i)
 
 							// Skip if it is in the Import Table
 							if rva >= importRVA && rva < importRVA+importSize {
+								i = j + 1
+								continue
+							}
+
+							// Skip if it is in the configuration resource area
+							if start+uint32(i) >= uint32(targetIndex) && start+uint32(i) < uint32(targetIndex+len(marker)+capacity) {
 								i = j + 1
 								continue
 							}
@@ -224,16 +243,19 @@ func main() {
 	// 3. Store string table in the configuration resource
 	// Resource layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
 	// We need to write this after the 2032 bytes of encrypted config
-	tableOffset := targetIndex + len(marker) + 2032
-	if tableOffset+4+len(stringTable)*8 <= len(patchedData) {
-		binary.LittleEndian.PutUint32(patchedData[tableOffset:tableOffset+4], uint32(len(stringTable)))
+	tableStart := targetIndex + len(marker) + 2032
+	tableSize := 4 + len(stringTable)*8
+
+	if tableStart+tableSize <= targetIndex + len(marker) + capacity {
+		binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(len(stringTable)))
 		for i, entry := range stringTable {
-			entryOffset := tableOffset + 4 + i*8
+			entryOffset := tableStart + 4 + i*8
 			binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
 			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.Length)
 		}
+		fmt.Printf("[+] Wrote string table (%d entries, %d bytes)\n", len(stringTable), tableSize)
 	} else {
-		fmt.Printf("[-] Warning: String table too large for remaining space in binary.\n")
+		log.Fatalf("[-] Error: String table too large for remaining space (%d > %d).", tableSize, capacity - 2032)
 	}
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
