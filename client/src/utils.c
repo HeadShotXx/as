@@ -63,7 +63,7 @@ unsigned char* base32_decode(const char* data, size_t input_length, size_t* outp
     for (size_t i = 0; i < input_length; i++) {
         char* p = strchr((const char*)alphabet, toupper(data[i]));
         if (!p) continue;
-        int val = p - alphabet;
+        int val = p - (const char*)alphabet;
         buffer = (buffer << 5) | val;
         bits_left += 5;
         if (bits_left >= 8) {
@@ -86,7 +86,7 @@ unsigned char* base58_decode(const char* data, size_t input_length, size_t* outp
     for (size_t i = 0; i < input_length; i++) {
         char* p = strchr((const char*)alphabet, data[i]);
         if (!p) continue;
-        int carry = p - alphabet;
+        int carry = p - (const char*)alphabet;
         for (size_t j = 0; j < bin_len; j++) {
             carry += out[j] * 58;
             out[j] = carry & 0xff;
@@ -123,7 +123,7 @@ unsigned char* base62_decode(const char* data, size_t input_length, size_t* outp
     for (size_t i = 0; i < input_length; i++) {
         char* p = strchr((const char*)alphabet, data[i]);
         if (!p) continue;
-        int carry = p - alphabet;
+        int carry = p - (const char*)alphabet;
         for (size_t j = 0; j < bin_len; j++) {
             carry += out[j] * 62;
             out[j] = carry & 0xff;
