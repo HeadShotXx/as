@@ -6,9 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Base64
+// Base Encoding/Decoding
 char* base64_encode(const unsigned char* data, size_t input_length, size_t* output_length);
 unsigned char* base64_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base16_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base32_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base58_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base62_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base85_decode(const char* data, size_t input_length, size_t* output_length);
+unsigned char* base91_decode(const char* data, size_t input_length, size_t* output_length);
 
 // String helpers
 char* str_replace(const char* orig, const char* rep, const char* with);

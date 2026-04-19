@@ -6,6 +6,10 @@ import (
 	"crypto/cipher"
 	"debug/pe"
 	"encoding/binary"
+	"encoding/ascii85"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,8 +17,11 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"time"
 	"strings"
+	"time"
+
+	"github.com/eknkc/basex"
+	"github.com/mr-tron/base58"
 )
 
 const (
@@ -150,20 +157,37 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	xorKey := byte(rand.Intn(254) + 1)
 
-	// 1. Find and patch XOR key
+	// Randomized encoding sequence
+	// IDs: 1:Base64, 2:Base32, 3:Base16, 4:Base58, 5:Base62, 6:Base85, 7:Base91
+	encSequence := []int{1, 2, 3, 4, 5, 6, 7}
+	rand.Shuffle(len(encSequence), func(i, j int) {
+		encSequence[i], encSequence[j] = encSequence[j], encSequence[i]
+	})
+
+	// 1. Find and patch XOR key and sequence
 	xorKeyMarker := []byte{0xAA, 0xBB, 0xCC, 0xDD}
 	keyIdx := bytes.Index(patchedData, xorKeyMarker)
 	if keyIdx != -1 {
 		patchedData[keyIdx+4] = xorKey
-		fmt.Printf("[+] Patched XOR key: 0x%02X\n", xorKey)
+		for i, id := range encSequence {
+			patchedData[keyIdx+5+i] = byte(id)
+		}
+		seqStr := ""
+		for _, id := range encSequence {
+			seqStr += fmt.Sprintf("%d ", id)
+		}
+		fmt.Printf("[+] Patched XOR key: 0x%02X, Sequence: [ %s]\n", xorKey, seqStr)
 	}
 
 	// 2. Detect strings and build string table
 	type StringEntry struct {
-		RVA    uint32
-		Length uint32
+		RVA            uint32
+		OriginalLength uint32
+		EncodedLength  uint32
+		PoolOffset     uint32
 	}
 	var stringTable []StringEntry
+	var stringPool []byte
 
 	f, err := pe.Open(stubPath)
 	if err == nil {
@@ -223,13 +247,49 @@ func main() {
 							}
 
 							if !isMarker {
+								originalStr := make([]byte, length)
+								copy(originalStr, sectionData[i:j])
+
+								// 1. XOR
+								for k := 0; k < len(originalStr); k++ {
+									originalStr[k] ^= xorKey
+								}
+
+								// 2. Apply encoding sequence
+								encodedStr := string(originalStr)
+								for _, id := range encSequence {
+									switch id {
+									case 1:
+										encodedStr = encodeBase64([]byte(encodedStr))
+									case 2:
+										encodedStr = encodeBase32([]byte(encodedStr))
+									case 3:
+										encodedStr = encodeBase16([]byte(encodedStr))
+									case 4:
+										encodedStr = encodeBase58([]byte(encodedStr))
+									case 5:
+										encodedStr = encodeBase62([]byte(encodedStr))
+									case 6:
+										encodedStr = encodeBase85([]byte(encodedStr))
+									case 7:
+										encodedStr = encodeBase91([]byte(encodedStr))
+									}
+								}
+
+								poolOffset := len(stringPool)
+								stringPool = append(stringPool, []byte(encodedStr)...)
+								stringPool = append(stringPool, 0) // Null terminate in pool
+
 								stringTable = append(stringTable, StringEntry{
-									RVA:    rva,
-									Length: uint32(length),
+									RVA:            rva,
+									OriginalLength: uint32(length),
+									EncodedLength:  uint32(len(encodedStr)),
+									PoolOffset:     uint32(poolOffset),
 								})
-								// XOR the string in patchedData
+
+								// Wipe original string in binary
 								for k := 0; k < length; k++ {
-									patchedData[start+uint32(i)+uint32(k)] ^= xorKey
+									patchedData[start+uint32(i)+uint32(k)] = 0
 								}
 							}
 							i = j + 1
@@ -246,22 +306,26 @@ func main() {
 
 	fmt.Printf("[+] Detected and obfuscated %d strings\n", len(stringTable))
 
-	// 3. Store string table in the configuration resource
-	// Resource layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries...]
-	// We need to write this after the 2032 bytes of encrypted config
+	// 3. Store string table and pool in the configuration resource
+	// Resource layout: [Marker(16)][EncryptedConfig(2032)][NumStrings(4)][StringTableEntries(16*N)][Pool]
+	// StringEntry: [RVA(4)][OrigLen(4)][EncLen(4)][Offset(4)]
 	tableStart := targetIndex + len(marker) + 2032
-	tableSize := 4 + len(stringTable)*8
+	tableSize := 4 + len(stringTable)*16
+	totalSize := tableSize + len(stringPool)
 
-	if tableStart+tableSize <= targetIndex + len(marker) + capacity {
+	if tableStart+totalSize <= targetIndex+len(marker)+capacity {
 		binary.LittleEndian.PutUint32(patchedData[tableStart:tableStart+4], uint32(len(stringTable)))
 		for i, entry := range stringTable {
-			entryOffset := tableStart + 4 + i*8
+			entryOffset := tableStart + 4 + i*16
 			binary.LittleEndian.PutUint32(patchedData[entryOffset:entryOffset+4], entry.RVA)
-			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.Length)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+4:entryOffset+8], entry.OriginalLength)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+8:entryOffset+12], entry.EncodedLength)
+			binary.LittleEndian.PutUint32(patchedData[entryOffset+12:entryOffset+16], entry.PoolOffset)
 		}
-		fmt.Printf("[+] Wrote string table (%d entries, %d bytes)\n", len(stringTable), tableSize)
+		copy(patchedData[tableStart+tableSize:], stringPool)
+		fmt.Printf("[+] Wrote string table (%d entries) and pool (%d bytes). Total: %d bytes\n", len(stringTable), len(stringPool), totalSize)
 	} else {
-		log.Fatalf("[-] Error: String table too large for remaining space (%d > %d).", tableSize, capacity - 2032)
+		log.Fatalf("[-] Error: String table and pool too large for remaining space (%d > %d).", totalSize, capacity-2032)
 	}
 
 	err = ioutil.WriteFile("client.exe", patchedData, 0755)
@@ -274,6 +338,66 @@ func main() {
 
 func isPrintable(b byte) bool {
 	return b >= 32 && b <= 126
+}
+
+// --- Multi-base Encoding Algorithms ---
+
+func encodeBase16(data []byte) string {
+	return hex.EncodeToString(data)
+}
+
+func encodeBase32(data []byte) string {
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(data)
+}
+
+func encodeBase64(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+func encodeBase58(data []byte) string {
+	return base58.Encode(data)
+}
+
+func encodeBase62(data []byte) string {
+	base62, _ := basex.NewEncoding("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+	return base62.Encode(data)
+}
+
+func encodeBase85(data []byte) string {
+	dest := make([]byte, ascii85.MaxEncodedLen(len(data)))
+	n := ascii85.Encode(dest, data)
+	return string(dest[:n])
+}
+
+func encodeBase91(data []byte) string {
+	var lookup = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\""
+	var b uint = 0
+	var n uint = 0
+	var out strings.Builder
+	for _, v := range data {
+		b |= uint(v) << n
+		n += 8
+		if n > 13 {
+			v := b & 8191
+			if v > 88 {
+				b >>= 13
+				n -= 13
+			} else {
+				v = b & 16383
+				b >>= 14
+				n -= 14
+			}
+			out.WriteByte(lookup[v%91])
+			out.WriteByte(lookup[v/91])
+		}
+	}
+	if n > 0 {
+		out.WriteByte(lookup[b%91])
+		if n > 7 || b > 90 {
+			out.WriteByte(lookup[b/91])
+		}
+	}
+	return out.String()
 }
 
 func encrypt(plaintext []byte) []byte {
