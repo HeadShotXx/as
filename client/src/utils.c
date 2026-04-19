@@ -202,18 +202,19 @@ unsigned char* base91_decode(const char* data, size_t input_length, size_t* outp
     unsigned char* out = (unsigned char*)malloc(input_length);
     if (!out) return NULL;
 
-    unsigned long long b = 0;
+    unsigned int b = 0;
     int n = 0;
     int v = -1;
     size_t count = 0;
 
     for (size_t i = 0; i < input_length; i++) {
-        int c = reverse_lookup[(unsigned char)data[i]];
+        unsigned char c = (unsigned char)data[i];
+        int val = reverse_lookup[c];
         if (v < 0) {
-            v = c;
+            v = val;
         } else {
-            v += c * 91;
-            b |= (unsigned long long)v << n;
+            v += val * 91;
+            b |= v << n;
             n += (v & 8191) > 88 ? 13 : 14;
             do {
                 out[count++] = (unsigned char)(b & 0xFF);
@@ -224,7 +225,7 @@ unsigned char* base91_decode(const char* data, size_t input_length, size_t* outp
         }
     }
     if (v != -1) {
-        out[count++] = (unsigned char)((b | (unsigned long long)v << n) & 0xFF);
+        out[count++] = (unsigned char)((b | (v << n)) & 0xFF);
     }
 
     if (output_length) *output_length = count;
