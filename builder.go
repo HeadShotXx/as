@@ -215,6 +215,10 @@ func main() {
 				}
 
 				sectionData := patchedData[start:end]
+
+				// Pool for de-duplication: maps encoded string to its offset in stringPool
+				poolMap := make(map[string]uint32)
+
 				for i := 0; i < len(sectionData); {
 					// Heuristic: printable characters, length >= 4, null terminated
 					if isPrintable(sectionData[i]) {
@@ -223,8 +227,8 @@ func main() {
 							j++
 						}
 						length := j - i
-						// Increased minimum length to 6 to reduce false positives
-						if length >= 4 && j < len(sectionData) && sectionData[j] == 0 {
+						// Increased minimum length to 6 to reduce false positives and save space
+						if length >= 6 && j < len(sectionData) && sectionData[j] == 0 {
 							// Found a potential string
 							rva := sec.VirtualAddress + uint32(i)
 
@@ -276,15 +280,19 @@ func main() {
 									}
 								}
 
-								poolOffset := len(stringPool)
-								stringPool = append(stringPool, []byte(encodedStr)...)
-								stringPool = append(stringPool, 0) // Null terminate in pool
+								poolOffset, exists := poolMap[encodedStr]
+								if !exists {
+									poolOffset = uint32(len(stringPool))
+									stringPool = append(stringPool, []byte(encodedStr)...)
+									stringPool = append(stringPool, 0) // Null terminate in pool
+									poolMap[encodedStr] = poolOffset
+								}
 
 								stringTable = append(stringTable, StringEntry{
 									RVA:            rva,
 									OriginalLength: uint32(length),
 									EncodedLength:  uint32(len(encodedStr)),
-									PoolOffset:     uint32(poolOffset),
+									PoolOffset:     poolOffset,
 								})
 
 								// Wipe original string in binary
