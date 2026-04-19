@@ -37,21 +37,21 @@ unsigned char* base64_decode(const char* data, size_t input_length, size_t* outp
 }
 
 unsigned char* base16_decode(const char* data, size_t input_length, size_t* output_length) {
-    DWORD out_len = 0;
-    if (!CryptStringToBinaryA(data, (DWORD)input_length, CRYPT_STRING_HEX, NULL, &out_len, NULL, NULL)) {
-        return NULL;
-    }
+    size_t out_len = input_length / 2;
     unsigned char* out = (unsigned char*)malloc(out_len);
-    if (!CryptStringToBinaryA(data, (DWORD)input_length, CRYPT_STRING_HEX, out, &out_len, NULL, NULL)) {
-        free(out);
-        return NULL;
+    if (!out) return NULL;
+
+    for (size_t i = 0; i < out_len; i++) {
+        char hex[3] = { data[i * 2], data[i * 2 + 1], 0 };
+        out[i] = (unsigned char)strtoul(hex, NULL, 16);
     }
+
     if (output_length) *output_length = out_len;
     return out;
 }
 
 unsigned char* base32_decode(const char* data, size_t input_length, size_t* output_length) {
-    const char* alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    static const unsigned char alphabet[] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7',0};
     size_t out_len = (input_length * 5) / 8;
     unsigned char* out = (unsigned char*)calloc(1, out_len + 1);
     if (!out) return NULL;
@@ -61,7 +61,7 @@ unsigned char* base32_decode(const char* data, size_t input_length, size_t* outp
     size_t count = 0;
 
     for (size_t i = 0; i < input_length; i++) {
-        char* p = strchr(alphabet, toupper(data[i]));
+        char* p = strchr((const char*)alphabet, toupper(data[i]));
         if (!p) continue;
         int val = p - alphabet;
         buffer = (buffer << 5) | val;
@@ -76,7 +76,7 @@ unsigned char* base32_decode(const char* data, size_t input_length, size_t* outp
 }
 
 unsigned char* base58_decode(const char* data, size_t input_length, size_t* output_length) {
-    const char* alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    static const unsigned char alphabet[] = {'1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','J','K','L','M','N','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','m','n','o','p','q','r','s','t','u','v','w','x','y','z',0};
     // Rough estimate for output size
     size_t out_len = input_length;
     unsigned char* out = (unsigned char*)calloc(1, out_len + 1);
@@ -84,7 +84,7 @@ unsigned char* base58_decode(const char* data, size_t input_length, size_t* outp
 
     size_t bin_len = 0;
     for (size_t i = 0; i < input_length; i++) {
-        char* p = strchr(alphabet, data[i]);
+        char* p = strchr((const char*)alphabet, data[i]);
         if (!p) continue;
         int carry = p - alphabet;
         for (size_t j = 0; j < bin_len; j++) {
@@ -114,14 +114,14 @@ unsigned char* base58_decode(const char* data, size_t input_length, size_t* outp
 }
 
 unsigned char* base62_decode(const char* data, size_t input_length, size_t* output_length) {
-    const char* alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    static const unsigned char alphabet[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',0};
     size_t out_len = input_length;
     unsigned char* out = (unsigned char*)calloc(1, out_len + 1);
     if (!out) return NULL;
 
     size_t bin_len = 0;
     for (size_t i = 0; i < input_length; i++) {
-        char* p = strchr(alphabet, data[i]);
+        char* p = strchr((const char*)alphabet, data[i]);
         if (!p) continue;
         int carry = p - alphabet;
         for (size_t j = 0; j < bin_len; j++) {
@@ -153,8 +153,8 @@ unsigned char* base62_decode(const char* data, size_t input_length, size_t* outp
 }
 
 unsigned char* base85_decode(const char* data, size_t input_length, size_t* output_length) {
-    size_t out_len = (input_length * 4) / 5 + 4;
-    unsigned char* out = (unsigned char*)malloc(out_len);
+    size_t max_out = (input_length * 4) / 5 + 4;
+    unsigned char* out = (unsigned char*)malloc(max_out);
     if (!out) return NULL;
 
     size_t count = 0;
@@ -162,13 +162,16 @@ unsigned char* base85_decode(const char* data, size_t input_length, size_t* outp
     int n = 0;
 
     for (size_t i = 0; i < input_length; i++) {
-        val = val * 85 + (unsigned char)(data[i] - 33);
+        unsigned char c = (unsigned char)data[i];
+        if (c < 33 || c > 117) continue; // Skip invalid characters
+
+        val = val * 85 + (c - 33);
         n++;
         if (n == 5) {
-            out[count++] = (unsigned char)((val >> 24) & 0xFF);
-            out[count++] = (unsigned char)((val >> 16) & 0xFF);
-            out[count++] = (unsigned char)((val >> 8) & 0xFF);
-            out[count++] = (unsigned char)(val & 0xFF);
+            out[count++] = (unsigned char)(val >> 24);
+            out[count++] = (unsigned char)(val >> 16);
+            out[count++] = (unsigned char)(val >> 8);
+            out[count++] = (unsigned char)val;
             val = 0;
             n = 0;
         }
@@ -176,8 +179,11 @@ unsigned char* base85_decode(const char* data, size_t input_length, size_t* outp
 
     if (n > 0) {
         int m = n - 1;
-        for (int i = 0; i < 5 - n; i++) val = val * 85 + 84;
-        for (int i = 0; i < m; i++) out[count++] = (unsigned char)((val >> (24 - i * 8)) & 0xFF);
+        unsigned int temp_val = val;
+        for (int i = 0; i < 5 - n; i++) temp_val = temp_val * 85 + 84;
+        for (int i = 0; i < m; i++) {
+            out[count++] = (unsigned char)(temp_val >> (24 - i * 8));
+        }
     }
 
     if (output_length) *output_length = count;
@@ -185,7 +191,7 @@ unsigned char* base85_decode(const char* data, size_t input_length, size_t* outp
 }
 
 unsigned char* base91_decode(const char* data, size_t input_length, size_t* output_length) {
-    const char* lookup = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\"";
+    static const unsigned char lookup[] = {'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','0','1','2','3','4','5','6','7','8','9','!','#','$','%','&','(',')','*','+',',','.','/',':',';','<','=','>','?','@','[',']','^','_','`','{','|','}','~','"',0};
     static unsigned char reverse_lookup[256];
     static int initialized = 0;
     if (!initialized) {
@@ -571,12 +577,12 @@ void transparent_decryption() {
         // Patch back to memory
         MEMORY_BASIC_INFORMATION mbi;
         if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
-            if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
+            if (mbi.State == MEM_COMMIT) {
                 DWORD old_protect;
                 if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+                    // Fill with zeros first to handle case where de-obfuscated string is shorter
+                    memset(addr, 0, orig_len);
                     memcpy(addr, current_data, (current_len < orig_len) ? current_len : orig_len);
-                    // Ensure null termination if there's space
-                    if (current_len < orig_len) addr[current_len] = 0;
                     VirtualProtect(addr, orig_len, old_protect, &old_protect);
                 }
             }

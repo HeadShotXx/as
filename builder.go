@@ -346,8 +346,7 @@ func main() {
 }
 
 func isPrintable(b byte) bool {
-	// Include common whitespace to handle multiline strings (like PEM keys)
-	return (b >= 32 && b <= 126) || b == '\n' || b == '\r' || b == '\t'
+	return b >= 32 && b <= 126
 }
 
 // --- Multi-base Encoding Algorithms ---
