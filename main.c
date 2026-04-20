@@ -2,15 +2,13 @@
 #include "obfuscator.h"
 
 int main() {
-    printf("Decrypted: %s\n", OBF_STR("Hello, World!"));
-    printf("Decrypted: %s\n", OBF_STR("This is an obfuscated string."));
-    printf("Decrypted: %s\n", OBF_STR("Another test with numbers 1234567890"));
+    printf("Decrypted 1: %s\n", OBF_STR("First unique string"));
+    printf("Decrypted 2: %s\n", OBF_STR("Second unique string"));
+    printf("Decrypted 3: %s\n", OBF_STR("Third unique string"));
 
-    // Testing same string multiple times
-    const char* str1 = OBF_STR("Repeat");
-    const char* str2 = OBF_STR("Repeat");
-    printf("Repeat 1: %s\n", str1);
-    printf("Repeat 2: %s\n", str2);
+    const char* repeat = OBF_STR("Repeatable");
+    printf("Repeat 1: %s\n", repeat);
+    printf("Repeat 2: %s\n", repeat);
 
     return 0;
 }
