@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "injector",
+    "sample_dll",
+]
