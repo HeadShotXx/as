@@ -81,11 +81,12 @@ namespace BrowserExtractorCS
                 si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
                 PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
 
-                StringBuilder cmdLine = new StringBuilder($"\"{exePath}\" --no-first-run --no-default-browser-check");
+                string cmdStr = $"\"{exePath}\" --no-first-run --no-default-browser-check";
+                IntPtr pCmdLine = Marshal.StringToHGlobalUni(cmdStr);
 
                 bool success = CreateProcess(
                     null,
-                    cmdLine,
+                    pCmdLine,
                     IntPtr.Zero,
                     IntPtr.Zero,
                     false,
@@ -95,6 +96,7 @@ namespace BrowserExtractorCS
                     ref si,
                     out pi
                 );
+                Marshal.FreeHGlobal(pCmdLine);
 
                 if (!success)
                 {

