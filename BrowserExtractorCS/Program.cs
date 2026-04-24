@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using static BrowserExtractorCS.BrowserExtractor;
 
 namespace BrowserExtractorCS
@@ -9,6 +10,8 @@ namespace BrowserExtractorCS
     {
         static void Main(string[] args)
         {
+            SQLitePCL.Batteries.Init();
+
             if (args.Length > 0 && args[0] == "--test")
             {
                 RunTests();
@@ -78,7 +81,7 @@ namespace BrowserExtractorCS
                 si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
                 PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
 
-                string cmdLine = $"\"{exePath}\" --no-first-run --no-default-browser-check";
+                StringBuilder cmdLine = new StringBuilder($"\"{exePath}\" --no-first-run --no-default-browser-check");
 
                 bool success = CreateProcess(
                     null,

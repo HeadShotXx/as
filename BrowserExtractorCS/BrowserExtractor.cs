@@ -15,10 +15,10 @@ namespace BrowserExtractorCS
     {
         #region Win32 API
 
-        [DllImport("kernel32.dll", SetLastError = true)]
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern bool CreateProcess(
             string lpApplicationName,
-            string lpCommandLine,
+            StringBuilder lpCommandLine,
             IntPtr lpProcessAttributes,
             IntPtr lpThreadAttributes,
             bool bInheritHandles,
@@ -174,6 +174,7 @@ namespace BrowserExtractorCS
             public uint nDebugInfoSize;
             public IntPtr lpImageName;
             public ushort fUnicode;
+            public ushort wPadding; // Padding for 8-byte alignment on x64
         }
 
         [StructLayout(LayoutKind.Sequential)]
