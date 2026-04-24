@@ -116,7 +116,7 @@ namespace BrowserExtractorCS
 
                     Console.WriteLine($"Started {config.Name} with PID: {pi.dwProcessId}");
 
-                    DebugLoop(pi.hProcess, config, userDataDir);
+                    DebugLoop(pi.dwProcessId, pi.hProcess, config, userDataDir);
 
                     CloseHandle(pi.hProcess);
                     CloseHandle(pi.hThread);

