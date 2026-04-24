@@ -12,6 +12,14 @@ namespace BrowserExtractorCS
         {
             SQLitePCL.Batteries.Init();
 
+            if (IntPtr.Size != 8)
+            {
+                Console.WriteLine("Error: This application must run as a 64-bit process.");
+                Console.WriteLine("Please ensure the project is built for x64 and 'Prefer 32-bit' is disabled.");
+                Console.ReadKey();
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--test")
             {
                 RunTests();
@@ -81,35 +89,42 @@ namespace BrowserExtractorCS
                 si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
                 PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
 
+                // Using lpCommandLine for both exe and args is most common
                 string cmdStr = $"\"{exePath}\" --no-first-run --no-default-browser-check";
                 IntPtr pCmdLine = Marshal.StringToHGlobalUni(cmdStr);
 
-                bool success = CreateProcess(
-                    null,
-                    pCmdLine,
-                    IntPtr.Zero,
-                    IntPtr.Zero,
-                    false,
-                    DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE,
-                    IntPtr.Zero,
-                    null,
-                    ref si,
-                    out pi
-                );
-                Marshal.FreeHGlobal(pCmdLine);
-
-                if (!success)
+                try
                 {
-                    Console.WriteLine($"Failed to create {config.Name} process. Error: {Marshal.GetLastWin32Error()}");
-                    continue;
+                    bool success = CreateProcess(
+                        null,
+                        pCmdLine,
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        false,
+                        DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE,
+                        IntPtr.Zero,
+                        null,
+                        ref si,
+                        out pi
+                    );
+
+                    if (!success)
+                    {
+                        Console.WriteLine($"Failed to create {config.Name} process. Error: {Marshal.GetLastWin32Error()}");
+                        continue;
+                    }
+
+                    Console.WriteLine($"Started {config.Name} with PID: {pi.dwProcessId}");
+
+                    DebugLoop(pi.hProcess, config, userDataDir);
+
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
                 }
-
-                Console.WriteLine($"Started {config.Name} with PID: {pi.dwProcessId}");
-
-                DebugLoop(pi.hProcess, config, userDataDir);
-
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
+                finally
+                {
+                    Marshal.FreeHGlobal(pCmdLine);
+                }
             }
 
             Console.WriteLine("Done. Press any key to exit.");
@@ -119,37 +134,24 @@ namespace BrowserExtractorCS
         static void RunTests()
         {
             Console.WriteLine("Running core logic verification tests...");
-
-            // Test 1: Configuration Loading
             var configs = GetConfigs();
             if (configs != null && configs.Count > 0)
-            {
-                Console.WriteLine($"[PASS] Configuration loaded: {configs.Count} browsers defined.");
-            }
+                Console.WriteLine($"[PASS] Configuration loaded: {configs.Count} browsers.");
             else
-            {
-                Console.WriteLine("[FAIL] Configuration failed to load.");
-            }
+                Console.WriteLine("[FAIL] Configuration failed.");
 
-            // Test 2: P/Invoke Setup (Check if we can call a simple API)
             try
             {
                 IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
                 if (snapshot != (IntPtr)(-1))
                 {
-                    Console.WriteLine("[PASS] Win32 P/Invoke check: CreateToolhelp32Snapshot successful.");
+                    Console.WriteLine("[PASS] Win32 P/Invoke check.");
                     CloseHandle(snapshot);
                 }
                 else
-                {
-                    Console.WriteLine("[FAIL] Win32 P/Invoke check: CreateToolhelp32Snapshot failed.");
-                }
+                    Console.WriteLine("[FAIL] Win32 P/Invoke check.");
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[FAIL] Win32 P/Invoke check: Exception - {ex.Message}");
-            }
-
+            catch (Exception ex) { Console.WriteLine($"[FAIL] Win32 check: {ex.Message}"); }
             Console.WriteLine("Tests completed.");
         }
     }

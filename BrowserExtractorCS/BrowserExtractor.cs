@@ -126,9 +126,9 @@ namespace BrowserExtractorCS
         public struct STARTUPINFO
         {
             public uint cb;
-            public IntPtr lpReserved;
-            public IntPtr lpDesktop;
-            public IntPtr lpTitle;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
             public uint dwX;
             public uint dwY;
             public uint dwXSize;
