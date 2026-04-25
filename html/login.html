@@ -1,20 +1,20 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Giriş</title>
+    <title>Login</title>
     <link rel="stylesheet" href="/css/login.css">
 </head>
 <body>
     <div class="login-box">
-        <h2>Giriş Yap</h2>
+        <h2>Login</h2>
         {{if .Error}}
         <div class="error">{{.Error}}</div>
         {{end}}
         <form method="POST" action="/login">
-            <input type="text" name="key" placeholder="Lisans Key" autocomplete="off" required />
-            <button type="submit">Giriş</button>
+            <input type="text" name="key" placeholder="License Key" autocomplete="off" required />
+            <button type="submit">Login</button>
         </form>
     </div>
 </body>

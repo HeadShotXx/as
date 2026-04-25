@@ -20,7 +20,7 @@ var db map[string]KeyData
 
 var secret = []byte("SUPER_SECRET_KEY_123")
 
-// replay protection (RAM cache)
+// Replay protection (RAM cache)
 var usedNonces = map[string]bool{}
 
 func loadDB() {
@@ -51,14 +51,14 @@ func validateKey(w http.ResponseWriter, r *http.Request) {
 	ts := r.URL.Query().Get("ts")
 	sig := r.URL.Query().Get("sig")
 
-	// 1. nonce replay protection
+	// 1. Nonce replay protection
 	if usedNonces[nonce] {
 		w.Write([]byte("replay detected"))
 		return
 	}
 	usedNonces[nonce] = true
 
-	// 2. timestamp check
+	// 2. Timestamp check
 	tsInt, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil {
 		w.Write([]byte("invalid timestamp"))
@@ -72,7 +72,7 @@ func validateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. key check
+	// 3. Key check
 	data, exists := db[key]
 	if !exists {
 		w.Write([]byte("invalid key"))
@@ -84,7 +84,7 @@ func validateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. HMAC verify
+	// 4. HMAC verification
 	message := key + "|" + nonce + "|" + ts
 
 	if !verifyHMAC(message, sig) {

