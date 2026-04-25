@@ -267,6 +267,16 @@ body {
 .info-val { font-size: 0.82rem; color: #ccc; display: flex; align-items: center; gap: 6px; }
 .info-val.mono { font-family: 'Courier New', monospace; }
 
+.blurred-key {
+    filter: blur(6px);
+    transition: filter 0.3s;
+    user-select: none;
+}
+
+#toggle-license-btn {
+    margin-left: 8px;
+}
+
 .status-dot {
     width: 7px;
     height: 7px;

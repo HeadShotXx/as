@@ -37,6 +37,7 @@ var (
 
 	currentLicenseKey    string
 	currentLicenseExpiry string
+	lastLicenseCheck     string
 	licenseSecret        = []byte("SUPER_SECRET_KEY_123")
 	licenseServerURL     = "http://localhost:8081/validate"
 )
@@ -451,6 +452,7 @@ func checkLicense(key string) (string, string, error) {
 	if strings.HasPrefix(res, "valid|") {
 		parts := strings.Split(res, "|")
 		if len(parts) == 2 {
+			lastLicenseCheck = time.Now().Format("02.01.2006 15:04:05")
 			return "valid", parts[1], nil
 		}
 	}
@@ -949,6 +951,9 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		"Key":            apiKey,
 		"LicenseKey":     currentLicenseKey,
 		"LicenseExpiry":  currentLicenseExpiry,
+		"LicenseServer":  licenseServerURL,
+		"Version":        "v2.1.0",
+		"LastCheck":      lastLicenseCheck,
 	}); err != nil {
 		log.Printf("Execution error: %v", err)
 	}

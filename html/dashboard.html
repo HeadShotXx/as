@@ -950,17 +950,42 @@
                         <div class="info-rows">
                             <div class="info-row">
                                 <span class="info-key">Lisans Anahtarı</span>
-                                <span class="info-val mono">{{.LicenseKey}}</span>
+                                <span class="info-val mono">
+                                    <span id="license-key-text" class="blurred-key">{{.LicenseKey}}</span>
+                                    <button id="toggle-license-btn" class="mini-btn" onclick="toggleLicense()">Göster</button>
+                                </span>
                             </div>
                             <div class="info-row">
                                 <span class="info-key">Bitiş Tarihi</span>
                                 <span class="info-val mono">{{.LicenseExpiry}}</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-key">Durum</span>
+                                <span class="info-key">Kalan Süre</span>
+                                <span class="info-val mono" id="remaining-time">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Lisans Durumu</span>
                                 <span class="info-val">
                                     <span class="status-dot"></span> Aktif
                                 </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card">
+                        <div class="info-card-title">Sistem & Sunucu</div>
+                        <div class="info-rows">
+                            <div class="info-row">
+                                <span class="info-key">Lisans Sunucusu</span>
+                                <span class="info-val mono">{{.LicenseServer}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Yazılım Versiyonu</span>
+                                <span class="info-val mono">{{.Version}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Son Kontrol</span>
+                                <span class="info-val mono">{{.LastCheck}}</span>
                             </div>
                         </div>
                     </div>
@@ -2644,7 +2669,35 @@
             }
         }
 
+        function toggleLicense() {
+            const keyText = document.getElementById('license-key-text');
+            const btn = document.getElementById('toggle-license-btn');
+            if (keyText.classList.contains('blurred-key')) {
+                keyText.classList.remove('blurred-key');
+                btn.textContent = 'Gizle';
+            } else {
+                keyText.classList.add('blurred-key');
+                btn.textContent = 'Göster';
+            }
+        }
+
+        function updateRemainingTime() {
+            const expiryStr = "{{.LicenseExpiry}}";
+            if (!expiryStr || expiryStr === "") return;
+            const expiry = new Date(expiryStr);
+            const now = new Date();
+            const diff = expiry - now;
+            if (diff <= 0) {
+                document.getElementById('remaining-time').textContent = 'Süre doldu';
+                return;
+            }
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+            document.getElementById('remaining-time').textContent = `${days} gün ${hours} saat`;
+        }
+
         // ─── Init ────────────────────────────────────────
+        updateRemainingTime();
         startStatsPolling();
         setInterval(refreshClients, 3000);
         refreshClients();
