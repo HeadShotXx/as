@@ -92,7 +92,7 @@ func validateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("valid"))
+	w.Write([]byte("valid|" + data.Expiry.Format(time.RFC3339)))
 }
 
 func main() {
@@ -100,8 +100,8 @@ func main() {
 
 	http.HandleFunc("/validate", validateKey)
 
-	fmt.Println("License server running on :8080")
-	err := http.ListenAndServe(":8080", nil)
+	fmt.Println("License server running on :8081")
+	err := http.ListenAndServe(":8081", nil)
 	if err != nil {
 		fmt.Println("server error:", err)
 	}

@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	crand "crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,12 +16,14 @@ import (
 	"encoding/pem"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	mrand "math/rand"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +34,11 @@ var (
 	tcpListener   net.Listener
 	tcpListenerMu sync.Mutex
 	rsaPrivKey    *rsa.PrivateKey
+
+	currentLicenseKey    string
+	currentLicenseExpiry string
+	licenseSecret        = []byte("SUPER_SECRET_KEY_123")
+	licenseServerURL     = "http://localhost:8081/validate"
 )
 
 func loadRSAPrivateKey() {
@@ -411,6 +420,42 @@ func sendCommandByID(id, cmd string) error {
 		}
 	}
 	return fmt.Errorf("client bulunamadı: %s", id)
+}
+
+// ─── License Helper ───────────────────────────────────────
+
+func checkLicense(key string) (string, string, error) {
+	nonce := strconv.FormatInt(mrand.Int63(), 16)
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+
+	message := key + "|" + nonce + "|" + ts
+	mac := hmac.New(sha256.New, licenseSecret)
+	mac.Write([]byte(message))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	url := fmt.Sprintf("%s?key=%s&nonce=%s&ts=%s&sig=%s",
+		licenseServerURL, key, nonce, ts, sig)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", err
+	}
+
+	res := string(body)
+	if strings.HasPrefix(res, "valid|") {
+		parts := strings.Split(res, "|")
+		if len(parts) == 2 {
+			return "valid", parts[1], nil
+		}
+	}
+
+	return res, "", nil
 }
 
 func broadcast(cmd string) {
@@ -846,10 +891,12 @@ func loginGetHandler(w http.ResponseWriter, r *http.Request) {
 
 func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
-	configMu.RLock()
-	cfgKey := config.Key
-	configMu.RUnlock()
-	if r.FormValue("key") == cfgKey {
+	key := r.FormValue("key")
+	status, expiry, err := checkLicense(key)
+	if err == nil && status == "valid" {
+		currentLicenseKey = key
+		currentLicenseExpiry = expiry
+
 		token := generateSessionToken()
 		expires := time.Now().Add(24 * time.Hour)
 
@@ -897,9 +944,11 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	apiKey := config.Key
 	configMu.RUnlock()
 	if err := tmpl.Execute(w, map[string]interface{}{
-		"Clients": list,
-		"Count":   len(list),
-		"Key":     apiKey,
+		"Clients":        list,
+		"Count":          len(list),
+		"Key":            apiKey,
+		"LicenseKey":     currentLicenseKey,
+		"LicenseExpiry":  currentLicenseExpiry,
 	}); err != nil {
 		log.Printf("Execution error: %v", err)
 	}
@@ -1736,6 +1785,43 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	loadConfig()
 	loadRSAPrivateKey()
+
+	// 1. License Server Reachability Check
+	fmt.Println("Lisans sunucusu kontrol ediliyor...")
+	resp, err := http.Get(licenseServerURL + "?key=check")
+	if err != nil {
+		fmt.Printf("Hata: Lisans sunucusuna erişilemiyor! (%v)\n", err)
+		os.Exit(1)
+	}
+	resp.Body.Close()
+
+	// 2. Initial License Check
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Lütfen Lisans Anahtarınızı Girin: ")
+	inputKey, _ := reader.ReadString('\n')
+	inputKey = strings.TrimSpace(inputKey)
+
+	status, expiry, err := checkLicense(inputKey)
+	if err != nil {
+		fmt.Printf("Lisans kontrolü sırasında hata oluştu: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch status {
+	case "valid":
+		currentLicenseKey = inputKey
+		currentLicenseExpiry = expiry
+		fmt.Printf("✔ Lisans Onaylandı! (Bitiş: %s)\n", expiry)
+	case "expired":
+		fmt.Println("❌ Abonelik süreniz bitti.")
+		os.Exit(1)
+	case "invalid key":
+		fmt.Println("❌ Aboneliğiniz yok.")
+		os.Exit(1)
+	default:
+		fmt.Printf("❌ Lisans hatası: %s\n", status)
+		os.Exit(1)
+	}
 
 	go startTCPServer()
 

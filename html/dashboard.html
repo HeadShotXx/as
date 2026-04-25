@@ -941,12 +941,29 @@
             <div class="page" id="page-account" style="display:none;">
                 <div class="page-header">
                     <h2>Account</h2>
-                    <span class="page-sub">Hesap bilgileri</span>
+                    <span class="page-sub">Hesap bilgileri ve lisans durumu</span>
                 </div>
-                <div class="coming-soon">
-                    <div class="coming-icon">◎</div>
-                    <div class="coming-title">Yapım Aşamasında</div>
-                    <div class="coming-sub">Hesap yönetimi özelliği yakında eklenecek.</div>
+
+                <div class="info-grid">
+                    <div class="info-card">
+                        <div class="info-card-title">Lisans Bilgileri</div>
+                        <div class="info-rows">
+                            <div class="info-row">
+                                <span class="info-key">Lisans Anahtarı</span>
+                                <span class="info-val mono">{{.LicenseKey}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Bitiş Tarihi</span>
+                                <span class="info-val mono">{{.LicenseExpiry}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Durum</span>
+                                <span class="info-val">
+                                    <span class="status-dot"></span> Aktif
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
