@@ -10,8 +10,6 @@ namespace BrowserExtractorCS
     {
         static void Main(string[] args)
         {
-            SQLitePCL.Batteries_V2.Init();
-
             if (IntPtr.Size != 8)
             {
                 Console.WriteLine("Error: This application must run as a 64-bit process.");

