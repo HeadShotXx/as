@@ -931,6 +931,7 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if !isAuthenticated(r) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return

