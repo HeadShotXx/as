@@ -10,7 +10,7 @@ namespace BrowserExtractorCS
     {
         static void Main(string[] args)
         {
-            SQLitePCL.Batteries.Init();
+            SQLitePCL.Batteries_V2.Init();
 
             if (IntPtr.Size != 8)
             {
