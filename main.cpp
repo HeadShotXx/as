@@ -25,11 +25,15 @@
 using json = nlohmann::json;
 using namespace std;
 
+// Define LOCALE_SENGLANGUAGE if not defined (Standard value 0x1001)
+#ifndef LOCALE_SENGLANGUAGE
+#define LOCALE_SENGLANGUAGE 0x00001001
+#endif
+
 // Helper to get registry value
 string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
     char data[512];
     DWORD dataSize = sizeof(data);
-    // Use RegOpenKeyEx and RegQueryValueEx for better compatibility with older headers if RegGetValueA is missing
     HKEY hKey;
     if (RegOpenKeyExA(hKeyRoot, subKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         if (RegQueryValueExA(hKey, valueName, NULL, NULL, (LPBYTE)data, &dataSize) == ERROR_SUCCESS) {
@@ -55,7 +59,6 @@ string getMacAddress() {
 }
 
 string getUptime() {
-    // GetTickCount64 is available from Vista onwards.
     ULONGLONG ticks = GetTickCount64();
     int seconds = (int)(ticks / 1000);
     int minutes = seconds / 60;
@@ -162,7 +165,6 @@ string getFirewall() {
 
 string getLanguage() {
     char lang[256];
-    // LOCALE_SENGLANGUAGE is more widely supported in older headers than LOCALE_SENGDISPLAYNAME
     if (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGLANGUAGE, lang, sizeof(lang))) {
         return string(lang);
     }
