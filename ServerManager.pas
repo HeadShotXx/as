@@ -246,6 +246,9 @@ end;
 procedure TServerManager.Stop;
 begin
   FHeartbeatTimer.Enabled := False;
+  FServer.OnConnected    := nil;
+  FServer.OnDisconnected := nil;
+  FServer.OnReadData     := nil;
   if FServer.Active then
     FServer.Active := False;
 end;

