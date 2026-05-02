@@ -52,6 +52,7 @@ type
     FDecodedFrameSize : Integer;
     FDisplayBitmap    : TBitmap;         // Repaint fallback için
     FPaintBox         : TNoFlickerPaintBox; // Gerçek görüntü alanı
+    FLastMouseMoveTick: UInt64;
 
     procedure FillDefaultOptions;
     procedure SendMonitoringCommand(const AAction: string);
@@ -581,7 +582,7 @@ begin
   try
     if Length(FPendingFrameBytes) > 0 then
     begin
-      ABytes := Copy(FPendingFrameBytes, 0, Length(FPendingFrameBytes));
+      ABytes := FPendingFrameBytes;
       SetLength(FPendingFrameBytes, 0);
       FPendingFrame := '';
       Result := True;
@@ -841,9 +842,15 @@ procedure TForm6.FPaintBoxMouseMove(Sender: TObject; Shift: TShiftState; X,
   Y: Integer);
 var
   JSONObj: TJSONObject;
+  NowTick: UInt64;
 begin
   if not CheckBox2.Checked or not Assigned(FOnSendJSON) or not Assigned(FLine) then
     Exit;
+
+  NowTick := GetTickCount64;
+  if (NowTick - FLastMouseMoveTick) < 30 then
+    Exit;
+  FLastMouseMoveTick := NowTick;
 
   JSONObj := TJSONObject.Create;
   try

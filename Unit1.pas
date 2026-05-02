@@ -523,6 +523,7 @@ begin
   begin
     F6.Show;
     F6.BringToFront;
+    F6.RequestMonitorList;
     Exit;
   end;
 

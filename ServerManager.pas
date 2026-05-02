@@ -18,7 +18,7 @@ const
   PROCESS_MANAGER_PLUGIN_ID   = 'ProcessManagerPlugin';
   REMOTE_SHELL_PLUGIN_ID      = 'RemoteShellPlugin';
   REMOTE_MONITORING_PLUGIN_ID = 'RemoteMonitoringPlugin';
-  MAX_JSON_BUFFER_SIZE        = 32 * 1024 * 1024;
+  MAX_JSON_BUFFER_SIZE        = 16 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
   PACKET_TYPE_MONITOR_FRAME   = $03;
@@ -538,6 +538,13 @@ begin
   if TryGetClientInfo(aLine, Info) then
     IP := Info.IPAddress;
 
+  // Security: Prevent directory traversal
+  if (PluginID = '') or (Pos('\', PluginID) > 0) or (Pos('/', PluginID) > 0) or (Pos('..', PluginID) > 0) then
+  begin
+    DoLog(lcError, 'Blocked invalid plugin request: ' + PluginID + ' [' + IP + ']');
+    Exit;
+  end;
+
   // Verify client is still connected before proceeding
   FLock.Enter;
   try
@@ -896,28 +903,15 @@ begin
       DoLog(lcCommand, '"inforesponse" received from ' + IP);
       if Assigned(FOnInfoReceived) then
       begin
-        var JSONCopy     := JSONObj.ToJSON;
+        var JSONClone    := TJSONObject(JSONObj.Clone);
         var CapturedLine := aLine;
         var CB           := FOnInfoReceived;
         QueueToUI(procedure
-        var
-          ParsedVal: TJSONValue;
-          ParsedObj: TJSONObject;
         begin
-          ParsedVal := TJSONObject.ParseJSONValue(JSONCopy);
-          if Assigned(ParsedVal) then
-          begin
-            if ParsedVal is TJSONObject then
-            begin
-              ParsedObj := TJSONObject(ParsedVal);
-              try
-                CB(CapturedLine, ParsedObj);
-              finally
-                ParsedVal.Free;
-              end;
-            end
-            else
-              ParsedVal.Free;
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
           end;
         end);
       end;
@@ -929,28 +923,15 @@ begin
       DoLog(lcCommand, '"processresponse" received from ' + IP);
       if Assigned(FOnProcessReceived) then
       begin
-        var JSONCopy     := JSONObj.ToJSON;
+        var JSONClone    := TJSONObject(JSONObj.Clone);
         var CapturedLine := aLine;
         var CB           := FOnProcessReceived;
         QueueToUI(procedure
-        var
-          ParsedVal: TJSONValue;
-          ParsedObj: TJSONObject;
         begin
-          ParsedVal := TJSONObject.ParseJSONValue(JSONCopy);
-          if Assigned(ParsedVal) then
-          begin
-            if ParsedVal is TJSONObject then
-            begin
-              ParsedObj := TJSONObject(ParsedVal);
-              try
-                CB(CapturedLine, ParsedObj);
-              finally
-                ParsedVal.Free;
-              end;
-            end
-            else
-              ParsedVal.Free;
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
           end;
         end);
       end;
@@ -962,28 +943,15 @@ begin
       DoLog(lcCommand, '"shellresponse" received from ' + IP);
       if Assigned(FOnRemoteShellReceived) then
       begin
-        var JSONCopy     := JSONObj.ToJSON;
+        var JSONClone    := TJSONObject(JSONObj.Clone);
         var CapturedLine := aLine;
         var CB           := FOnRemoteShellReceived;
         QueueToUI(procedure
-        var
-          ParsedVal: TJSONValue;
-          ParsedObj: TJSONObject;
         begin
-          ParsedVal := TJSONObject.ParseJSONValue(JSONCopy);
-          if Assigned(ParsedVal) then
-          begin
-            if ParsedVal is TJSONObject then
-            begin
-              ParsedObj := TJSONObject(ParsedVal);
-              try
-                CB(CapturedLine, ParsedObj);
-              finally
-                ParsedVal.Free;
-              end;
-            end
-            else
-              ParsedVal.Free;
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
           end;
         end);
       end;
@@ -998,28 +966,15 @@ begin
         DoLog(lcCommand, '"' + Action + '" received from ' + IP);
       if Assigned(FOnMonitoringReceived) then
       begin
-        var JSONCopy     := JSONObj.ToJSON;
+        var JSONClone    := TJSONObject(JSONObj.Clone);
         var CapturedLine := aLine;
         var CB           := FOnMonitoringReceived;
         QueueToUI(procedure
-        var
-          ParsedVal: TJSONValue;
-          ParsedObj: TJSONObject;
         begin
-          ParsedVal := TJSONObject.ParseJSONValue(JSONCopy);
-          if Assigned(ParsedVal) then
-          begin
-            if ParsedVal is TJSONObject then
-            begin
-              ParsedObj := TJSONObject(ParsedVal);
-              try
-                CB(CapturedLine, ParsedObj);
-              finally
-                ParsedVal.Free;
-              end;
-            end
-            else
-              ParsedVal.Free;
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
           end;
         end);
       end;
@@ -1120,4 +1075,3 @@ begin
 end;
 
 end.
-
