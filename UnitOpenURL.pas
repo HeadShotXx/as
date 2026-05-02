@@ -11,6 +11,7 @@ type
     Edit1: TEdit;
     Button1: TButton;
     ComboBox1: TComboBox;
+    procedure Button1Click(Sender: TObject);
   private
     { Private declarations }
   public
@@ -23,5 +24,11 @@ var
 implementation
 
 {$R *.dfm}
+
+procedure TForm8.Button1Click(Sender: TObject);
+begin
+  if Trim(Edit1.Text) <> '' then
+    ModalResult := mrOk;
+end;
 
 end.

