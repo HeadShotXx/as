@@ -120,7 +120,7 @@ begin
     Memo1.SelStart := Length(Memo1.Text);
     Memo1.SelText := LogValue;
     // Auto scroll to bottom
-    SendMessage(Memo1.Handle, EM_VSCROLL, SB_BOTTOM, 0);
+    SendMessage(Memo1.Handle, WM_VSCROLL, SB_BOTTOM, 0);
   end;
 end;
 
