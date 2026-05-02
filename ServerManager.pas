@@ -444,6 +444,7 @@ procedure TServerManager.UnregisterKeyloggerForm(aLine: TncLine);
 var
   AForm: TForm7;
 begin
+  if not Assigned(aLine) then Exit;
   FLock.Enter;
   try
     if FKeyloggerForms.TryGetValue(aLine, AForm) and Assigned(AForm) then
