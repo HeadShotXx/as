@@ -4,7 +4,7 @@ interface
 
 uses
   Winapi.Windows, Winapi.Messages,
-  System.SysUtils, System.Classes, System.JSON,
+  System.SysUtils, System.Classes, System.JSON, System.Math,
   System.NetEncoding, System.StrUtils, System.SyncObjs,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls,
   Vcl.ComCtrls, Vcl.ExtCtrls, Vcl.Imaging.jpeg, Vcl.Imaging.pngimage,
@@ -72,6 +72,12 @@ type
     procedure UpdateStatusBar;
     procedure UpdateButtonCaption;
     procedure UpdateMonitorList(JSONObj: TJSONObject);
+
+    procedure FPaintBoxMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure FPaintBoxMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+    procedure FPaintBoxMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
   protected
     procedure DoClose(var Action: TCloseAction); override;
   public
@@ -206,6 +212,10 @@ begin
     FPaintBox.Anchors  := PaintBox1.Anchors;
     FPaintBox.OnPaint  := PaintBoxPaint;
 
+    FPaintBox.OnMouseDown := FPaintBoxMouseDown;
+    FPaintBox.OnMouseMove := FPaintBoxMouseMove;
+    FPaintBox.OnMouseUp   := FPaintBoxMouseUp;
+
     // Üst panel varsa double buffer
     if FPaintBox.Parent is TWinControl then
       TWinControl(FPaintBox.Parent).DoubleBuffered := True;
@@ -213,6 +223,9 @@ begin
 
   Caption        := 'Remote Monitoring - ' + FClientID;
   DoubleBuffered := True;
+  KeyPreview     := True;
+  OnKeyDown      := FormKeyDown;
+  OnKeyUp        := FormKeyUp;
 
   Button1.OnClick    := Button1Click;
   ComboBox1.OnChange := ComboBox1Change;
@@ -801,6 +814,104 @@ begin
     UpdateButtonCaption;
   if ImageText = '' then
     UpdateStatusBar;
+end;
+
+procedure TForm6.FPaintBoxMouseDown(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+var
+  JSONObj: TJSONObject;
+begin
+  if not CheckBox2.Checked or not Assigned(FOnSendJSON) or not Assigned(FLine) then
+    Exit;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'mouseevent');
+    JSONObj.AddPair('event',  'down');
+    JSONObj.AddPair('button', TJSONNumber.Create(Ord(Button))); // 0:mbLeft, 1:mbRight, 2:mbMiddle
+    JSONObj.AddPair('x',      TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
+    JSONObj.AddPair('y',      TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
+    FOnSendJSON(FLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
+end;
+
+procedure TForm6.FPaintBoxMouseMove(Sender: TObject; Shift: TShiftState; X,
+  Y: Integer);
+var
+  JSONObj: TJSONObject;
+begin
+  if not CheckBox2.Checked or not Assigned(FOnSendJSON) or not Assigned(FLine) then
+    Exit;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'mouseevent');
+    JSONObj.AddPair('event',  'move');
+    JSONObj.AddPair('x',      TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
+    JSONObj.AddPair('y',      TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
+    FOnSendJSON(FLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
+end;
+
+procedure TForm6.FPaintBoxMouseUp(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+var
+  JSONObj: TJSONObject;
+begin
+  if not CheckBox2.Checked or not Assigned(FOnSendJSON) or not Assigned(FLine) then
+    Exit;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'mouseevent');
+    JSONObj.AddPair('event',  'up');
+    JSONObj.AddPair('button', TJSONNumber.Create(Ord(Button)));
+    JSONObj.AddPair('x',      TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
+    JSONObj.AddPair('y',      TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
+    FOnSendJSON(FLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
+end;
+
+procedure TForm6.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  JSONObj: TJSONObject;
+begin
+  if not CheckBox1.Checked or not Assigned(FOnSendJSON) or not Assigned(FLine) then
+    Exit;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'keyevent');
+    JSONObj.AddPair('event',  'down');
+    JSONObj.AddPair('key',    TJSONNumber.Create(Key));
+    FOnSendJSON(FLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
+end;
+
+procedure TForm6.FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  JSONObj: TJSONObject;
+begin
+  if not CheckBox1.Checked or not Assigned(FOnSendJSON) or not Assigned(FLine) then
+    Exit;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'keyevent');
+    JSONObj.AddPair('event',  'up');
+    JSONObj.AddPair('key',    TJSONNumber.Create(Key));
+    FOnSendJSON(FLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
 end;
 
 end.

@@ -538,6 +538,63 @@ static void start_capture(SOCKET sock, int monitorIndex, int scalePercent, int r
     safe_send_json(sock, response);
 }
 
+static void simulate_mouse(const string& event, int button, int x, int y) {
+    RECT rect{};
+    {
+        lock_guard<mutex> lock(g_captureMutex);
+        if (!g_hasCaptureRect) return;
+        rect = g_captureRect;
+    }
+
+    // Normalized (0-65535) to Screen Absolute
+    // x_abs = rect.left + (x * (rect.right - rect.left) / 65535)
+    // SendInput uses MOUSEEVENTF_ABSOLUTE which maps 0-65535 to the virtual screen.
+
+    int screen_x = rect.left + MulDiv(x, rect.right - rect.left, 65535);
+    int screen_y = rect.top + MulDiv(y, rect.bottom - rect.top, 65535);
+
+    // Map screen coordinate to MOUSEEVENTF_ABSOLUTE (0-65535 of virtual screen)
+    int v_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int v_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int v_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    int v_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+    if (v_width <= 0 || v_height <= 0) return;
+
+    double fx = (double)(screen_x - v_left) * (65535.0 / (double)(v_width - 1));
+    double fy = (double)(screen_y - v_top) * (65535.0 / (double)(v_height - 1));
+
+    INPUT input = {0};
+    input.type = INPUT_MOUSE;
+    input.mi.dx = (LONG)fx;
+    input.mi.dy = (LONG)fy;
+    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+    if (event == "move") {
+        input.mi.dwFlags |= MOUSEEVENTF_MOVE;
+    } else if (event == "down") {
+        if (button == 0) input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
+        else if (button == 1) input.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
+        else if (button == 2) input.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN;
+    } else if (event == "up") {
+        if (button == 0) input.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+        else if (button == 1) input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
+        else if (button == 2) input.mi.dwFlags |= MOUSEEVENTF_MIDDLEUP;
+    }
+
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+static void simulate_key(const string& event, int vk) {
+    INPUT input = {0};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = (WORD)vk;
+    if (event == "up") {
+        input.ki.dwFlags = KEYEVENTF_KEYUP;
+    }
+    SendInput(1, &input, sizeof(INPUT));
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     send_monitor_list(sock);
 }
@@ -567,6 +624,22 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             response["action"] = "monitorstatus";
             response["status"] = "stopped";
             safe_send_json(sock, response);
+            return;
+        }
+
+        if (action == "mouseevent") {
+            string event = command.value("event", "");
+            int button = command.value("button", 0);
+            int x = command.value("x", 0);
+            int y = command.value("y", 0);
+            simulate_mouse(event, button, x, y);
+            return;
+        }
+
+        if (action == "keyevent") {
+            string event = command.value("event", "");
+            int vk = command.value("key", 0);
+            simulate_key(event, vk);
             return;
         }
 
