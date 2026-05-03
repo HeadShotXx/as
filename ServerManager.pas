@@ -1164,6 +1164,20 @@ begin
       Exit;
     end;
 
+    if (Action = 'openurl_response') then
+    begin
+      var Status  := JSONObj.Values['status'].Value;
+      var Message := '';
+      if Assigned(JSONObj.Values['message']) then
+        Message := ': ' + JSONObj.Values['message'].Value;
+
+      if SameText(Status, 'success') then
+        DoLog(lcCommand, '"openurl" success on ' + IP)
+      else
+        DoLog(lcError, '"openurl" failed on ' + IP + Message);
+      Exit;
+    end;
+
     if (Action <> '') and (Action <> 'ping') then
       DoLog(lcCommand, '"' + Action + '" received from ' + IP);
 

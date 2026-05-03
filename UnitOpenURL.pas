@@ -43,6 +43,9 @@ begin
   FOnSendJSON := ASendJSON;
   FOnUnregister := AUnregister;
   Caption := 'Open URL - ' + FClientID;
+
+  Button1.OnClick := Button1Click;
+  OnClose := FormClose;
 end;
 
 procedure TForm8.DetachCallbacks;

