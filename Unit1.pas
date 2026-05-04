@@ -1,4 +1,4 @@
-﻿unit Unit1;
+unit Unit1;
 
 interface
 
@@ -47,6 +47,7 @@ type
     Keylogger1       : TMenuItem;
     OpenURL1: TMenuItem;
     TabSheet1: TTabSheet;
+    FileManager1: TMenuItem;
 
     procedure Button1Click(Sender: TObject);
     procedure SendMessage1Click(Sender: TObject);
@@ -60,6 +61,7 @@ type
     procedure RemoteMonitoring1Click(Sender: TObject);
     procedure Keylogger1Click(Sender: TObject);
     procedure OpenURL1Click(Sender: TObject);
+    procedure FileManager1Click(Sender: TObject);
   private
     FServerManager: TServerManager;
     FCurrentPort  : Integer;
@@ -130,6 +132,11 @@ begin
     FServerManager := nil;
   end;
   inherited;
+end;
+
+procedure TForm1.FileManager1Click(Sender: TObject);
+begin
+     //File Manager PopupMenu
 end;
 
 procedure TForm1.FormCreate(Sender: TObject);
@@ -735,4 +742,3 @@ begin
 end;
 
 end.
-
