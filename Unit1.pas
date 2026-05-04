@@ -97,6 +97,9 @@ implementation
 
 {$R *.dfm}
 
+uses
+  UnitFileManager;
+
 procedure TForm1.AfterConstruction;
 begin
   inherited;
@@ -480,7 +483,7 @@ begin
   else
     AddOrUpdateListView(Info);
 
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     begin
       if not Assigned(FServerManager) then Exit;
@@ -503,7 +506,7 @@ procedure TForm1.OnClientDisconnected(aLine: TncLine);
 begin
   if not Assigned(FServerManager) then Exit;
   RemoveFromListView(aLine);
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     begin
       if not Assigned(FServerManager) then Exit;
@@ -599,7 +602,7 @@ end;
 //ViewList'e client ekleme veya ViewList'i güncelleme (ViewList1)
 procedure TForm1.AddOrUpdateListView(const Info: TClientInfo);
 begin
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     var
       Item: TListItem;
@@ -773,7 +776,7 @@ end;
 //bağlantısı kopan etc. clientleri listview1'den silen fonksiyon.
 procedure TForm1.RemoveFromListView(aLine: TncLine);
 begin
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     var
       i: Integer;

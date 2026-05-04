@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ComCtrls, Vcl.ExtCtrls,
-  Vcl.Menus, System.JSON, ncLines;
+  Vcl.Menus, System.JSON, ncLines, System.UITypes;
 
 type
   TSendJSONProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
