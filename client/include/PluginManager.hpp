@@ -17,6 +17,7 @@ public:
     bool loadPluginFromFile(const std::string& pluginId, const std::string& filePath);
     void executePlugin(const std::string& pluginId, const std::string& funcName, SOCKET serverSock);
     void executePluginCommand(const std::string& pluginId, const std::string& funcName, SOCKET serverSock, const std::string& commandJson);
+    void executePluginBinary(const std::string& pluginId, const std::string& funcName, SOCKET serverSock, const std::vector<uint8_t>& payload);
 };
 
 #endif
