@@ -260,7 +260,7 @@ private:
                     continue;
                 }
 
-                if (recv_buffer.size() > 20 * 1024 * 1024) recv_buffer.clear();
+                if (recv_buffer.size() > 64 * 1024 * 1024) recv_buffer.clear();
                 break;
             }
         }

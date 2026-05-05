@@ -52,6 +52,9 @@ type
     FOnUnregister: TUnregisterFormProc;
 
     FCurrentPath: string;
+    FLastStatus: string;
+    procedure LogToStatus(const Msg: string);
+    procedure Timer1Timer(Sender: TObject);
   public
     procedure SetupForClient(aLine: TncLine; const aClientID: string;
       aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc);
@@ -80,7 +83,8 @@ begin
   FCurrentPath := '';
   Edit1.Text := '';
   ListView1.Items.Clear;
-  StatusBar1.SimpleText := 'Folders [0] Files [0]';
+  FLastStatus := 'Folders [0] Files [0]';
+  StatusBar1.SimpleText := FLastStatus;
 
   OnClose := FormClose;
   Geri.OnClick := GeriClick;
@@ -94,6 +98,27 @@ begin
   FLine := nil;
   FOnSendJSON := nil;
   FOnUnregister := nil;
+end;
+
+procedure TForm9.LogToStatus(const Msg: string);
+begin
+  StatusBar1.SimpleText := Msg;
+  TThread.CreateAnonymousThread(
+    procedure
+    begin
+      Sleep(3000);
+      TThread.Queue(nil,
+        procedure
+        begin
+          if Assigned(StatusBar1) then
+            StatusBar1.SimpleText := FLastStatus;
+        end);
+    end).Start;
+end;
+
+procedure TForm9.Timer1Timer(Sender: TObject);
+begin
+  // Placeholder for potential future timer logic
 end;
 
 procedure TForm9.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -169,7 +194,8 @@ begin
     finally
       ListView1.Items.EndUpdate;
     end;
-    StatusBar1.SimpleText := 'Drives listed';
+    FLastStatus := 'Drives listed';
+    StatusBar1.SimpleText := FLastStatus;
   end
   else if SameText(Action, 'files') then
   begin
@@ -198,11 +224,12 @@ begin
     finally
       ListView1.Items.EndUpdate;
     end;
-    StatusBar1.SimpleText := Format('Folders [%d] Files [%d]', [DCount, FCount]);
+    FLastStatus := Format('Folders [%d] Files [%d]', [DCount, FCount]);
+    StatusBar1.SimpleText := FLastStatus;
   end
   else if SameText(Action, 'log') then
   begin
-    StatusBar1.SimpleText := JSONObj.Values['message'].Value;
+    LogToStatus(JSONObj.Values['message'].Value);
   end
   else if SameText(Action, 'download') then
   begin
@@ -230,7 +257,7 @@ begin
       MS.Free;
     end;
 
-    StatusBar1.SimpleText := 'Downloaded to: ' + FileName;
+    LogToStatus('Downloaded: ' + FileName);
   end;
 end;
 
@@ -305,6 +332,7 @@ begin
     JSONObj.AddPair('action', 'copyfile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Copied to clipboard');
   finally
     JSONObj.Free;
   end;
@@ -322,6 +350,7 @@ begin
     JSONObj.AddPair('action', 'deletefile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Deleting: ' + ListView1.Selected.Caption + '...');
   finally
     JSONObj.Free;
   end;
@@ -337,7 +366,7 @@ begin
     JSONObj.AddPair('action', 'downloadfile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     FOnSendJSON(FLine, JSONObj);
-    StatusBar1.SimpleText := 'Downloading: ' + ListView1.Selected.Caption + '...';
+    LogToStatus('Downloading: ' + ListView1.Selected.Caption + '...');
   finally
     JSONObj.Free;
   end;
@@ -357,6 +386,7 @@ begin
     JSONObj.AddPair('action', 'createfolder');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + FolderName);
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Creating folder...');
   finally
     JSONObj.Free;
   end;
@@ -373,6 +403,7 @@ begin
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('mode', 'normal');
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Executing: ' + ListView1.Selected.Caption);
   finally
     JSONObj.Free;
   end;
@@ -389,6 +420,7 @@ begin
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('mode', 'hidden');
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Executing (Hidden): ' + ListView1.Selected.Caption);
   finally
     JSONObj.Free;
   end;
@@ -404,6 +436,7 @@ begin
     JSONObj.AddPair('action', 'pastefile');
     JSONObj.AddPair('path', FCurrentPath);
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Pasting file...');
   finally
     JSONObj.Free;
   end;
@@ -424,6 +457,7 @@ begin
     JSONObj.AddPair('oldpath', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('newpath', IncludeTrailingPathDelimiter(FCurrentPath) + NewName);
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Renaming: ' + ListView1.Selected.Caption + '...');
   finally
     JSONObj.Free;
   end;
@@ -440,6 +474,7 @@ begin
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('mode', 'runas');
     FOnSendJSON(FLine, JSONObj);
+    LogToStatus('Executing (RunAs): ' + ListView1.Selected.Caption);
   finally
     JSONObj.Free;
   end;
