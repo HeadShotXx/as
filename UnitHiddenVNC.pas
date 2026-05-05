@@ -40,6 +40,8 @@ type
     FOnFormClosed     : TVNCFormClosedEvent;
     FCapturing        : Boolean;
     FLastFrameSize    : Integer;
+    FBinaryCount      : Integer;
+    FFrameCount       : Integer;
     FLastStatusTick   : UInt64;
     FFrameTimer       : TTimer;
     FPendingFrameBytes: TBytes;
@@ -163,6 +165,8 @@ begin
   FOnFormClosed     := AFormClosed;
   FCapturing        := False;
   FLastFrameSize    := 0;
+  FBinaryCount      := 0;
+  FFrameCount       := 0;
   FLastStatusTick   := 0;
   SetLength(FPendingFrameBytes, 0);
   FDecodeStopping   := False;
@@ -177,7 +181,7 @@ begin
   begin
     FFrameTimer          := TTimer.Create(Self);
     FFrameTimer.Enabled  := False;
-    FFrameTimer.Interval := 30; // ~33 FPS
+    FFrameTimer.Interval := 30;
     FFrameTimer.OnTimer  := FrameTimerTimer;
   end;
 
@@ -322,10 +326,7 @@ end;
 
 procedure TForm10.Button1Click(Sender: TObject);
 begin
-  if FCapturing then
-    RequestCaptureStop
-  else
-    RequestCaptureStart;
+  if FCapturing then RequestCaptureStop else RequestCaptureStart;
 end;
 
 procedure TForm10.Button2Click(Sender: TObject);
@@ -362,7 +363,7 @@ end;
 
 procedure TForm10.ComboBox1Change(Sender: TObject);
 begin
-  if FCapturing then RequestCaptureStart;
+  if FCapturing then SendVNCCommand('vncstart'); // Update quality
 end;
 
 function TForm10.JSONValueText(JSONObj: TJSONObject; const AName: string): string;
@@ -380,6 +381,7 @@ begin
   if Length(ABytes) = 0 then Exit;
   FFrameLock.Enter;
   try
+    Inc(FBinaryCount);
     FPendingFrameBytes := Copy(ABytes, 0, Length(ABytes));
     if Assigned(FDecodeEvent) then
       FDecodeEvent.SetEvent;
@@ -428,9 +430,11 @@ begin
   FDisplayBitmap.Canvas.Draw(0, 0, ABitmap);
 
   if Assigned(FPaintBox) then
-    FPaintBox.Invalidate; // Trigger OnPaint which uses StretchDraw
+    FPaintBox.Canvas.StretchDraw(FPaintBox.ClientRect, ABitmap);
 
   FLastFrameSize := AFrameSize;
+  Inc(FFrameCount);
+
   if (GetTickCount64 - FLastStatusTick) >= 500 then
   begin
     FLastStatusTick := GetTickCount64;
@@ -567,13 +571,14 @@ var
 begin
   if FCapturing then StatusStr := 'Capturing [On]' else StatusStr := 'Capturing [Off]';
 
-  if StatusBar1.Panels.Count >= 2 then
+  if StatusBar1.Panels.Count >= 3 then
   begin
     StatusBar1.Panels[0].Text := StatusStr;
     StatusBar1.Panels[1].Text := 'Size [' + FormatFloat('0.0 KB', FLastFrameSize / 1024) + ']';
+    StatusBar1.Panels[2].Text := 'B: ' + IntToStr(FBinaryCount) + ' / F: ' + IntToStr(FFrameCount);
   end
   else
-    StatusBar1.SimpleText := StatusStr + ' - Size [' + FormatFloat('0.0 KB', FLastFrameSize / 1024) + ']';
+    StatusBar1.SimpleText := StatusStr + ' - Size [' + FormatFloat('0.0 KB', FLastFrameSize / 1024) + '] - B:' + IntToStr(FBinaryCount) + ' F:' + IntToStr(FFrameCount);
 end;
 
 procedure TForm10.UpdateButtonCaption;
@@ -594,7 +599,7 @@ begin
     Status := JSONValueText(JSONObj, 'status');
     if Status = '' then Status := Action;
 
-    if SameText(Status, 'started') then FCapturing := True
+    if SameText(Status, 'started') or ContainsText(Status, 'started') then FCapturing := True
     else if SameText(Status, 'stopped') then FCapturing := False;
 
     if StatusBar1.Panels.Count > 0 then
