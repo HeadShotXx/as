@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ComCtrls, Vcl.ExtCtrls,
-  Vcl.Menus, System.JSON, ncLines, System.UITypes, System.NetEncoding, System.IOUtils;
+  Vcl.Menus, System.JSON, ncLines, System.UITypes, System.NetEncoding, System.IOUtils, System.DateUtils;
 
 type
   TSendJSONProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
@@ -53,6 +53,7 @@ type
 
     FCurrentPath: string;
     FLastStatus: string;
+    FLastLogTime: TDateTime;
     procedure LogToStatus(const Msg: string);
     procedure Timer1Timer(Sender: TObject);
   public
@@ -102,7 +103,14 @@ end;
 
 procedure TForm9.LogToStatus(const Msg: string);
 begin
-  StatusBar1.SimpleText := Msg;
+  FLastLogTime := Now;
+  TThread.Queue(nil,
+    procedure
+    begin
+      if Assigned(StatusBar1) then
+        StatusBar1.SimpleText := Msg;
+    end);
+
   TThread.CreateAnonymousThread(
     procedure
     begin
@@ -110,7 +118,7 @@ begin
       TThread.Queue(nil,
         procedure
         begin
-          if Assigned(StatusBar1) then
+          if Assigned(StatusBar1) and (MilliSecondsBetween(Now, FLastLogTime) >= 3000) then
             StatusBar1.SimpleText := FLastStatus;
         end);
     end).Start;
@@ -195,7 +203,8 @@ begin
       ListView1.Items.EndUpdate;
     end;
     FLastStatus := 'Drives listed';
-    StatusBar1.SimpleText := FLastStatus;
+    if (MilliSecondsBetween(Now, FLastLogTime) >= 3000) then
+      StatusBar1.SimpleText := FLastStatus;
   end
   else if SameText(Action, 'files') then
   begin
@@ -239,7 +248,8 @@ begin
       ListView1.Items.EndUpdate;
     end;
     FLastStatus := Format('Folders [%d] Files [%d]', [DCount, FCount]);
-    StatusBar1.SimpleText := FLastStatus;
+    if (MilliSecondsBetween(Now, FLastLogTime) >= 3000) then
+      StatusBar1.SimpleText := FLastStatus;
   end
   else if SameText(Action, 'log') then
   begin
@@ -247,31 +257,53 @@ begin
   end
   else if SameText(Action, 'download') then
   begin
-    var FileName := JSONObj.Values['name'].Value;
-    var Base64Data := JSONObj.Values['data'].Value;
-    var RawData: TBytes;
-    var SavePath: string;
+    var LFileName := JSONObj.Values['name'].Value;
+    var LBase64Data := JSONObj.Values['data'].Value;
+    var LClientID := FClientID;
 
-    RawData := TNetEncoding.Base64.Decode(TEncoding.UTF8.GetBytes(Base64Data));
-    SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
-    SavePath := TPath.Combine(SavePath, FClientID);
-    SavePath := TPath.Combine(SavePath, 'recovery_files');
+    TThread.CreateAnonymousThread(
+      procedure
+      var
+        LRawData: TBytes;
+        LSavePath: string;
+        LMS: TMemoryStream;
+      begin
+        try
+          LRawData := TNetEncoding.Base64.Decode(TEncoding.UTF8.GetBytes(LBase64Data));
 
-    if not TDirectory.Exists(SavePath) then
-      TDirectory.CreateDirectory(SavePath);
+          if Length(LRawData) > (50 * 1024 * 1024) then
+          begin
+            TThread.Queue(nil, procedure begin if Assigned(Form9) then Form9.LogToStatus('Download failed: Decoded file exceeds 50MB'); end);
+            Exit;
+          end;
 
-    SavePath := TPath.Combine(SavePath, FileName);
+          LSavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
+          LSavePath := TPath.Combine(LSavePath, LClientID);
+          LSavePath := TPath.Combine(LSavePath, 'recovery_files');
 
-    var MS := TMemoryStream.Create;
-    try
-      if Length(RawData) > 0 then
-        MS.WriteBuffer(RawData[0], Length(RawData));
-      MS.SaveToFile(SavePath);
-    finally
-      MS.Free;
-    end;
+          if not TDirectory.Exists(LSavePath) then
+            TDirectory.CreateDirectory(LSavePath);
 
-    LogToStatus('Downloaded: ' + FileName);
+          LSavePath := TPath.Combine(LSavePath, LFileName);
+
+          LMS := TMemoryStream.Create;
+          try
+            if Length(LRawData) > 0 then
+              LMS.WriteBuffer(LRawData[0], Length(LRawData));
+            LMS.SaveToFile(LSavePath);
+          finally
+            LMS.Free;
+          end;
+
+          TThread.Queue(nil, procedure begin if Assigned(Form9) then Form9.LogToStatus('Downloaded: ' + LFileName); end);
+        except
+          on E: Exception do
+          begin
+            var LError := E.Message;
+            TThread.Queue(nil, procedure begin if Assigned(Form9) then Form9.LogToStatus('Download processing error: ' + LError); end);
+          end;
+        end;
+      end).Start;
   end;
 end;
 
@@ -496,10 +528,8 @@ end;
 
 procedure TForm9.Upload1Click(Sender: TObject);
 var
-  JSONObj: TJSONObject;
   OpenDlg: TOpenDialog;
-  FileBytes: TBytes;
-  Base64Str: string;
+  LFileName, LDestPath: string;
 begin
   if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
 
@@ -507,26 +537,57 @@ begin
   try
     if OpenDlg.Execute then
     begin
-      if TFile.GetSize(OpenDlg.FileName) > (50 * 1024 * 1024) then
+      LFileName := OpenDlg.FileName;
+      LDestPath := IncludeTrailingPathDelimiter(FCurrentPath) + TPath.GetFileName(LFileName);
+
+      if TFile.GetSize(LFileName) > (50 * 1024 * 1024) then
       begin
         MessageBox(Handle, 'File size exceeds 50MB limit.', 'Upload Error', MB_OK or MB_ICONERROR);
         Exit;
       end;
 
-      FileBytes := TFile.ReadAllBytes(OpenDlg.FileName);
-      Base64Str := TNetEncoding.Base64.EncodeBytesToString(FileBytes);
-      Base64Str := Base64Str.Replace(#13, '').Replace(#10, '');
+      LogToStatus('Uploading: ' + TPath.GetFileName(LFileName) + '...');
 
-      JSONObj := TJSONObject.Create;
-      try
-        JSONObj.AddPair('action', 'uploadfile');
-        JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + TPath.GetFileName(OpenDlg.FileName));
-        JSONObj.AddPair('data', Base64Str);
-        FOnSendJSON(FLine, JSONObj);
-        StatusBar1.SimpleText := 'Uploading: ' + TPath.GetFileName(OpenDlg.FileName);
-      finally
-        JSONObj.Free;
-      end;
+      TThread.CreateAnonymousThread(
+        procedure
+        var
+          LFileBytes: TBytes;
+          LBase64Str: string;
+          LJSONObj: TJSONObject;
+          LCurrentLine: TncLine;
+          LSendJSON: TSendJSONProc;
+        begin
+          try
+            LFileBytes := TFile.ReadAllBytes(LFileName);
+            LBase64Str := TNetEncoding.Base64.EncodeBytesToString(LFileBytes);
+            LBase64Str := LBase64Str.Replace(#13, '').Replace(#10, '');
+
+            LJSONObj := TJSONObject.Create;
+            try
+              LJSONObj.AddPair('action', 'uploadfile');
+              LJSONObj.AddPair('path', LDestPath);
+              LJSONObj.AddPair('data', LBase64Str);
+
+              TThread.Synchronize(nil,
+                procedure
+                begin
+                  LCurrentLine := FLine;
+                  LSendJSON := FOnSendJSON;
+                end);
+
+              if Assigned(LSendJSON) and Assigned(LCurrentLine) then
+                LSendJSON(LCurrentLine, LJSONObj);
+            finally
+              LJSONObj.Free;
+            end;
+          except
+            on E: Exception do
+            begin
+              var LError := E.Message;
+              TThread.Queue(nil, procedure begin if Assigned(Form9) then Form9.LogToStatus('Upload failed: ' + LError); end);
+            end;
+          end;
+        end).Start;
     end;
   finally
     OpenDlg.Free;
