@@ -319,6 +319,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             fseek(f, 0, SEEK_END);
             long size = ftell(f);
             fseek(f, 0, SEEK_SET);
+
+            if (size > (50 * 1024 * 1024)) {
+                fclose(f);
+                send_log(sock, "Download failed: File size exceeds 50MB limit");
+                return;
+            }
+
             vector<uint8_t> buffer(size);
             fread(buffer.data(), 1, size, f);
             fclose(f);

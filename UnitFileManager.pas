@@ -207,19 +207,33 @@ begin
       ListView1.Items.Clear;
       FCount := 0;
       DCount := 0;
+      // First pass: Folders
       for i := 0 to Items.Count - 1 do
       begin
         ItemObj := Items.Items[i] as TJSONObject;
-        LItem := ListView1.Items.Add;
-        LItem.Caption := ItemObj.Values['name'].Value;
-        LItem.SubItems.Add(ItemObj.Values['date'].Value);
-        LItem.SubItems.Add(ItemObj.Values['type'].Value);
-        LItem.SubItems.Add(ItemObj.Values['size'].Value);
-
         if SameText(ItemObj.Values['type'].Value, 'Folder') then
-          Inc(DCount)
-        else
+        begin
+          LItem := ListView1.Items.Add;
+          LItem.Caption := ItemObj.Values['name'].Value;
+          LItem.SubItems.Add(ItemObj.Values['date'].Value);
+          LItem.SubItems.Add(ItemObj.Values['type'].Value);
+          LItem.SubItems.Add(ItemObj.Values['size'].Value);
+          Inc(DCount);
+        end;
+      end;
+      // Second pass: Files
+      for i := 0 to Items.Count - 1 do
+      begin
+        ItemObj := Items.Items[i] as TJSONObject;
+        if not SameText(ItemObj.Values['type'].Value, 'Folder') then
+        begin
+          LItem := ListView1.Items.Add;
+          LItem.Caption := ItemObj.Values['name'].Value;
+          LItem.SubItems.Add(ItemObj.Values['date'].Value);
+          LItem.SubItems.Add(ItemObj.Values['type'].Value);
+          LItem.SubItems.Add(ItemObj.Values['size'].Value);
           Inc(FCount);
+        end;
       end;
     finally
       ListView1.Items.EndUpdate;
@@ -493,6 +507,12 @@ begin
   try
     if OpenDlg.Execute then
     begin
+      if TFile.GetSize(OpenDlg.FileName) > (50 * 1024 * 1024) then
+      begin
+        MessageBox(Handle, 'File size exceeds 50MB limit.', 'Upload Error', MB_OK or MB_ICONERROR);
+        Exit;
+      end;
+
       FileBytes := TFile.ReadAllBytes(OpenDlg.FileName);
       Base64Str := TNetEncoding.Base64.EncodeBytesToString(FileBytes);
       Base64Str := Base64Str.Replace(#13, '').Replace(#10, '');

