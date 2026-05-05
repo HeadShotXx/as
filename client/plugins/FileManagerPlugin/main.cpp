@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <fstream>
+#include <thread>
+#include <mutex>
 #include "../../include/json.hpp"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -18,6 +20,8 @@ using json = nlohmann::json;
 using namespace std;
 
 static wstring clipboard_path = L"";
+static mutex send_mutex;
+const long long MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 static const string base64_chars =
              "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -102,6 +106,7 @@ static wstring utf8_to_wide(const string& str) {
 }
 
 static void send_json(SOCKET sock, const json& data) {
+    lock_guard<mutex> lock(send_mutex);
     string msg = data.dump() + "\r\n";
     send(sock, msg.c_str(), (int)msg.length(), 0);
 }
@@ -310,48 +315,59 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             }
         }
         else if (action == "downloadfile") {
-            wstring path = utf8_to_wide(command.value("path", ""));
-            FILE* f = _wfopen(path.c_str(), L"rb");
-            if (!f) {
-                send_log(sock, "Download failed: Could not open file");
-                return;
-            }
-            fseek(f, 0, SEEK_END);
-            long size = ftell(f);
-            fseek(f, 0, SEEK_SET);
+            thread([sock, command]() {
+                wstring path = utf8_to_wide(command.value("path", ""));
+                FILE* f = _wfopen(path.c_str(), L"rb");
+                if (!f) {
+                    send_log(sock, "Download failed: Could not open file");
+                    return;
+                }
+                _fseeki64(f, 0, SEEK_END);
+                long long size = _ftelli64(f);
+                _fseeki64(f, 0, SEEK_SET);
 
-            if (size > (50 * 1024 * 1024)) {
+                if (size > MAX_FILE_SIZE) {
+                    fclose(f);
+                    send_log(sock, "Download failed: File size exceeds 50MB limit");
+                    return;
+                }
+
+                vector<uint8_t> buffer((size_t)size);
+                fread(buffer.data(), 1, (size_t)size, f);
                 fclose(f);
-                send_log(sock, "Download failed: File size exceeds 50MB limit");
-                return;
-            }
 
-            vector<uint8_t> buffer(size);
-            fread(buffer.data(), 1, size, f);
-            fclose(f);
-            json response;
-            response["action"] = "filemanager_response";
-            response["type"] = "download";
-            response["name"] = wide_to_utf8(path.substr(path.find_last_of(L"\\") + 1));
-            response["data"] = base64_encode(buffer);
-            send_json(sock, response);
-            send_log(sock, "File downloaded: " + wide_to_utf8(path));
+                json response;
+                response["action"] = "filemanager_response";
+                response["type"] = "download";
+                response["name"] = wide_to_utf8(path.substr(path.find_last_of(L"\\") + 1));
+                response["data"] = base64_encode(buffer);
+                send_json(sock, response);
+                send_log(sock, "File downloaded: " + wide_to_utf8(path));
+            }).detach();
         }
         else if (action == "uploadfile") {
-            wstring path = utf8_to_wide(command.value("path", ""));
-            string base64_data = command.value("data", "");
-            vector<uint8_t> data = base64_decode(base64_data);
-            FILE* f = _wfopen(path.c_str(), L"wb");
-            if (!f) {
-                send_log(sock, "Upload failed: Could not create file");
-                return;
-            }
-            fwrite(data.data(), 1, data.size(), f);
-            fclose(f);
-            send_log(sock, "File uploaded: " + wide_to_utf8(path));
-            size_t last_slash = path.find_last_of(L"\\");
-            wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
-            send_files(sock, parent);
+            thread([sock, command]() {
+                wstring path = utf8_to_wide(command.value("path", ""));
+                string base64_data = command.value("data", "");
+                vector<uint8_t> data = base64_decode(base64_data);
+
+                if (data.size() > (size_t)MAX_FILE_SIZE) {
+                    send_log(sock, "Upload failed: Data size exceeds 50MB limit");
+                    return;
+                }
+
+                FILE* f = _wfopen(path.c_str(), L"wb");
+                if (!f) {
+                    send_log(sock, "Upload failed: Could not create file");
+                    return;
+                }
+                fwrite(data.data(), 1, data.size(), f);
+                fclose(f);
+                send_log(sock, "File uploaded: " + wide_to_utf8(path));
+                size_t last_slash = path.find_last_of(L"\\");
+                wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
+                send_files(sock, parent);
+            }).detach();
         }
     } catch (...) {
         send_log(sock, "Client-side plugin error processing command");

