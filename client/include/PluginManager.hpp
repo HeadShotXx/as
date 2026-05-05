@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <cstdint>
 #include <winsock2.h>
 #include <windows.h>
 

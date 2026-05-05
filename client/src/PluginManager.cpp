@@ -2,6 +2,7 @@
 #include "MemoryLoader.hpp"
 #include <iostream>
 #include <fstream>
+#include <cstdint>
 
 bool PluginManager::isPluginLoaded(const std::string& pluginId) {
     return loadedPlugins.find(pluginId) != loadedPlugins.end();
