@@ -687,17 +687,20 @@ begin
   if (Action <> '') and (Action <> 'ping') then
     DoLog(lcCommand, '"' + Action + '" command sent to ' + IP);
 
+  var ClientExists := False;
   FLock.Enter;
   try
-    if FClients.ContainsKey(aLine) then
-    try
-      TncLineAccess(aLine).SendBuffer(DataBytes[0], Length(DataBytes));
-    except
-      on E: Exception do
-        DoLog(lcError, 'JSON send error [' + IP + ']: ' + E.Message);
-    end;
+    ClientExists := FClients.ContainsKey(aLine);
   finally
     FLock.Leave;
+  end;
+
+  if ClientExists then
+  try
+    TncLineAccess(aLine).SendBuffer(DataBytes[0], Length(DataBytes));
+  except
+    on E: Exception do
+      DoLog(lcError, 'JSON send error [' + IP + ']: ' + E.Message);
   end;
 end;
 
@@ -723,17 +726,20 @@ begin
   if TryGetClientInfo(aLine, Info) then
     IP := Info.IPAddress;
 
+  var ClientExists := False;
   FLock.Enter;
   try
-    if FClients.ContainsKey(aLine) then
-    try
-      TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
-    except
-      on E: Exception do
-        DoLog(lcError, 'Binary send error [' + IP + ']: ' + E.Message);
-    end;
+    ClientExists := FClients.ContainsKey(aLine);
   finally
     FLock.Leave;
+  end;
+
+  if ClientExists then
+  try
+    TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
+  except
+    on E: Exception do
+      DoLog(lcError, 'Binary send error [' + IP + ']: ' + E.Message);
   end;
 end;
 

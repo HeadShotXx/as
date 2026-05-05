@@ -560,7 +560,6 @@ begin
           try
             LFileBytes := TFile.ReadAllBytes(LFileName);
             LBase64Str := TNetEncoding.Base64.EncodeBytesToString(LFileBytes);
-            LBase64Str := LBase64Str.Replace(#13, '').Replace(#10, '');
 
             LJSONObj := TJSONObject.Create;
             try
