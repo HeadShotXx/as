@@ -126,6 +126,7 @@ type
     procedure Start(Port: Integer);
     procedure Stop;
     procedure SendJSON(aLine: TncLine; JSONObj: TJSONObject);
+    procedure SendRawJSON(aLine: TncLine; const JSONStr: string);
     procedure SendPlugin(aLine: TncLine; const PluginID: string);
     procedure SendInformationPlugin(aLine: TncLine);
     procedure SendProcessManagerPlugin(aLine: TncLine);
@@ -665,39 +666,53 @@ begin
 end;
 
 procedure TServerManager.SendJSON(aLine: TncLine; JSONObj: TJSONObject);
+begin
+  if not Assigned(JSONObj) then Exit;
+  SendRawJSON(aLine, JSONObj.ToJSON);
+end;
+
+procedure TServerManager.SendRawJSON(aLine: TncLine; const JSONStr: string);
 var
   DataStr  : string;
   DataBytes: TBytes;
   Action   : string;
   IP       : string;
   Info     : TClientInfo;
+  ClientExists : Boolean;
 begin
-  if not Assigned(JSONObj) then Exit;
-
-  DataStr   := JSONObj.ToJSON + #13#10;
+  DataStr   := JSONStr + #13#10;
   DataBytes := TEncoding.UTF8.GetBytes(DataStr);
 
-  Action := '';
-  if Assigned(JSONObj.Values['action']) then
-    Action := JSONObj.Values['action'].Value;
   IP := '';
   if TryGetClientInfo(aLine, Info) then
     IP := Info.IPAddress;
 
+  // Simple heuristic for logging action
+  Action := '';
+  if Pos('"action":"', JSONStr) > 0 then
+  begin
+    Action := Copy(JSONStr, Pos('"action":"', JSONStr) + 10, 100);
+    if Pos('"', Action) > 0 then
+      Action := Copy(Action, 1, Pos('"', Action) - 1);
+  end;
+
   if (Action <> '') and (Action <> 'ping') then
     DoLog(lcCommand, '"' + Action + '" command sent to ' + IP);
 
+  ClientExists := False;
   FLock.Enter;
   try
-    if FClients.ContainsKey(aLine) then
-    try
-      TncLineAccess(aLine).SendBuffer(DataBytes[0], Length(DataBytes));
-    except
-      on E: Exception do
-        DoLog(lcError, 'JSON send error [' + IP + ']: ' + E.Message);
-    end;
+    ClientExists := FClients.ContainsKey(aLine);
   finally
     FLock.Leave;
+  end;
+
+  if ClientExists then
+  try
+    TncLineAccess(aLine).SendBuffer(DataBytes[0], Length(DataBytes));
+  except
+    on E: Exception do
+      DoLog(lcError, 'JSON send error [' + IP + ']: ' + E.Message);
   end;
 end;
 
@@ -723,17 +738,20 @@ begin
   if TryGetClientInfo(aLine, Info) then
     IP := Info.IPAddress;
 
+  var ClientExists := False;
   FLock.Enter;
   try
-    if FClients.ContainsKey(aLine) then
-    try
-      TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
-    except
-      on E: Exception do
-        DoLog(lcError, 'Binary send error [' + IP + ']: ' + E.Message);
-    end;
+    ClientExists := FClients.ContainsKey(aLine);
   finally
     FLock.Leave;
+  end;
+
+  if ClientExists then
+  try
+    TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
+  except
+    on E: Exception do
+      DoLog(lcError, 'Binary send error [' + IP + ']: ' + E.Message);
   end;
 end;
 

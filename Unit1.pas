@@ -179,7 +179,8 @@ begin
 
   F9.SetupForClient(SelectedLine, ClientID,
                     FServerManager.SendJSON,
-                    FServerManager.UnregisterFileManagerForm);
+                    FServerManager.UnregisterFileManagerForm,
+                    FServerManager.SendRawJSON);
   F9.Show;
   F9.BringToFront;
   F9.RequestDrives;
