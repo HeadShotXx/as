@@ -183,10 +183,12 @@ static void send_files(SOCKET sock, wstring path) {
             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 item["type"] = "Folder";
                 item["size"] = "";
+                item["size_raw"] = 0;
             } else {
                 item["type"] = "File";
                 uint64_t size = ((uint64_t)findData.nFileSizeHigh << 32) | findData.nFileSizeLow;
                 item["size"] = format_size(size);
+                item["size_raw"] = size;
             }
             files.push_back(item);
         } while (FindNextFileW(hFind, &findData));

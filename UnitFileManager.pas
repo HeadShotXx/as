@@ -9,6 +9,7 @@ uses
 
 type
   TSendJSONProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
+  TSendRawJSONProc = procedure(aLine: TncLine; const JSONStr: string) of object;
   TUnregisterFormProc = procedure(aLine: TncLine) of object;
 
   TForm9 = class(TForm)
@@ -49,6 +50,7 @@ type
     FLine: TncLine;
     FClientID: string;
     FOnSendJSON: TSendJSONProc;
+    FOnSendRawJSON: TSendRawJSONProc;
     FOnUnregister: TUnregisterFormProc;
 
     FCurrentPath: string;
@@ -58,7 +60,8 @@ type
     procedure Timer1Timer(Sender: TObject);
   public
     procedure SetupForClient(aLine: TncLine; const aClientID: string;
-      aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc);
+      aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc;
+      aSendRawJSONProc: TSendRawJSONProc = nil);
     procedure HandleFileManagerJSON(JSONObj: TJSONObject);
     procedure DetachCallbacks;
     procedure RequestDrives;
@@ -73,11 +76,13 @@ implementation
 {$R *.dfm}
 
 procedure TForm9.SetupForClient(aLine: TncLine; const aClientID: string;
-  aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc);
+  aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc;
+  aSendRawJSONProc: TSendRawJSONProc = nil);
 begin
   FLine := aLine;
   FClientID := aClientID;
   FOnSendJSON := aSendJSONProc;
+  FOnSendRawJSON := aSendRawJSONProc;
   FOnUnregister := aUnregisterProc;
 
   Caption := 'File Manager - ' + FClientID;
@@ -98,6 +103,7 @@ procedure TForm9.DetachCallbacks;
 begin
   FLine := nil;
   FOnSendJSON := nil;
+  FOnSendRawJSON := nil;
   FOnUnregister := nil;
 end;
 
@@ -227,6 +233,7 @@ begin
           LItem.SubItems.Add(ItemObj.Values['date'].Value);
           LItem.SubItems.Add(ItemObj.Values['type'].Value);
           LItem.SubItems.Add(ItemObj.Values['size'].Value);
+          LItem.SubItems.Add('0'); // size_raw
           Inc(DCount);
         end;
       end;
@@ -241,6 +248,10 @@ begin
           LItem.SubItems.Add(ItemObj.Values['date'].Value);
           LItem.SubItems.Add(ItemObj.Values['type'].Value);
           LItem.SubItems.Add(ItemObj.Values['size'].Value);
+          if Assigned(ItemObj.Values['size_raw']) then
+            LItem.SubItems.Add(ItemObj.Values['size_raw'].Value)
+          else
+            LItem.SubItems.Add('0');
           Inc(FCount);
         end;
       end;
@@ -405,8 +416,20 @@ end;
 procedure TForm9.Download1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
+  LSizeRaw: Int64;
 begin
   if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+
+  LSizeRaw := 0;
+  if ListView1.Selected.SubItems.Count >= 4 then
+    TryStrToInt64(ListView1.Selected.SubItems[3], LSizeRaw);
+
+  if LSizeRaw > (50 * 1024 * 1024) then
+  begin
+    MessageBox(Handle, 'File size exceeds 50MB limit.', 'Download Error', MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'downloadfile');
@@ -553,32 +576,28 @@ begin
         var
           LFileBytes: TBytes;
           LBase64Str: string;
-          LJSONObj: TJSONObject;
+          LJSONStr: string;
           LCurrentLine: TncLine;
-          LSendJSON: TSendJSONProc;
+          LSendRawJSON: TSendRawJSONProc;
         begin
           try
             LFileBytes := TFile.ReadAllBytes(LFileName);
             LBase64Str := TNetEncoding.Base64.EncodeBytesToString(LFileBytes);
 
-            LJSONObj := TJSONObject.Create;
-            try
-              LJSONObj.AddPair('action', 'uploadfile');
-              LJSONObj.AddPair('path', LDestPath);
-              LJSONObj.AddPair('data', LBase64Str);
+            // Manual JSON construction to avoid TJSONObject overhead for 50MB
+            LJSONStr := '{"action":"uploadfile","path":"' +
+                        LDestPath.Replace('\', '\\').Replace('"', '\"') +
+                        '","data":"' + LBase64Str + '"}';
 
-              TThread.Synchronize(nil,
-                procedure
-                begin
-                  LCurrentLine := FLine;
-                  LSendJSON := FOnSendJSON;
-                end);
+            TThread.Synchronize(nil,
+              procedure
+              begin
+                LCurrentLine := FLine;
+                LSendRawJSON := FOnSendRawJSON;
+              end);
 
-              if Assigned(LSendJSON) and Assigned(LCurrentLine) then
-                LSendJSON(LCurrentLine, LJSONObj);
-            finally
-              LJSONObj.Free;
-            end;
+            if Assigned(LSendRawJSON) and Assigned(LCurrentLine) then
+              LSendRawJSON(LCurrentLine, LJSONStr);
           except
             on E: Exception do
             begin
