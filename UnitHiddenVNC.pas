@@ -55,7 +55,7 @@ type
 
     procedure FillDefaultOptions;
     procedure SendVNCCommand(const AAction: string; AParams: TJSONObject = nil);
-    function  SelectedScalePercent: Integer;
+    function  SelectedQualityPercent: Integer;
     function  JSONValueText(JSONObj: TJSONObject; const AName: string): string;
     function  DecodeFrameToBitmap(const ABytes: TBytes; out ABitmap: TBitmap): Boolean;
     procedure FrameTimerTimer(Sender: TObject);
@@ -215,6 +215,12 @@ begin
   OnKeyDown      := FormKeyDown;
   OnKeyUp        := FormKeyUp;
 
+  // Explicitly assign events
+  Button1.OnClick    := Button1Click;
+  Button2.OnClick    := Button2Click;
+  Button3.OnClick    := Button3Click;
+  ComboBox1.OnChange := ComboBox1Change;
+
   FillDefaultOptions;
   UpdateButtonCaption;
   UpdateStatusBar;
@@ -224,25 +230,31 @@ procedure TForm10.FillDefaultOptions;
 var
   i: Integer;
 begin
-  if ComboBox1.Items.Count = 0 then
-  begin
+  ComboBox1.Items.BeginUpdate;
+  try
+    ComboBox1.Items.Clear;
     for i := 1 to 10 do
       ComboBox1.Items.Add(IntToStr(i * 10) + '%');
     ComboBox1.ItemIndex := 4; // 50%
+  finally
+    ComboBox1.Items.EndUpdate;
   end;
 
-  if ComboBox2.Items.Count = 0 then
-  begin
+  ComboBox2.Items.BeginUpdate;
+  try
+    ComboBox2.Items.Clear;
     ComboBox2.Items.Add('chrome.exe');
     ComboBox2.Items.Add('msedge.exe');
     ComboBox2.Items.Add('brave.exe');
     ComboBox2.Items.Add('powershell.exe');
     ComboBox2.Items.Add('cmd.exe');
     ComboBox2.ItemIndex := 0;
+  finally
+    ComboBox2.Items.EndUpdate;
   end;
 end;
 
-function TForm10.SelectedScalePercent: Integer;
+function TForm10.SelectedQualityPercent: Integer;
 begin
   Result := StrToIntDef(StringReplace(ComboBox1.Text, '%', '', [rfReplaceAll]), 50);
 end;
@@ -250,6 +262,7 @@ end;
 procedure TForm10.SendVNCCommand(const AAction: string; AParams: TJSONObject = nil);
 var
   JSONObj: TJSONObject;
+  i: Integer;
 begin
   if not Assigned(FLine) or not Assigned(FOnSendJSON) then
     Exit;
@@ -259,7 +272,7 @@ begin
     JSONObj.AddPair('action', AAction);
     if Assigned(AParams) then
     begin
-      for var i := 0 to AParams.Count - 1 do
+      for i := 0 to AParams.Count - 1 do
         JSONObj.AddPair(AParams.Pairs[i].JsonString.Value, AParams.Pairs[i].JsonValue.Clone as TJSONValue);
     end;
     FOnSendJSON(FLine, JSONObj);
@@ -275,10 +288,13 @@ begin
   FCapturing := True;
   FFrameTimer.Enabled := True;
   Params := TJSONObject.Create;
-  Params.AddPair('scale',   TJSONNumber.Create(50)); // Scale is fixed for simplicity, Quality is variable
-  Params.AddPair('quality', TJSONNumber.Create(SelectedScalePercent));
-  SendVNCCommand('vncstart', Params);
-  Params.Free;
+  try
+    Params.AddPair('scale',   TJSONNumber.Create(50));
+    Params.AddPair('quality', TJSONNumber.Create(SelectedQualityPercent));
+    SendVNCCommand('vncstart', Params);
+  finally
+    Params.Free;
+  end;
   UpdateButtonCaption;
   UpdateStatusBar;
 end;
@@ -292,7 +308,8 @@ begin
     SetLength(FPendingFrameBytes, 0);
     FreeAndNil(FDecodedBitmap);
     FDecodedFrameSize := 0;
-    FDecodeEvent.ResetEvent;
+    if Assigned(FDecodeEvent) then
+      FDecodeEvent.ResetEvent;
   finally
     FFrameLock.Leave;
   end;
@@ -313,10 +330,14 @@ procedure TForm10.Button2Click(Sender: TObject);
 var
   Params: TJSONObject;
 begin
+  if ComboBox2.Text = '' then Exit;
   Params := TJSONObject.Create;
-  Params.AddPair('path', ComboBox2.Text);
-  SendVNCCommand('run', Params);
-  Params.Free;
+  try
+    Params.AddPair('path', ComboBox2.Text);
+    SendVNCCommand('run', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 procedure TForm10.Button3Click(Sender: TObject);
@@ -326,10 +347,14 @@ var
 begin
   if InputQuery('Custom Process', 'Enter process path or command:', Path) then
   begin
+    if Path = '' then Exit;
     Params := TJSONObject.Create;
-    Params.AddPair('path', Path);
-    SendVNCCommand('run', Params);
-    Params.Free;
+    try
+      Params.AddPair('path', Path);
+      SendVNCCommand('run', Params);
+    finally
+      Params.Free;
+    end;
   end;
 end;
 
@@ -354,7 +379,8 @@ begin
   FFrameLock.Enter;
   try
     FPendingFrameBytes := Copy(ABytes, 0, Length(ABytes));
-    FDecodeEvent.SetEvent;
+    if Assigned(FDecodeEvent) then
+      FDecodeEvent.SetEvent;
   finally
     FFrameLock.Leave;
   end;
@@ -388,10 +414,20 @@ end;
 
 procedure TForm10.PaintFrameBitmap(ABitmap: TBitmap; AFrameSize: Integer);
 begin
+  if not Assigned(FDisplayBitmap) then
+  begin
+    FDisplayBitmap := TBitmap.Create;
+    FDisplayBitmap.PixelFormat := pf24bit;
+  end;
+
   if (FDisplayBitmap.Width <> ABitmap.Width) or (FDisplayBitmap.Height <> ABitmap.Height) then
     FDisplayBitmap.SetSize(ABitmap.Width, ABitmap.Height);
+
   FDisplayBitmap.Canvas.Draw(0, 0, ABitmap);
-  FPaintBox.Canvas.StretchDraw(FPaintBox.ClientRect, ABitmap);
+
+  if Assigned(FPaintBox) then
+    FPaintBox.Canvas.StretchDraw(FPaintBox.ClientRect, ABitmap);
+
   FLastFrameSize := AFrameSize;
   if (GetTickCount64 - FLastStatusTick) >= 500 then
   begin
@@ -420,6 +456,7 @@ begin
       ABitmap.Canvas.Draw(0, 0, Jpeg);
       Result := True;
     except
+      if Assigned(ABitmap) then FreeAndNil(ABitmap);
     end;
   finally
     Jpeg.Free;
@@ -429,8 +466,17 @@ end;
 
 procedure TForm10.StartFrameWorker;
 begin
+  if not Assigned(FFrameLock) then
+    FFrameLock := TCriticalSection.Create;
+  if not Assigned(FDecodeEvent) then
+    FDecodeEvent := TEvent.Create(nil, True, False, '');
+
   FDecodeStopping := False;
-  FDecodeThread := TThread.CreateAnonymousThread(DecodeFrameWorker);
+  FDecodeThread := TThread.CreateAnonymousThread(
+    procedure
+    begin
+      DecodeFrameWorker;
+    end);
   FDecodeThread.FreeOnTerminate := False;
   FDecodeThread.Start;
 end;
@@ -438,7 +484,9 @@ end;
 procedure TForm10.StopFrameWorker;
 begin
   FDecodeStopping := True;
-  FDecodeEvent.SetEvent;
+  if Assigned(FDecodeEvent) then
+    FDecodeEvent.SetEvent;
+
   if Assigned(FDecodeThread) then
   begin
     FDecodeThread.WaitFor;
@@ -454,10 +502,13 @@ var
 begin
   while not FDecodeStopping do
   begin
-    FDecodeEvent.WaitFor(100);
+    if Assigned(FDecodeEvent) then
+      FDecodeEvent.WaitFor(100);
+
     while not FDecodeStopping and TakePendingFrame(Bytes) do
     begin
       Size := Length(Bytes);
+      Decoded := nil;
       if DecodeFrameToBitmap(Bytes, Decoded) then
       begin
         FFrameLock.Enter;
@@ -484,7 +535,8 @@ begin
       SetLength(FPendingFrameBytes, 0);
       Result := True;
     end;
-    if Length(FPendingFrameBytes) = 0 then FDecodeEvent.ResetEvent;
+    if (Length(FPendingFrameBytes) = 0) and Assigned(FDecodeEvent) then
+      FDecodeEvent.ResetEvent;
   finally
     FFrameLock.Leave;
   end;
@@ -508,15 +560,26 @@ begin
 end;
 
 procedure TForm10.UpdateStatusBar;
+var
+  StatusStr: string;
 begin
-  if StatusBar1.Panels.Count < 2 then Exit;
-  StatusBar1.Panels[0].Text := IfThen(FCapturing, 'Capturing [On]', 'Capturing [Off]');
-  StatusBar1.Panels[1].Text := 'Size [' + FormatFloat('0.0 KB', FLastFrameSize / 1024) + ']';
+  if FCapturing then StatusStr := 'Capturing [On]' else StatusStr := 'Capturing [Off]';
+
+  if StatusBar1.Panels.Count >= 2 then
+  begin
+    StatusBar1.Panels[0].Text := StatusStr;
+    StatusBar1.Panels[1].Text := 'Size [' + FormatFloat('0.0 KB', FLastFrameSize / 1024) + ']';
+  end
+  else
+    StatusBar1.SimpleText := StatusStr + ' - Size [' + FormatFloat('0.0 KB', FLastFrameSize / 1024) + ']';
 end;
 
 procedure TForm10.UpdateButtonCaption;
 begin
-  Button1.Caption := IfThen(FCapturing, 'Stop VNC', 'Start VNC');
+  if FCapturing then
+    Button1.Caption := 'Stop VNC'
+  else
+    Button1.Caption := 'Start VNC';
 end;
 
 procedure TForm10.HandleHiddenVNCJSON(JSONObj: TJSONObject);
@@ -524,20 +587,27 @@ var
   Action, Status, Error: string;
 begin
   Action := JSONValueText(JSONObj, 'action');
-  if Action = 'hiddenvnc_status' then
+  if (Action = 'hiddenvnc_status') or (Action = 'hiddenvnc_initialized') then
   begin
     Status := JSONValueText(JSONObj, 'status');
-    if Status = 'started' then FCapturing := True
-    else if Status = 'stopped' then FCapturing := False;
+    if Status = '' then Status := Action;
+
+    if SameText(Status, 'started') then FCapturing := True
+    else if SameText(Status, 'stopped') then FCapturing := False;
 
     if StatusBar1.Panels.Count > 0 then
-       StatusBar1.Panels[0].Text := 'Status: ' + Status;
+       StatusBar1.Panels[0].Text := 'Status: ' + Status
+    else
+       StatusBar1.SimpleText := 'Status: ' + Status;
+
     UpdateButtonCaption;
+    UpdateStatusBar;
   end
   else if Action = 'hiddenvnc_error' then
   begin
     Error := JSONValueText(JSONObj, 'error');
-    MessageBox(Handle, PChar(Error), 'VNC Error', MB_OK or MB_ICONERROR);
+    if Error <> '' then
+       MessageBox(Handle, PChar(Error), 'VNC Error', MB_OK or MB_ICONERROR);
   end;
 end;
 
@@ -547,12 +617,15 @@ var
   Params: TJSONObject;
 begin
   Params := TJSONObject.Create;
-  Params.AddPair('event', 'down');
-  Params.AddPair('button', TJSONNumber.Create(Ord(Button)));
-  Params.AddPair('x', TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
-  Params.AddPair('y', TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
-  SendVNCCommand('mouseevent', Params);
-  Params.Free;
+  try
+    Params.AddPair('event', 'down');
+    Params.AddPair('button', TJSONNumber.Create(Ord(Button)));
+    Params.AddPair('x', TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
+    Params.AddPair('y', TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
+    SendVNCCommand('mouseevent', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 procedure TForm10.FPaintBoxMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -564,11 +637,14 @@ begin
   if (NowTick - FLastMouseMoveTick) < 50 then Exit;
   FLastMouseMoveTick := NowTick;
   Params := TJSONObject.Create;
-  Params.AddPair('event', 'move');
-  Params.AddPair('x', TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
-  Params.AddPair('y', TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
-  SendVNCCommand('mouseevent', Params);
-  Params.Free;
+  try
+    Params.AddPair('event', 'move');
+    Params.AddPair('x', TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
+    Params.AddPair('y', TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
+    SendVNCCommand('mouseevent', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 procedure TForm10.FPaintBoxMouseUp(Sender: TObject; Button: TMouseButton;
@@ -577,12 +653,15 @@ var
   Params: TJSONObject;
 begin
   Params := TJSONObject.Create;
-  Params.AddPair('event', 'up');
-  Params.AddPair('button', TJSONNumber.Create(Ord(Button)));
-  Params.AddPair('x', TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
-  Params.AddPair('y', TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
-  SendVNCCommand('mouseevent', Params);
-  Params.Free;
+  try
+    Params.AddPair('event', 'up');
+    Params.AddPair('button', TJSONNumber.Create(Ord(Button)));
+    Params.AddPair('x', TJSONNumber.Create(Round(X * 65535 / Max(1, FPaintBox.Width))));
+    Params.AddPair('y', TJSONNumber.Create(Round(Y * 65535 / Max(1, FPaintBox.Height))));
+    SendVNCCommand('mouseevent', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
@@ -590,10 +669,13 @@ var
   Params: TJSONObject;
 begin
   Params := TJSONObject.Create;
-  Params.AddPair('event', 'down');
-  Params.AddPair('key', TJSONNumber.Create(Key));
-  SendVNCCommand('keyevent', Params);
-  Params.Free;
+  try
+    Params.AddPair('event', 'down');
+    Params.AddPair('key', TJSONNumber.Create(Key));
+    SendVNCCommand('keyevent', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
@@ -601,10 +683,13 @@ var
   Params: TJSONObject;
 begin
   Params := TJSONObject.Create;
-  Params.AddPair('event', 'up');
-  Params.AddPair('key', TJSONNumber.Create(Key));
-  SendVNCCommand('keyevent', Params);
-  Params.Free;
+  try
+    Params.AddPair('event', 'up');
+    Params.AddPair('key', TJSONNumber.Create(Key));
+    SendVNCCommand('keyevent', Params);
+  finally
+    Params.Free;
+  end;
 end;
 
 end.
