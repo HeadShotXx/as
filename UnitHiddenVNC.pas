@@ -234,7 +234,7 @@ begin
   end;
 
   { Schedule decode + paint on UI thread }
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     begin
       if not (csDestroying in ComponentState) then
