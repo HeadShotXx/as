@@ -40,7 +40,7 @@ type
     FOnUnregister: TUnregisterProc;
     FIsCapturing: Boolean;
     FLastBitmap: TBitmap;
-    FImageLock: TObject;
+    FLock: TCriticalSection;
 
     procedure SendHVNCCommand(const Action: string; Params: TJSONObject = nil);
     procedure UpdateUI;
@@ -65,7 +65,7 @@ implementation
 constructor TForm10.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  FImageLock := TObject.Create;
+  FLock := TCriticalSection.Create;
   FLastBitmap := TBitmap.Create;
   FIsCapturing := False;
 end;
@@ -73,7 +73,7 @@ end;
 destructor TForm10.Destroy;
 begin
   FLastBitmap.Free;
-  FImageLock.Free;
+  FLock.Free;
   inherited;
 end;
 
@@ -260,11 +260,11 @@ begin
       except
         Exit;
       end;
-      System.SyncObjs.TMonitor.Enter(FImageLock);
+      FLock.Enter;
       try
         FLastBitmap.Assign(JPG);
       finally
-        System.SyncObjs.TMonitor.Exit(FImageLock);
+        FLock.Leave;
       end;
     finally
       JPG.Free;
@@ -276,18 +276,19 @@ begin
   System.Classes.TThread.Queue(nil,
     procedure
     begin
-      PaintBox1.Invalidate;
+      if Assigned(PaintBox1) then
+        PaintBox1.Invalidate;
     end);
 end;
 
 procedure TForm10.PaintBox1Paint(Sender: TObject);
 begin
-  System.SyncObjs.TMonitor.Enter(FImageLock);
+  FLock.Enter;
   try
     if not FLastBitmap.Empty then
       PaintBox1.Canvas.StretchDraw(PaintBox1.ClientRect, FLastBitmap);
   finally
-    System.SyncObjs.TMonitor.Exit(FImageLock);
+    FLock.Leave;
   end;
 end;
 
