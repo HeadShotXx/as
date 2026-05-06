@@ -334,8 +334,13 @@ static void input_loop() {
             g_inputQueue.pop();
         }
 
-        int x = task.cmd.value("x", 0);
-        int y = task.cmd.value("y", 0);
+        int sw = GetSystemMetrics(SM_CXSCREEN);
+        int sh = GetSystemMetrics(SM_CYSCREEN);
+
+        // Normalized (0-65535) to Screen Absolute
+        int x = (task.cmd.value("x", 0) * sw) / 65535;
+        int y = (task.cmd.value("y", 0) * sh) / 65535;
+
         POINT pt = {x, y};
         HWND targetHwnd = WindowFromPoint(pt);
         if (!targetHwnd) continue;
