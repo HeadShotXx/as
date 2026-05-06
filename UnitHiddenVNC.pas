@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.ExtCtrls, Vcl.StdCtrls,
-  System.JSON, System.SyncObjs, ncLines, Vcl.Imaging.jpeg;
+  System.JSON, System.SyncObjs, ncLines, Vcl.Imaging.jpeg, System.UITypes;
 
 type
   THiddenVNCFrameHeader = packed record
