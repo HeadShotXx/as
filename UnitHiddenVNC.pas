@@ -62,6 +62,15 @@ implementation
 
 {$R *.dfm}
 
+procedure QueueToUI(AProc: TProc);
+begin
+  System.Classes.TThread.Queue(nil,
+    procedure
+    begin
+      AProc();
+    end);
+end;
+
 constructor TForm10.Create(AOwner: TComponent);
 begin
   inherited;
@@ -238,7 +247,7 @@ begin
       finally
         FLock.Leave;
       end;
-      System.Classes.TThread.Queue(procedure begin PaintBox1.Invalidate; end);
+      QueueToUI(procedure begin PaintBox1.Invalidate; end);
     except
       // Handle corrupted frame if necessary
     end;
