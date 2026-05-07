@@ -98,6 +98,7 @@ begin
   FLastHeight  := 0;
   FHasFrame    := False;
   KeyPreview   := True;
+  ControlStyle := ControlStyle + [csDoubleClicks];
 
   ComboBox1.Items.Clear;
   ComboBox1.Items.Add('10%');
