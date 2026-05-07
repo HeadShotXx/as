@@ -83,6 +83,7 @@ static POINT g_dragStartPt  = {0, 0};
 static RECT  g_dragStartRect = {0, 0, 0, 0};
 static bool  g_dragging     = false;
 static LRESULT g_dragHitTest = HTCLIENT;
+static HWND  g_hLastWindow  = NULL;
 
 // -----------------------------------------------------------------------
 
@@ -357,11 +358,15 @@ static HWND find_window_at(POINT screenPt) {
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
-    GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
     HWND foreground = GetForegroundWindow();
+    if (!foreground) foreground = g_hLastWindow;
+    if (!foreground) return NULL;
+
     DWORD threadId = GetWindowThreadProcessId(foreground, NULL);
-    if (GetGUIThreadInfo(threadId, &gti) && gti.hwndFocus) {
-        return gti.hwndFocus;
+    GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
+    if (GetGUIThreadInfo(threadId, &gti)) {
+        if (gti.hwndFocus) return gti.hwndFocus;
+        if (gti.hwndCaret) return gti.hwndCaret;
     }
     return foreground;
 }
@@ -393,12 +398,14 @@ static void input_loop() {
             HWND hTarget = GetFocusedWindow();
             if (!hTarget) continue;
 
+            SendMessageW(hTarget, WM_SETFOCUS, 0, 0);
+
             if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, vk, 0);
+                PostMessageW(hTarget, WM_KEYDOWN, vk, 0x00000001);
             } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, vk, 0);
+                PostMessageW(hTarget, WM_KEYUP, vk, 0xC0000001);
             } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, vk, 0);
+                PostMessageW(hTarget, WM_CHAR, vk, 0x00000001);
             }
             continue;
         }
@@ -472,10 +479,12 @@ static void input_loop() {
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
+            g_hLastWindow = hwnd;
             SendMessageW(hwnd, WM_MOUSEACTIVATE, (WPARAM)hwnd, MAKELPARAM(HTCLIENT, WM_LBUTTONDOWN));
             SetForegroundWindow(hwnd);
             SetFocus(hwnd);
             SendMessageW(hwnd, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hwnd);
+            SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
 
             LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0,
                                       MAKELPARAM(screenPt.x, screenPt.y));
