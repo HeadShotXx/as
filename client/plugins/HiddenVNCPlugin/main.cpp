@@ -84,6 +84,7 @@ static RECT  g_dragStartRect = {0, 0, 0, 0};
 static bool  g_dragging     = false;
 static LRESULT g_dragHitTest = HTCLIENT;
 static HWND  g_hLastWindow  = NULL;
+static HWND  g_hCurrentFocus = NULL;
 
 // -----------------------------------------------------------------------
 
@@ -358,17 +359,18 @@ static HWND find_window_at(POINT screenPt) {
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
-    HWND foreground = GetForegroundWindow();
-    if (!foreground) foreground = g_hLastWindow;
-    if (!foreground) return NULL;
+    HWND hTarget = GetForegroundWindow();
+    if (!hTarget) hTarget = g_hCurrentFocus;
+    if (!hTarget) hTarget = g_hLastWindow;
+    if (!hTarget) return NULL;
 
-    DWORD threadId = GetWindowThreadProcessId(foreground, NULL);
+    DWORD threadId = GetWindowThreadProcessId(hTarget, NULL);
     GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
     if (GetGUIThreadInfo(threadId, &gti)) {
         if (gti.hwndFocus) return gti.hwndFocus;
         if (gti.hwndCaret) return gti.hwndCaret;
     }
-    return foreground;
+    return hTarget;
 }
 
 // -----------------------------------------------------------------------
@@ -482,15 +484,25 @@ static void input_loop() {
             HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             g_hLastWindow = hRoot;
 
-            // Z-Order: Bring root window to top
+            // Focus Transfer Logic
+            if (g_hCurrentFocus && g_hCurrentFocus != hwnd) {
+                HWND hOldRoot = GetAncestor(g_hCurrentFocus, GA_ROOT);
+                SendMessageW(g_hCurrentFocus, WM_KILLFOCUS, (WPARAM)hwnd, 0);
+                if (hOldRoot != hRoot) {
+                    SendMessageW(hOldRoot, WM_ACTIVATE, WA_INACTIVE, (LPARAM)hRoot);
+                }
+            }
+
+            // Z-Order & Activation
             SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             SetForegroundWindow(hRoot);
-            SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, WM_LBUTTONDOWN));
+            SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN))));
             SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
 
             // Set focus to the specific child window clicked
+            g_hCurrentFocus = hwnd;
             SetFocus(hwnd);
-            SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
+            SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)(g_hCurrentFocus == hwnd ? NULL : g_hCurrentFocus), 0);
 
             LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
 
