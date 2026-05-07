@@ -493,36 +493,34 @@ static void input_loop() {
 
             AllowSetForegroundWindow(ASFW_ANY);
 
-            // Cross-Thread Attachment
+            // Cross-Thread Attachment to bridge input focus
             if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-            if (foregroundThreadId && foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(foregroundThreadId, targetThreadId, TRUE);
+            if (foregroundThreadId && foregroundThreadId != currentThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, TRUE);
 
-            // Deactivate Previous Focus
-            if (g_hCurrentFocus && g_hCurrentFocus != hwnd) {
-                SendMessageW(g_hCurrentFocus, WM_KILLFOCUS, (WPARAM)hwnd, 0);
-            }
+            // Deactivate Previous Foreground
             if (hFore && hFore != hRoot) {
-                SendMessageW(hFore, WM_NCACTIVATE, FALSE, 0);
+                SendMessageW(hFore, WM_KILLFOCUS, (WPARAM)hRoot, 0);
                 SendMessageW(hFore, WM_ACTIVATE, WA_INACTIVE, (LPARAM)hRoot);
+                SendMessageW(hFore, WM_NCACTIVATE, FALSE, 0);
                 SendMessageW(hFore, WM_ACTIVATEAPP, FALSE, targetThreadId);
             }
 
-            // Force Switch & Activate
-            SwitchToThisWindow(hRoot, TRUE);
+            // Activate New Window
             SetForegroundWindow(hRoot);
+            SwitchToThisWindow(hRoot, TRUE);
             BringWindowToTop(hRoot);
             SetActiveWindow(hRoot);
             SetFocus(hwnd);
 
-            // Explicit Messages to Application
+            // Explicit Messages to New Window
+            SendMessageW(hRoot, WM_ACTIVATEAPP, TRUE, targetThreadId);
             SendMessageW(hRoot, WM_NCACTIVATE, TRUE, 0);
-            SendMessageW(hRoot, WM_ACTIVATEAPP, TRUE, currentThreadId);
             SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN))));
             SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
-            SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)g_hCurrentFocus, 0);
+            SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)hFore, 0);
 
             // Detach threads
-            if (foregroundThreadId && foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(foregroundThreadId, targetThreadId, FALSE);
+            if (foregroundThreadId && foregroundThreadId != currentThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
             if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, FALSE);
 
             g_hCurrentFocus = hwnd;
