@@ -479,34 +479,52 @@ static void input_loop() {
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
-            g_hLastWindow = hwnd;
-            SendMessageW(hwnd, WM_MOUSEACTIVATE, (WPARAM)hwnd, MAKELPARAM(HTCLIENT, WM_LBUTTONDOWN));
-            SetForegroundWindow(hwnd);
+            HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+            g_hLastWindow = hRoot;
+
+            // Z-Order: Bring root window to top
+            SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetForegroundWindow(hRoot);
+            SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, WM_LBUTTONDOWN));
+            SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
+
+            // Set focus to the specific child window clicked
             SetFocus(hwnd);
-            SendMessageW(hwnd, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hwnd);
             SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
 
-            LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0,
-                                      MAKELPARAM(screenPt.x, screenPt.y));
+            LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
 
             if (ht != HTCLIENT) {
-                UINT ncMsg = WM_NCLBUTTONDOWN;
-                if (btn == 1) ncMsg = WM_NCRBUTTONDOWN;
-                else if (btn == 2) ncMsg = WM_NCMBUTTONDOWN;
+                // Title bar buttons (Close, Min, Max)
+                if (btn == 0) {
+                    if (ht == HTCLOSE) {
+                        PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0);
+                        continue;
+                    } else if (ht == HTMINBUTTON) {
+                        PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+                        continue;
+                    } else if (ht == HTMAXBUTTON) {
+                        WINDOWPLACEMENT wp = { sizeof(wp) };
+                        GetWindowPlacement(hRoot, &wp);
+                        if (wp.showCmd == SW_SHOWMAXIMIZED)
+                            PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
+                        else
+                            PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+                        continue;
+                    }
+                }
 
-                PostMessageW(hwnd, ncMsg, (WPARAM)ht,
-                             MAKELPARAM(screenPt.x, screenPt.y));
+                UINT ncMsg = (btn == 1) ? WM_NCRBUTTONDOWN : (btn == 2 ? WM_NCMBUTTONDOWN : WM_NCLBUTTONDOWN);
+                PostMessageW(hwnd, ncMsg, (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
 
-                if (btn == 0 && (ht == HTCAPTION  ||
-                                 ht == HTLEFT      || ht == HTRIGHT      ||
-                                 ht == HTTOP       || ht == HTBOTTOM     ||
-                                 ht == HTTOPLEFT   || ht == HTTOPRIGHT   ||
-                                 ht == HTBOTTOMLEFT|| ht == HTBOTTOMRIGHT)) {
-                    g_dragging      = true;
-                    g_dragHwnd      = hwnd;
-                    g_dragStartPt   = screenPt;
-                    g_dragHitTest   = ht;
-                    GetWindowRect(hwnd, &g_dragStartRect);
+                if (btn == 0 && (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT ||
+                                 ht == HTTOP || ht == HTBOTTOM || ht == HTTOPLEFT ||
+                                 ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT)) {
+                    g_dragging = true;
+                    g_dragHwnd = hRoot;
+                    g_dragStartPt = screenPt;
+                    g_dragHitTest = ht;
+                    GetWindowRect(hRoot, &g_dragStartRect);
                 }
             } else {
                 HWND hTarget = hwnd;
