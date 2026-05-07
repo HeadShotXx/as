@@ -484,22 +484,23 @@ static void input_loop() {
             HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             g_hLastWindow = hRoot;
 
-            // Robust Focus & Activation via Thread Input Attachment
-            DWORD clickThreadId = GetWindowThreadProcessId(hRoot, NULL);
+            // Highly Aggressive Focus & Activation Sequence
             DWORD currentThreadId = GetCurrentThreadId();
+            DWORD targetThreadId  = GetWindowThreadProcessId(hRoot, NULL);
+            DWORD foregroundThreadId = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
 
-            if (clickThreadId != currentThreadId) {
-                AttachThreadInput(currentThreadId, clickThreadId, TRUE);
-                SetForegroundWindow(hRoot);
-                SetFocus(hwnd);
-                SetActiveWindow(hRoot);
-                AttachThreadInput(currentThreadId, clickThreadId, FALSE);
-            } else {
-                SetForegroundWindow(hRoot);
-                SetFocus(hwnd);
-            }
+            AllowSetForegroundWindow(ASFW_ANY);
 
-            // Explicit Focus Transfer Messages (Fallback for some apps)
+            // Attach to both current foreground and target to bridge the input focus
+            if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+            if (foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, TRUE);
+
+            SetForegroundWindow(hRoot);
+            BringWindowToTop(hRoot);
+            SetActiveWindow(hRoot);
+            SetFocus(hwnd);
+
+            // Explicitly kill focus of old window
             if (g_hCurrentFocus && g_hCurrentFocus != hwnd) {
                 SendMessageW(g_hCurrentFocus, WM_KILLFOCUS, (WPARAM)hwnd, 0);
                 HWND hOldRoot = GetAncestor(g_hCurrentFocus, GA_ROOT);
@@ -508,13 +509,19 @@ static void input_loop() {
                 }
             }
 
-            // Z-Order
-            SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            // Send activation and focus messages manually to ensure target processing
             SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN))));
             SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
             SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)g_hCurrentFocus, 0);
 
+            // Detach threads
+            if (foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+            if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+
             g_hCurrentFocus = hwnd;
+
+            // Z-Order enforcement
+            SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
             LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
 
