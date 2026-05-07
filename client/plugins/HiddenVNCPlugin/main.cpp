@@ -359,9 +359,8 @@ static HWND find_window_at(POINT screenPt) {
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
-    HWND hTarget = GetForegroundWindow();
-    if (!hTarget) hTarget = g_hCurrentFocus;
-    if (!hTarget) hTarget = g_hLastWindow;
+    HWND hForeground = GetForegroundWindow();
+    HWND hTarget = hForeground ? hForeground : (g_hCurrentFocus ? g_hCurrentFocus : g_hLastWindow);
     if (!hTarget) return NULL;
 
     DWORD threadId = GetWindowThreadProcessId(hTarget, NULL);
@@ -487,35 +486,39 @@ static void input_loop() {
             // Highly Aggressive Focus & Activation Sequence
             DWORD currentThreadId = GetCurrentThreadId();
             DWORD targetThreadId  = GetWindowThreadProcessId(hRoot, NULL);
-            DWORD foregroundThreadId = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
+            HWND  hFore           = GetForegroundWindow();
+            DWORD foregroundThreadId = hFore ? GetWindowThreadProcessId(hFore, NULL) : 0;
 
             AllowSetForegroundWindow(ASFW_ANY);
 
-            // Attach to both current foreground and target to bridge the input focus
+            // Attach threads to bridge input state
             if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-            if (foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, TRUE);
+            if (foregroundThreadId && foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, TRUE);
 
+            // Deactivate old window
+            if (hFore && hFore != hRoot) {
+                SendMessageW(hFore, WM_NCACTIVATE, FALSE, 0);
+                SendMessageW(hFore, WM_ACTIVATE, WA_INACTIVE, (LPARAM)hRoot);
+            }
+
+            // Activate new window
             SetForegroundWindow(hRoot);
             BringWindowToTop(hRoot);
             SetActiveWindow(hRoot);
             SetFocus(hwnd);
 
-            // Explicitly kill focus of old window
+            // Explicitly handle focus messages
             if (g_hCurrentFocus && g_hCurrentFocus != hwnd) {
                 SendMessageW(g_hCurrentFocus, WM_KILLFOCUS, (WPARAM)hwnd, 0);
-                HWND hOldRoot = GetAncestor(g_hCurrentFocus, GA_ROOT);
-                if (hOldRoot != hRoot) {
-                    SendMessageW(hOldRoot, WM_ACTIVATE, WA_INACTIVE, (LPARAM)hRoot);
-                }
             }
 
-            // Send activation and focus messages manually to ensure target processing
+            SendMessageW(hRoot, WM_NCACTIVATE, TRUE, 0);
             SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN))));
             SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
             SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)g_hCurrentFocus, 0);
 
             // Detach threads
-            if (foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+            if (foregroundThreadId && foregroundThreadId != currentThreadId && foregroundThreadId != targetThreadId) AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
             if (targetThreadId != currentThreadId) AttachThreadInput(currentThreadId, targetThreadId, FALSE);
 
             g_hCurrentFocus = hwnd;
