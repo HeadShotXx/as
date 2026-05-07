@@ -282,7 +282,7 @@ static void capture_loop() {
             HGDIOBJ hOldWin = SelectObject(hdcWin, hbmpWin);
 
             if (!PrintWindow(win.hwnd, hdcWin, PW_RENDERFULLCONTENT)) {
-                HDC hdcRealWin = GetDC(win.hwnd);
+                HDC hdcRealWin = GetWindowDC(win.hwnd);
                 if (hdcRealWin) {
                     BitBlt(hdcWin, 0, 0, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
                     ReleaseDC(win.hwnd, hdcRealWin);
@@ -441,6 +441,10 @@ static void input_loop() {
                     SetWindowPos(g_dragHwnd, NULL, rc.left, rc.top, w, h,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                 }
+
+                // Force repaint after move/resize to prevent ghosting
+                RedrawWindow(g_dragHwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME | RDW_ALLCHILDREN);
+                RedrawWindow(GetDesktopWindow(), NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 
                 PostMessageW(g_dragHwnd, WM_NCMOUSEMOVE, (WPARAM)g_dragHitTest,
                              MAKELPARAM(screenPt.x, screenPt.y));
