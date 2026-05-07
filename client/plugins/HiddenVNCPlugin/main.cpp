@@ -484,25 +484,37 @@ static void input_loop() {
             HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             g_hLastWindow = hRoot;
 
-            // Focus Transfer Logic
+            // Robust Focus & Activation via Thread Input Attachment
+            DWORD clickThreadId = GetWindowThreadProcessId(hRoot, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+
+            if (clickThreadId != currentThreadId) {
+                AttachThreadInput(currentThreadId, clickThreadId, TRUE);
+                SetForegroundWindow(hRoot);
+                SetFocus(hwnd);
+                SetActiveWindow(hRoot);
+                AttachThreadInput(currentThreadId, clickThreadId, FALSE);
+            } else {
+                SetForegroundWindow(hRoot);
+                SetFocus(hwnd);
+            }
+
+            // Explicit Focus Transfer Messages (Fallback for some apps)
             if (g_hCurrentFocus && g_hCurrentFocus != hwnd) {
-                HWND hOldRoot = GetAncestor(g_hCurrentFocus, GA_ROOT);
                 SendMessageW(g_hCurrentFocus, WM_KILLFOCUS, (WPARAM)hwnd, 0);
+                HWND hOldRoot = GetAncestor(g_hCurrentFocus, GA_ROOT);
                 if (hOldRoot != hRoot) {
                     SendMessageW(hOldRoot, WM_ACTIVATE, WA_INACTIVE, (LPARAM)hRoot);
                 }
             }
 
-            // Z-Order & Activation
+            // Z-Order
             SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            SetForegroundWindow(hRoot);
             SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(HTCLIENT, (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN))));
             SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
+            SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)g_hCurrentFocus, 0);
 
-            // Set focus to the specific child window clicked
             g_hCurrentFocus = hwnd;
-            SetFocus(hwnd);
-            SendMessageW(hwnd, WM_SETFOCUS, (WPARAM)(g_hCurrentFocus == hwnd ? NULL : g_hCurrentFocus), 0);
 
             LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
 
