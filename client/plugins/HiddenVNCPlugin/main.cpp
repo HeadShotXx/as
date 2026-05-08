@@ -384,9 +384,9 @@ static POINT screen_pt(int normX, int normY) {
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
     HWND hTarget = g_hCurrentFocus;
-    if (!hTarget) hTarget = GetForegroundWindow();
-    if (!hTarget) hTarget = g_hLastWindow;
-    if (!hTarget) return NULL;
+    if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
+    if (!hTarget || !IsWindow(hTarget)) hTarget = g_hLastWindow;
+    if (!hTarget || !IsWindow(hTarget)) return NULL;
 
     DWORD threadId = GetWindowThreadProcessId(hTarget, NULL);
     GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
@@ -511,19 +511,38 @@ static void input_loop() {
 
             HWND hFore = GetForegroundWindow();
             if (hFore != hRoot) {
-                AllowSetForegroundWindow(ASFW_ANY);
-                SetForegroundWindow(hRoot);
-                BringWindowToTop(hRoot);
+                // Focus and Foreground synchronization
+                DWORD foreThreadId = GetWindowThreadProcessId(hFore, NULL);
+                DWORD targetThreadId = GetWindowThreadProcessId(hRoot, NULL);
+                DWORD currentThreadId = GetCurrentThreadId();
+
+                if (foreThreadId != targetThreadId) {
+                    AttachThreadInput(targetThreadId, foreThreadId, TRUE);
+                    AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+
+                    AllowSetForegroundWindow(ASFW_ANY);
+                    SetForegroundWindow(hRoot);
+                    SetActiveWindow(hRoot);
+                    SetFocus(hRoot);
+
+                    AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+                    AttachThreadInput(targetThreadId, foreThreadId, FALSE);
+                } else {
+                    SetForegroundWindow(hRoot);
+                }
                 
                 UINT mouseMsg = (btn == 0 ? WM_LBUTTONDOWN : (btn == 1 ? WM_RBUTTONDOWN : WM_MBUTTONDOWN));
                 PostMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
             }
+
+            // Set focus to the actual child window clicked
             PostMessageW(hwnd, WM_SETFOCUS, 0, 0);
+            g_hCurrentFocus = hwnd;
+
             SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
             if (ht != HTCLIENT) {
-                g_hCurrentFocus = hRoot;
                 if (btn == 0) {
                     if (ht == HTCLOSE) {
                         PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0);
