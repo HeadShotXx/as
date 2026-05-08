@@ -1256,7 +1256,7 @@ begin
 
   HVNCForm := GetHiddenVNCForm(aLine);
   if Assigned(HVNCForm) then
-    HVNCForm.QueueFrameBytes(FrameBytes);
+    HVNCForm.QueueFrameBytes(FrameBytes, FrameHeader.Monitor);
 end;
 
 procedure TServerManager.ProcessFileManagerBinaryPacket(aLine: TncLine;
