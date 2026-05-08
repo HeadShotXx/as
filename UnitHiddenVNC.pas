@@ -294,7 +294,7 @@ begin
       JPG        : TJPEGImage;
       TempBmp    : TBitmap;
 
-      procedure PushToUI(ABmp: TBitmap; ACursor: Integer);
+      procedure InternalUpdate(ABmp: TBitmap; ACur: Integer);
       begin
         TThread.Queue(nil,
           procedure
@@ -309,7 +309,7 @@ begin
               end;
               PaintBox1.Invalidate;
 
-              case ACursor of
+              case ACur of
                 1: Screen.Cursor := crArrow;
                 2: Screen.Cursor := crIBeam;
                 3: Screen.Cursor := crHourGlass;
@@ -335,7 +335,7 @@ begin
 
     begin
       try
-        while True do
+        while not (csDestroying in ComponentState) do
         begin
           FLock.Enter;
           try
@@ -344,10 +344,10 @@ begin
               FIsDecoding := False;
               Exit;
             end;
-            LocalBytes    := FPendingBytes;
-            LocalCursor   := FPendingCursor;
-            FPendingBytes := nil;
-            FHasFrame     := False;
+            LocalBytes     := FPendingBytes;
+            LocalCursor    := FPendingCursor;
+            FPendingBytes  := nil;
+            FHasFrame      := False;
           finally
             FLock.Leave;
           end;
@@ -364,7 +364,7 @@ begin
               TempBmp := TBitmap.Create;
               try
                 TempBmp.Assign(JPG);
-                PushToUI(TempBmp, LocalCursor);
+                InternalUpdate(TempBmp, LocalCursor);
               except
                 TempBmp.Free;
               end;
@@ -375,7 +375,7 @@ begin
             MS.Free;
           end;
         end;
-      except
+      finally
         FLock.Enter;
         try
           FIsDecoding := False;

