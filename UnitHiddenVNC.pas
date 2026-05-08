@@ -10,7 +10,22 @@ uses
   Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg,
   ncLines;
 
+const
+  WM_FRAME_READY = WM_USER + 101;
+
 type
+  TForm10 = class;
+
+  TDecodeThread = class(TThread)
+  private
+    FForm: TForm10;
+    FEvent: TEvent;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AForm: TForm10; AEvent: TEvent);
+  end;
+
   TSendJSONProc   = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TUnregisterProc = procedure(aLine: TncLine) of object;
 
@@ -54,7 +69,10 @@ type
     FHasFrame    : Boolean;
     FIsDecoding  : Boolean;
 
-    FBitmap      : TBitmap;
+    FDecodeThread: TDecodeThread;
+    FDecodeEvent : TEvent;
+    FDecodeBitmap: TBitmap;
+    FDisplayBitmap: TBitmap;
     FBitmapLock  : TCriticalSection;
     FLastWidth   : Integer;
     FLastHeight  : Integer;
@@ -66,6 +84,8 @@ type
     FPaintBoxActive : Boolean;  { True = kullanýcý PaintBox üzerinde iþlem yapýyor }
 
     procedure LogToStatus(const Msg: string);
+
+    procedure WMFrameReady(var Msg: TMessage); message WM_FRAME_READY;
 
     procedure SendControlCommand(const Action: string;
       X: Integer = -1; Y: Integer = -1;
@@ -95,6 +115,92 @@ implementation
 
 {$R *.dfm}
 
+{ TDecodeThread }
+
+constructor TDecodeThread.Create(AForm: TForm10; AEvent: TEvent);
+begin
+  inherited Create(True);
+  FForm := AForm;
+  FEvent := AEvent;
+  FreeOnTerminate := False;
+  Start;
+end;
+
+procedure TDecodeThread.Execute;
+var
+  LocalBytes : TBytes;
+  MS         : TMemoryStream;
+  JPG        : TJPEGImage;
+  TempBmp    : TBitmap;
+  WaitRes    : TWaitResult;
+begin
+  while not Terminated do
+  begin
+    WaitRes := FEvent.WaitFor(1000);
+    if Terminated then Break;
+    if WaitRes <> wrSignaled then Continue;
+
+    MS := TMemoryStream.Create;
+    JPG := TJPEGImage.Create;
+    try
+      while not Terminated do
+      begin
+        FForm.FLock.Enter;
+        try
+          if not FForm.FHasFrame then
+          begin
+            FForm.FIsDecoding := False;
+            Break;
+          end;
+          LocalBytes := FForm.FPendingBytes;
+          FForm.FPendingBytes := nil;
+          FForm.FHasFrame := False;
+        finally
+          FForm.FLock.Leave;
+        end;
+
+        if Length(LocalBytes) = 0 then Continue;
+
+        MS.Clear;
+        MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
+        MS.Position := 0;
+        try
+          JPG.LoadFromStream(MS);
+
+          { Use FDecodeBitmap as a reusable surface }
+          FForm.FDecodeBitmap.Assign(JPG);
+
+          { Swap pointers under a very short lock }
+          FForm.FBitmapLock.Enter;
+          try
+            TempBmp := FForm.FDisplayBitmap;
+            FForm.FDisplayBitmap := FForm.FDecodeBitmap;
+            FForm.FDecodeBitmap := TempBmp;
+
+            FForm.FLastWidth := FForm.FDisplayBitmap.Width;
+            FForm.FLastHeight := FForm.FDisplayBitmap.Height;
+          finally
+            FForm.FBitmapLock.Leave;
+          end;
+
+          { Notify UI thread }
+          PostMessage(FForm.Handle, WM_FRAME_READY, 0, 0);
+        except
+        end;
+      end;
+    finally
+      JPG.Free;
+      MS.Free;
+    end;
+  end;
+end;
+
+procedure TForm10.WMFrameReady(var Msg: TMessage);
+begin
+  if not (csDestroying in ComponentState) then
+    PaintBox1.Invalidate;
+end;
+
 { ---------------------------------------------------------------------- }
 {  Constructor / Destructor                                                }
 { ---------------------------------------------------------------------- }
@@ -106,7 +212,10 @@ begin
   if Assigned(Panel1) then Panel1.DoubleBuffered := True;
   FLock           := TCriticalSection.Create;
   FBitmapLock     := TCriticalSection.Create;
-  FBitmap         := TBitmap.Create;
+  FDecodeEvent    := TEvent.Create(nil, False, False, "");
+  FDecodeBitmap   := TBitmap.Create;
+  FDisplayBitmap  := TBitmap.Create;
+  FDecodeThread   := TDecodeThread.Create(Self, FDecodeEvent);
   FIsCapturing    := False;
   FLastWidth      := 0;
   FLastHeight     := 0;
@@ -140,7 +249,13 @@ end;
 
 destructor TForm10.Destroy;
 begin
-  FBitmap.Free;
+  FDecodeThread.Terminate;
+  FDecodeEvent.SetEvent;
+  FDecodeThread.WaitFor;
+  FDecodeThread.Free;
+  FDecodeEvent.Free;
+  FDecodeBitmap.Free;
+  FDisplayBitmap.Free;
   FBitmapLock.Free;
   FLock.Free;
   inherited;
@@ -279,72 +394,12 @@ begin
   try
     FPendingBytes := Copy(Bytes);
     FHasFrame     := True;
+    FDecodeEvent.SetEvent;
     if FIsDecoding then Exit;
     FIsDecoding := True;
   finally
     FLock.Leave;
   end;
-
-  TThread.CreateAnonymousThread(
-    procedure
-    var
-      LocalBytes : TBytes;
-      MS         : TMemoryStream;
-      JPG        : TJPEGImage;
-      TempBmp    : TBitmap;
-    begin
-      while True do
-      begin
-        FLock.Enter;
-        try
-          if not FHasFrame then
-          begin
-            FIsDecoding := False;
-            Exit;
-          end;
-          LocalBytes    := FPendingBytes;
-          FPendingBytes := nil;
-          FHasFrame     := False;
-        finally
-          FLock.Leave;
-        end;
-
-        if Length(LocalBytes) = 0 then Continue;
-
-        TempBmp := TBitmap.Create;
-        MS      := TMemoryStream.Create;
-        JPG     := TJPEGImage.Create;
-        try
-          MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
-          MS.Position := 0;
-          try
-            JPG.LoadFromStream(MS);
-            TempBmp.Assign(JPG);
-
-            TThread.Synchronize(nil,
-              procedure
-              begin
-                if (csDestroying in ComponentState) then Exit;
-
-                FBitmapLock.Enter;
-                try
-                  FBitmap.Assign(TempBmp);
-                  FLastWidth  := FBitmap.Width;
-                  FLastHeight := FBitmap.Height;
-                finally
-                  FBitmapLock.Leave;
-                end;
-                PaintBox1.Invalidate;
-              end);
-          except
-          end;
-        finally
-          JPG.Free;
-          MS.Free;
-          TempBmp.Free;
-        end;
-      end;
-    end).Start;
 end;
 
 { ---------------------------------------------------------------------- }
@@ -456,7 +511,7 @@ var
   SD  : TSaveDialog;
   JPG : TJPEGImage;
 begin
-  if FBitmap.Empty then
+  if FDisplayBitmap.Empty then
   begin
     LogToStatus('No frame to save.');
     Exit;
@@ -473,7 +528,7 @@ begin
     begin
       JPG := TJPEGImage.Create;
       try
-        JPG.Assign(FBitmap);
+        JPG.Assign(FDisplayBitmap);
         JPG.SaveToFile(SD.FileName);
         LogToStatus('Screenshot saved: ' + ExtractFileName(SD.FileName));
       finally
@@ -577,13 +632,9 @@ end;
 
 procedure TForm10.PaintBox1Paint(Sender: TObject);
 begin
-  FBitmapLock.Enter;
-  try
-    if not FBitmap.Empty then
-      PaintBox1.Canvas.StretchDraw(PaintBox1.ClientRect, FBitmap);
-  finally
-    FBitmapLock.Leave;
-  end;
+  { PaintBox1Paint reads FDisplayBitmap without holding any lock }
+  if not FDisplayBitmap.Empty then
+    PaintBox1.Canvas.StretchDraw(PaintBox1.ClientRect, FDisplayBitmap);
 end;
 
 { ---------------------------------------------------------------------- }
