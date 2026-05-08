@@ -293,86 +293,94 @@ begin
       MS         : TMemoryStream;
       JPG        : TJPEGImage;
       TempBmp    : TBitmap;
-    begin
-      while True do
+
+      procedure PushToUI(ABmp: TBitmap; ACursor: Integer);
       begin
+        TThread.Queue(nil,
+          procedure
+          begin
+            try
+              if (csDestroying in ComponentState) then Exit;
+              FBitmapLock.Enter;
+              try
+                FBitmap.Assign(ABmp);
+              finally
+                FBitmapLock.Leave;
+              end;
+              PaintBox1.Invalidate;
+
+              case ACursor of
+                1: Screen.Cursor := crArrow;
+                2: Screen.Cursor := crIBeam;
+                3: Screen.Cursor := crHourGlass;
+                4: Screen.Cursor := crCross;
+                5: Screen.Cursor := crUpArrow;
+                8: Screen.Cursor := crSizeNWSE;
+                9: Screen.Cursor := crSizeNESW;
+                10: Screen.Cursor := crSizeWE;
+                11: Screen.Cursor := crSizeNS;
+                12: Screen.Cursor := crSizeAll;
+                13: Screen.Cursor := crNo;
+                14: Screen.Cursor := crHandPoint;
+                15: Screen.Cursor := crAppStart;
+                16: Screen.Cursor := crHelp;
+              else
+                Screen.Cursor := crDefault;
+              end;
+            finally
+              ABmp.Free;
+            end;
+          end);
+      end;
+
+    begin
+      try
+        while True do
+        begin
+          FLock.Enter;
+          try
+            if not FHasFrame then
+            begin
+              FIsDecoding := False;
+              Exit;
+            end;
+            LocalBytes    := FPendingBytes;
+            LocalCursor   := FPendingCursor;
+            FPendingBytes := nil;
+            FHasFrame     := False;
+          finally
+            FLock.Leave;
+          end;
+
+          if Length(LocalBytes) = 0 then Continue;
+
+          MS  := TMemoryStream.Create;
+          JPG := TJPEGImage.Create;
+          try
+            MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
+            MS.Position := 0;
+            try
+              JPG.LoadFromStream(MS);
+              TempBmp := TBitmap.Create;
+              try
+                TempBmp.Assign(JPG);
+                PushToUI(TempBmp, LocalCursor);
+              except
+                TempBmp.Free;
+              end;
+            except
+            end;
+          finally
+            JPG.Free;
+            MS.Free;
+          end;
+        end;
+      except
         FLock.Enter;
         try
-          if not FHasFrame then
-          begin
-            FIsDecoding := False;
-            Exit;
-          end;
-          LocalBytes     := FPendingBytes;
-          LocalCursor    := FPendingCursor;
-          FPendingBytes  := nil;
-          FHasFrame      := False;
+          FIsDecoding := False;
         finally
           FLock.Leave;
-        end;
-
-        if Length(LocalBytes) = 0 then Continue;
-
-        TempBmp := TBitmap.Create;
-        MS      := TMemoryStream.Create;
-        JPG     := TJPEGImage.Create;
-        try
-          MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
-          MS.Position := 0;
-          try
-            JPG.LoadFromStream(MS);
-            TempBmp.Assign(JPG);
-
-            TThread.Queue(nil,
-              procedure
-              var
-                B: TBitmap;
-              begin
-                B := TempBmp;
-                if not Assigned(B) then Exit;
-                try
-                  if (csDestroying in ComponentState) then Exit;
-
-                  FBitmapLock.Enter;
-                  try
-                    FBitmap.Assign(B);
-                    FLastWidth  := FBitmap.Width;
-                    FLastHeight := FBitmap.Height;
-                  finally
-                    FBitmapLock.Leave;
-                  end;
-                  PaintBox1.Invalidate;
-
-                  case LocalCursor of
-                    1: Screen.Cursor := crArrow;
-                    2: Screen.Cursor := crIBeam;
-                    3: Screen.Cursor := crHourGlass;
-                    4: Screen.Cursor := crCross;
-                    5: Screen.Cursor := crUpArrow;
-                    6: Screen.Cursor := crSizeAll;
-                    8: Screen.Cursor := crSizeNWSE;
-                    9: Screen.Cursor := crSizeNESW;
-                    10: Screen.Cursor := crSizeWE;
-                    11: Screen.Cursor := crSizeNS;
-                    12: Screen.Cursor := crSizeAll;
-                    13: Screen.Cursor := crNo;
-                    14: Screen.Cursor := crHandPoint;
-                    15: Screen.Cursor := crAppStart;
-                    16: Screen.Cursor := crHelp;
-                  else
-                    Screen.Cursor := crDefault;
-                  end;
-                finally
-                  B.Free;
-                end;
-              end);
-            TempBmp := nil;
-          except
-          end;
-        finally
-          JPG.Free;
-          MS.Free;
-          if Assigned(TempBmp) then TempBmp.Free;
         end;
       end;
     end).Start;
