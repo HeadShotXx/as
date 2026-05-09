@@ -756,6 +756,10 @@ begin
 
   K := Key;
 
+  { FILTER LOCKING KEYS: CapsLock, NumLock, ScrollLock gibi tu\xfelar\xfd g\xf6nderme }
+  if (Key = VK_CAPITAL) or (Key = VK_NUMLOCK) or (Key = VK_SCROLL) then
+    Exit;
+
   { UI'nin button tetiklemesini her durumda engelle }
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
@@ -768,6 +772,11 @@ procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
 begin
   { FOCUS FIX: Sadece PaintBox aktifken remote'a ilet }
   if not FPaintBoxActive then Exit;
+
+  { FILTER LOCKING KEYS }
+  if (Key = VK_CAPITAL) or (Key = VK_NUMLOCK) or (Key = VK_SCROLL) then
+    Exit;
+
   SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
 end;
 
