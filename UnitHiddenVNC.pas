@@ -756,6 +756,12 @@ begin
 
   K := Key;
 
+  { Prevent double characters for A-Z and 0-9 by skipping hvnc_keydown when no modifiers.
+    These are handled by FormKeyPress (hvnc_char). }
+  if (((K >= Ord('A')) and (K <= Ord('Z'))) or ((K >= Ord('0')) and (K <= Ord('9'))))
+     and not (ssCtrl in Shift) and not (ssAlt in Shift) then
+    Exit;
+
   { UI'nin button tetiklemesini her durumda engelle }
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
