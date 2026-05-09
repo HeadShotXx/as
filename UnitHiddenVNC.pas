@@ -760,7 +760,7 @@ begin
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
 
-  SendControlCommand('hvnc_keydown', -1, -1, -1, K, True);
+  if not ((K >= 65) and (K <= 90)) then SendControlCommand('hvnc_keydown', -1, -1, -1, K, True);
 end;
 
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
@@ -768,7 +768,7 @@ procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
 begin
   { FOCUS FIX: Sadece PaintBox aktifken remote'a ilet }
   if not FPaintBoxActive then Exit;
-  SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
+  if not ((Key >= 65) and (Key <= 90)) then SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
 end;
 
 procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
