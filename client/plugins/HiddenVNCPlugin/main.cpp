@@ -152,6 +152,7 @@ static bool g_key_shift = false;
 static bool g_key_ctrl  = false;
 static bool g_key_alt   = false;
 static bool g_key_caps  = false;
+static bool g_key_caps_down = false;
 
 // -----------------------------------------------------------------------
 
@@ -815,13 +816,17 @@ static LPARAM make_lparam(UINT vk, bool up, bool ext, bool alt) {
 
 static void update_keyboard_state() {
     BYTE keyState[256] = {0};
-    // Mevcut thread durumunu oku
     GetKeyboardState(keyState);
-    // Modifier'ları kendi takip ettiğimiz değerlere göre ayarla
-    if (g_key_caps) keyState[VK_CAPITAL] = 1; else keyState[VK_CAPITAL] = 0;
-    if (g_key_shift) keyState[VK_SHIFT]   = 0x80; else keyState[VK_SHIFT] = 0;
-    if (g_key_ctrl)  keyState[VK_CONTROL] = 0x80; else keyState[VK_CONTROL] = 0;
-    if (g_key_alt)   keyState[VK_MENU]    = 0x80; else keyState[VK_MENU] = 0;
+
+    // CapsLock: bit 0 = toggle state, bit 7 = pressed state
+    keyState[VK_CAPITAL] = (g_key_caps ? 0x01 : 0x00);
+    if (g_key_caps_down) keyState[VK_CAPITAL] |= 0x80;
+
+    // Modifiers: bit 7 = pressed state
+    if (g_key_shift)   keyState[VK_SHIFT]   |= 0x80; else keyState[VK_SHIFT]   &= ~0x80;
+    if (g_key_ctrl)    keyState[VK_CONTROL] |= 0x80; else keyState[VK_CONTROL] &= ~0x80;
+    if (g_key_alt)     keyState[VK_MENU]    |= 0x80; else keyState[VK_MENU]    &= ~0x80;
+
     SetKeyboardState(keyState);
 }
 
@@ -944,6 +949,16 @@ static void input_loop() {
     if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
     if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
 
+    // Ensure thread has a message queue for AttachThreadInput
+    MSG msg;
+    PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE);
+
+    // Sync initial CapsLock state
+    BYTE keyState[256] = {0};
+    if (GetKeyboardState(keyState)) {
+        g_key_caps = (keyState[VK_CAPITAL] & 0x01) != 0;
+    }
+
     while (g_inputRunning) {
         InputTask task;
         {
@@ -963,12 +978,25 @@ static void input_loop() {
             HWND hTarget = GetFocusedWindow();
             if (!hTarget) continue;
 
+            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+            bool attached = false;
+            if (targetThreadId && targetThreadId != currentThreadId) {
+                attached = AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+            }
+
             if (action == "hvnc_keydown") {
                 // Modifier'ları güncelle
                 if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = true;
                 if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = true;
                 if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = true;
-                if (vk == VK_CAPITAL) g_key_caps = !g_key_caps; // Toggle
+
+                if (vk == VK_CAPITAL) {
+                    if (!g_key_caps_down) {
+                        g_key_caps = !g_key_caps;
+                    }
+                    g_key_caps_down = true;
+                }
 
                 // Klavye durumunu ayarla ve mesajı gönder
                 update_keyboard_state();
@@ -981,19 +1009,23 @@ static void input_loop() {
                 if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_key_shift = false;
                 if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_key_ctrl = false;
                 if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_key_alt = false;
-                // CapsLock keyup'da değişmez
+
+                if (vk == VK_CAPITAL) {
+                    g_key_caps_down = false;
+                }
 
                 update_keyboard_state();
                 bool ext = is_extended_key(vk);
-                // Alt da hala basılı olabilir (örn. AltGr), ama bırakıldığında g_key_alt false olur.
-                // WM_SYSKEYUP flag'ini doğru ayarla: tuşun kendisi Alt ise veya halen başka bir Alt basılı ise?
-                // Basitlik için, Alt tuşu bırakıldığında WM_SYSKEYUP, diğer tuşlarda normal WM_KEYUP.
                 UINT msg = (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) ? WM_SYSKEYUP : WM_KEYUP;
                 PostMessageW(hTarget, msg, vk, make_lparam(vk, true, ext, (vk == VK_MENU)));
             }
             else if (action == "hvnc_char") {
                 // Karakter mesajı, klavye durumundan bağımsız WM_CHAR
                 PostMessageW(hTarget, WM_CHAR, vk, 1);
+            }
+
+            if (attached) {
+                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
             }
 
             g_forceFullFrame = true;
