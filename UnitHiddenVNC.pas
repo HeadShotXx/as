@@ -465,6 +465,7 @@ var
   JSONObj : TJSONObject;
   NormX   : Integer;
   NormY   : Integer;
+  LState, MState: Integer;
 begin
   if not FIsCapturing or not Assigned(FSendJSON) or not Assigned(FLine) then
     Exit;
@@ -486,6 +487,22 @@ begin
 
     if InjectFocus and (FFocusedHwnd <> 0) then
       JSONObj.AddPair('focused_hwnd', TJSONNumber.Create(FFocusedHwnd));
+
+    if (Action = 'hvnc_keydown') or (Action = 'hvnc_keyup') or (Action = 'hvnc_char') or
+       (Pos('hvnc_mouse', Action) > 0) or (Action = 'hvnc_doubleclick') then
+    begin
+       LState := 0;
+       if (GetKeyState(VK_CAPITAL) and $01) <> 0 then LState := LState or $01;
+       if (GetKeyState(VK_NUMLOCK) and $01) <> 0 then LState := LState or $02;
+       if (GetKeyState(VK_SCROLL)  and $01) <> 0 then LState := LState or $04;
+       JSONObj.AddPair('lock_state', TJSONNumber.Create(LState));
+
+       MState := 0;
+       if (GetKeyState(VK_SHIFT)   and $8000) <> 0 then MState := MState or $01;
+       if (GetKeyState(VK_CONTROL) and $8000) <> 0 then MState := MState or $02;
+       if (GetKeyState(VK_MENU)    and $8000) <> 0 then MState := MState or $04;
+       JSONObj.AddPair('modifier_state', TJSONNumber.Create(MState));
+    end;
 
     FSendJSON(FLine, JSONObj);
   finally
