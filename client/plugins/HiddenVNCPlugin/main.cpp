@@ -780,9 +780,22 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
+static bool is_extended_key(WORD vk) {
+    switch (vk) {
+        case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+        case VK_PRIOR:  case VK_NEXT:   case VK_LEFT: case VK_UP:
+        case VK_RIGHT:  case VK_DOWN:   case VK_LWIN: case VK_RWIN:
+        case VK_APPS:   case VK_DIVIDE: case VK_NUMLOCK:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+    if (is_extended_key(vk)) lp |= (1 << 24);
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
