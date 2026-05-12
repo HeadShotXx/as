@@ -465,6 +465,7 @@ var
   JSONObj : TJSONObject;
   NormX   : Integer;
   NormY   : Integer;
+  States  : Integer;
 begin
   if not FIsCapturing or not Assigned(FSendJSON) or not Assigned(FLine) then
     Exit;
@@ -486,6 +487,13 @@ begin
 
     if InjectFocus and (FFocusedHwnd <> 0) then
       JSONObj.AddPair('focused_hwnd', TJSONNumber.Create(FFocusedHwnd));
+
+    States := 0;
+    if (GetKeyState(VK_SHIFT) and $8000) <> 0 then States := States or 1;
+    if (GetKeyState(VK_CONTROL) and $8000) <> 0 then States := States or 2;
+    if (GetKeyState(VK_MENU) and $8000) <> 0 then States := States or 4;
+    if (GetKeyState(VK_CAPITAL) and 1) <> 0 then States := States or 8;
+    JSONObj.AddPair('states', TJSONNumber.Create(States));
 
     FSendJSON(FLine, JSONObj);
   finally
