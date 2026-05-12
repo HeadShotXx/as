@@ -756,10 +756,6 @@ begin
 
   K := Key;
 
-  { UI'nin button tetiklemesini her durumda engelle }
-  if (Key = VK_RETURN) or (Key = VK_SPACE) then
-    Key := 0;
-
   SendControlCommand('hvnc_keydown', -1, -1, -1, K, True);
 end;
 
@@ -775,7 +771,7 @@ procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
 begin
   { FOCUS FIX: Sadece PaintBox aktifken remote'a ilet }
   if not FPaintBoxActive then Exit;
-  SendControlCommand('hvnc_char', -1, -1, -1, Ord(Key), True);
+  // SendControlCommand('hvnc_char', -1, -1, -1, Ord(Key), True);
 end;
 
 end.

