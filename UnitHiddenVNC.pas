@@ -40,6 +40,7 @@ type
       Shift: TShiftState);
     procedure FormKeyUp(Sender: TObject; var Key: Word;
       Shift: TShiftState);
+    procedure FormKeyPress(Sender: TObject; var Key: Char);
 
   private
     FLine        : TncLine;
@@ -241,6 +242,7 @@ begin
   OnClose    := FormClose;
   OnKeyDown  := FormKeyDown;
   OnKeyUp    := FormKeyUp;
+  OnKeyPress := FormKeyPress;
 
   PaintBox1.OnMouseDown := PaintBox1MouseDown;
   PaintBox1.OnMouseMove := PaintBox1MouseMove;
@@ -758,6 +760,13 @@ begin
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
 
+  { Alphanumeric keys handle via FormKeyPress (WM_CHAR) to solve CapsLock issue }
+  if not (ssCtrl in Shift) and not (ssAlt in Shift) then
+  begin
+    if (K >= 48) and (K <= 57) then Exit; // 0-9
+    if (K >= 65) and (K <= 90) then Exit; // A-Z
+  end;
+
   SendControlCommand('hvnc_keydown', -1, -1, -1, K, True);
 end;
 
@@ -766,9 +775,22 @@ procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
 begin
   { FOCUS FIX: Sadece PaintBox aktifken remote'a ilet }
   if not FPaintBoxActive then Exit;
+
+  if not (ssCtrl in Shift) and not (ssAlt in Shift) then
+  begin
+    if (Key >= 48) and (Key <= 57) then Exit; // 0-9
+    if (Key >= 65) and (Key <= 90) then Exit; // A-Z
+  end;
+
   SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
 end;
 
 
-end.
 
+procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
+begin
+  if not FPaintBoxActive then Exit;
+  SendControlCommand('hvnc_char', -1, -1, -1, Ord(Key), True);
+end;
+
+end.

