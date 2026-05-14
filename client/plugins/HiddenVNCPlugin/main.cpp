@@ -1183,11 +1183,12 @@ static void clone_folder_selective(const std::filesystem::path& src, const std::
         if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"lockfile" ||
             name == L"parent.lock" || name == L"Parent.lock" || name == L"Cache" ||
             name == L"Code Cache" || name == L"GPUCache" || name == L"Service Worker" ||
-            name == L"CacheStorage" || name == L"Lock") continue;
+            name == L"CacheStorage" || name == L"Lock" || name == L"SSYNC") continue;
 
         fs::path destPath = dst / entry.path().filename();
         if (entry.is_directory()) {
-            if (name == L"Sessions" || name == L"Local Storage" || name == L"IndexedDB" || name == L"Sync Data") {
+            if (name == L"Sessions" || name == L"Local Storage" || name == L"IndexedDB" ||
+                name == L"Sync Data" || name == L"AutofillStates" || name == L"VideoDecodeStats") {
                 clone_folder_selective(entry.path(), destPath);
             } else {
                 CreateSymbolicLinkW(destPath.wstring().c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
@@ -1263,7 +1264,7 @@ static void launch_browser_thread(wstring browser_name) {
         // By setting APPDATA=target_data_dir, Thunderbird finds its data at %APPDATA%\Thunderbird.
         cmdLine = L"\"" + browser_path + L"\" -no-remote";
     } else {
-        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --profile-directory=\"Default\" --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer --disable-dev-shm-usage --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=* --disable-extensions --disable-infobars --start-maximized --window-size=1920,1080";
+        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer --disable-dev-shm-usage --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity,CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=* --disable-extensions --disable-infobars --start-maximized --window-size=1920,1080 --disable-gpu-rasterization --disable-setuid-sandbox";
     }
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
