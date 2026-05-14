@@ -1135,12 +1135,34 @@ static wstring get_browser_path(const wstring& browser_exe) {
     DWORD size = sizeof(path);
     wstring subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + browser_exe;
     if (RegGetValueW(HKEY_LOCAL_MACHINE, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
-        return path;
+        wstring res = path;
+        if (!res.empty() && res[0] == L'\"') {
+            res.erase(0, 1);
+            if (!res.empty() && res.back() == L'\"') res.pop_back();
+        }
+        return res;
     }
     size = sizeof(path);
     if (RegGetValueW(HKEY_CURRENT_USER, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
-        return path;
+        wstring res = path;
+        if (!res.empty() && res[0] == L'\"') {
+            res.erase(0, 1);
+            if (!res.empty() && res.back() == L'\"') res.pop_back();
+        }
+        return res;
     }
+
+    // Fallbacks
+    if (browser_exe == L"thunderbird.exe") {
+        const wchar_t* fallbacks[] = {
+            L"C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe",
+            L"C:\\Program Files (x86)\\Mozilla Thunderbird\\thunderbird.exe"
+        };
+        for (auto p : fallbacks) {
+            if (std::filesystem::exists(p)) return p;
+        }
+    }
+
     return L"";
 }
 
@@ -1151,18 +1173,18 @@ static wstring get_thunderbird_profile_path() {
     if (!std::filesystem::exists(profilesPath)) return L"";
 
     try {
+        wstring fallback;
         for (const auto& entry : std::filesystem::directory_iterator(profilesPath)) {
             if (entry.is_directory()) {
                 wstring name = entry.path().filename().wstring();
-                if (name.find(L".default") != wstring::npos) {
-                    return entry.path().wstring();
+                wstring prefs = entry.path().wstring() + L"\\prefs.js";
+                if (std::filesystem::exists(prefs)) {
+                    if (name.find(L"default-release") != wstring::npos) return entry.path().wstring();
+                    if (fallback.empty() || name.find(L".default") != wstring::npos) fallback = entry.path().wstring();
                 }
             }
         }
-        // Fallback to first directory if no .default found
-        for (const auto& entry : std::filesystem::directory_iterator(profilesPath)) {
-            if (entry.is_directory()) return entry.path().wstring();
-        }
+        return fallback;
     } catch (...) {}
     return L"";
 }
@@ -1203,13 +1225,39 @@ static bool create_browser_clone(const wstring& browser_name, wstring& target_da
     namespace fs = std::filesystem;
     for (const auto& entry : fs::directory_iterator(source_path)) {
         wstring name = entry.path().filename().wstring();
-        if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") continue;
+        if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile" || name == L"parent.lock") continue;
 
         wstring dest = target_data_dir + L"\\" + name;
         if (entry.is_directory()) {
-            CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            if (name == L"Default" || name == L"Network" || (browser_name == L"thunderbird.exe" && name == L"Profiles")) {
+                try {
+                    fs::create_directories(dest);
+                    for (const auto& sub : fs::directory_iterator(entry.path())) {
+                        wstring subName = sub.path().filename().wstring();
+                        if (subName == L"Cache" || subName == L"Code Cache" || subName == L"GPUCache" || subName == L"Service Worker" || subName == L"CacheStorage") continue;
+                        if (subName == L"SingletonLock" || subName == L"SingletonCookie" || subName == L"lockfile" || subName == L"parent.lock") continue;
+
+                        wstring subDest = dest + L"\\" + subName;
+                        if (sub.is_directory()) {
+                            CreateSymbolicLinkW(subDest.c_str(), sub.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+                        } else {
+                            CopyFileW(sub.path().wstring().c_str(), subDest.c_str(), FALSE);
+                        }
+                    }
+                } catch (...) {
+                    CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+                }
+            } else if (name.find(L"Profile") != wstring::npos) {
+                 CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            } else {
+                CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            }
         } else {
-            CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            if (name == L"Local State" || name == L"Preferences" || name == L"prefs.js" || name == L"Cookies" || name == L"Login Data" || name == L"Web Data") {
+                CopyFileW(entry.path().wstring().c_str(), dest.c_str(), FALSE);
+            } else {
+                CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            }
         }
     }
 
@@ -1235,7 +1283,7 @@ static void launch_browser_thread(wstring browser_name) {
     if (browser_name == L"thunderbird.exe") {
         cmdLine = L"\"" + browser_path + L"\" -profile \"" + target_data_dir + L"\" -no-remote";
     } else {
-        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=*";
+        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --profile-directory=\"Default\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=* --disable-extensions --disable-infobars --start-maximized";
     }
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
