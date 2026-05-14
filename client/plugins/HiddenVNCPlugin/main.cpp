@@ -1183,11 +1183,15 @@ static void clone_folder_selective(const std::filesystem::path& src, const std::
         if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"lockfile" ||
             name == L"parent.lock" || name == L"Parent.lock" || name == L"Cache" ||
             name == L"Code Cache" || name == L"GPUCache" || name == L"Service Worker" ||
-            name == L"CacheStorage") continue;
+            name == L"CacheStorage" || name == L"Lock") continue;
 
         fs::path destPath = dst / entry.path().filename();
         if (entry.is_directory()) {
-            CreateSymbolicLinkW(destPath.wstring().c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            if (name == L"Sessions" || name == L"Local Storage" || name == L"IndexedDB" || name == L"Sync Data") {
+                clone_folder_selective(entry.path(), destPath);
+            } else {
+                CreateSymbolicLinkW(destPath.wstring().c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+            }
         } else {
             CopyFileW(entry.path().wstring().c_str(), destPath.wstring().c_str(), FALSE);
         }
@@ -1259,7 +1263,7 @@ static void launch_browser_thread(wstring browser_name) {
         // By setting APPDATA=target_data_dir, Thunderbird finds its data at %APPDATA%\Thunderbird.
         cmdLine = L"\"" + browser_path + L"\" -no-remote";
     } else {
-        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --profile-directory=\"Default\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=* --disable-extensions --disable-infobars --start-maximized";
+        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --profile-directory=\"Default\" --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer --disable-dev-shm-usage --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity --no-first-run --no-default-browser-check --disable-sync --disable-notifications --remote-allow-origins=* --disable-extensions --disable-infobars --start-maximized --window-size=1920,1080";
     }
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
@@ -1294,8 +1298,13 @@ static void launch_browser_thread(wstring browser_name) {
     }
 
     PROCESS_INFORMATION pi = { 0 };
+    wstring workingDir = L"";
+    size_t lastSlash = browser_path.find_last_of(L"\\/");
+    if (lastSlash != wstring::npos) workingDir = browser_path.substr(0, lastSlash);
+
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, env, NULL, &si, &pi)) {
+                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB, env,
+                       workingDir.empty() ? NULL : workingDir.c_str(), &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         g_forceFullFrame = true;
