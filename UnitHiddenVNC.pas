@@ -182,6 +182,8 @@ begin
   ComboBox2.Items.Add('powershell.exe');
   ComboBox2.Items.Add('cmd.exe');
   ComboBox2.Items.Add('explorer.exe');
+  ComboBox2.Items.Add('Chrome');
+  ComboBox2.Items.Add('Edge');
   ComboBox2.ItemIndex := 0;
 
   PaintBox1.ControlStyle := PaintBox1.ControlStyle + [csDoubleClicks, csOpaque];
