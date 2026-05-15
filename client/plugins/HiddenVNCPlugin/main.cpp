@@ -814,9 +814,31 @@ static WPARAM mouse_wparam_for_button(int btn, bool down) {
     return MK_LBUTTON;
 }
 
+struct EnumHitTest {
+    POINT pt;
+    HWND result;
+};
+
+static BOOL CALLBACK HitTestEnumProc(HWND hwnd, LPARAM lParam) {
+    EnumHitTest* test = (EnumHitTest*)lParam;
+    if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return TRUE;
+
+    LONG_PTR exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+    if ((exStyle & WS_EX_TRANSPARENT)) return TRUE;
+
+    RECT rc;
+    if (GetWindowRect(hwnd, &rc)) {
+        if (PtInRect(&rc, test->pt)) {
+            test->result = hwnd;
+            return FALSE; // Found topmost
+        }
+    }
+    return TRUE;
+}
+
 static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
-    HWND current = hwnd;
     HWND best = hwnd;
+    HWND current = hwnd;
 
     while (current && IsWindow(current)) {
         best = current;
@@ -835,9 +857,29 @@ static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
 }
 
 static HWND target_window_from_screen_point(POINT screenPt) {
-    HWND hwnd = WindowFromPoint(screenPt);
-    if (!hwnd || !IsWindow(hwnd)) return NULL;
-    return resolve_child_window_from_point(hwnd, screenPt);
+    EnumHitTest test = { screenPt, NULL };
+    EnumWindows(HitTestEnumProc, (LPARAM)&test);
+
+    if (!test.result) test.result = WindowFromPoint(screenPt);
+    if (!test.result || !IsWindow(test.result)) return NULL;
+
+    return resolve_child_window_from_point(test.result, screenPt);
+}
+
+static bool is_menu_or_popup(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return false;
+    wchar_t cls[256];
+    if (GetClassNameW(hwnd, cls, 256)) {
+        if (wcscmp(cls, L"#32768") == 0) return true; // Standard Win32 Menu
+        if (wcsstr(cls, L"Chrome_WidgetWin_1")) {
+            // Check if it's a popup/menu by looking for styles
+            LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+            if ((style & WS_POPUP) && !(style & WS_CAPTION)) return true;
+        }
+        if (wcsstr(cls, L"DropDown") || wcsstr(cls, L"Menu") || wcsstr(cls, L"Popup")) return true;
+    }
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    return (style & WS_POPUP) && !(style & WS_CAPTION);
 }
 
 static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
@@ -846,6 +888,9 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
     if (!hRoot) hRoot = hwnd;
 
     g_hLastWindow = hRoot;
+
+    // Don't switch focus/foreground if clicking a menu or a window that already has its root active
+    if (is_menu_or_popup(hwnd)) return;
 
     HWND hFore = GetForegroundWindow();
     if (hFore != hRoot) {
@@ -857,10 +902,12 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
             AttachThreadInput(targetThreadId, foreThreadId, TRUE);
             AttachThreadInput(currentThreadId, targetThreadId, TRUE);
             SetForegroundWindow(hRoot);
+            SetFocus(hRoot);
             AttachThreadInput(currentThreadId, targetThreadId, FALSE);
             AttachThreadInput(targetThreadId, foreThreadId, FALSE);
         } else {
             SetForegroundWindow(hRoot);
+            SetFocus(hRoot);
         }
     }
 
@@ -934,7 +981,23 @@ static void input_loop() {
 
         if (action == "hvnc_mousemove") {
             g_forceFullFrame = true;
+            SetCursorPos(screenPt.x, screenPt.y);
             send_mouse_input(normX, normY, MOUSEEVENTF_MOVE);
+
+            HWND hwnd = target_window_from_screen_point(screenPt);
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
+            if (hwnd) {
+                POINT clientPt = screenPt;
+                ScreenToClient(hwnd, &clientPt);
+                PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
+
+                LRESULT ht = HTCLIENT;
+                if (SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                        SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht)) {
+                    PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, WM_MOUSEMOVE));
+                }
+            }
+
             if (g_dragging && g_dragHwnd) {
                 int dx = screenPt.x - g_dragStartPt.x;
                 int dy = screenPt.y - g_dragStartPt.y;
@@ -984,7 +1047,9 @@ static void input_loop() {
             int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
 
-            HWND hwnd = WindowFromPoint(screenPt);
+            HWND hwnd = target_window_from_screen_point(screenPt);
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
+
             if (hwnd) {
                 LRESULT ht = HTCLIENT;
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
@@ -1016,21 +1081,19 @@ static void input_loop() {
                     }
                 }
 
-                HWND hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
-
                 UINT mouseMsg = mouse_message_for_button(btn, true);
-                activate_target_window(hTarget, mouseMsg, ht);
-                g_hCurrentFocus = hTarget;
-                g_mouseDownTarget[btn] = hTarget;
+                activate_target_window(hwnd, mouseMsg, ht);
+                g_hCurrentFocus = hwnd;
+                g_mouseDownTarget[btn] = hwnd;
 
                 POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
+                ScreenToClient(hwnd, &clientPt);
                 LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
 
-                PostMessageW(hTarget, WM_MOUSEMOVE, 0, lParam);
-                PostMessageW(hTarget, WM_SETCURSOR, (WPARAM)hTarget, MAKELPARAM(ht, mouseMsg));
-                PostMessageW(hTarget, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
+                SetCursorPos(screenPt.x, screenPt.y);
+                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
+                PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
+                PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
             }
             continue;
         }
@@ -1052,9 +1115,17 @@ static void input_loop() {
             if (!hwnd) hwnd = WindowFromPoint(screenPt);
 
             if (hwnd) {
+                LRESULT ht = HTCLIENT;
+                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
+
                 UINT mouseMsg = mouse_message_for_button(btn, false);
                 POINT clientPt = screenPt;
                 ScreenToClient(hwnd, &clientPt);
+
+                SetCursorPos(screenPt.x, screenPt.y);
+                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
+                PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, false), MAKELPARAM(clientPt.x, clientPt.y));
             }
             g_mouseDownTarget[btn] = NULL;
@@ -1086,7 +1157,9 @@ static void input_loop() {
                 WPARAM downWParam = mouse_wparam_for_button(btn, true);
                 WPARAM upWParam   = mouse_wparam_for_button(btn, false);
 
-                PostMessageW(hwnd, WM_MOUSEMOVE, 0, lParam);
+                SetCursorPos(screenPt.x, screenPt.y);
+                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, downMsg));
+                PostMessageW(hwnd, WM_MOUSEMOVE, downWParam, lParam);
                 PostMessageW(hwnd, downMsg, downWParam, lParam);
                 PostMessageW(hwnd, upMsg, upWParam, lParam);
                 PostMessageW(hwnd, dblMsg, downWParam, lParam);
