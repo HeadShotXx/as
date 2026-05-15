@@ -184,6 +184,7 @@ begin
   ComboBox2.Items.Add('explorer.exe');
   ComboBox2.Items.Add('chrome.exe');
   ComboBox2.Items.Add('msedge.exe');
+  ComboBox2.Items.Add('thunderbird.exe');
   ComboBox2.ItemIndex := 0;
 
   PaintBox1.ControlStyle := PaintBox1.ControlStyle + [csDoubleClicks, csOpaque];

