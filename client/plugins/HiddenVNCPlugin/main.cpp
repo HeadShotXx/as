@@ -1,14 +1,14 @@
-#define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
-#include <shlobj.h>
-#include <shlwapi.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
