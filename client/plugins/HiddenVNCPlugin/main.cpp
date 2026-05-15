@@ -916,6 +916,26 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
 // -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
+static wstring utf8_to_wstring(const string& str) {
+    if (str.empty()) return wstring();
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    if (size <= 0) return wstring();
+    wstring res(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
+    if (!res.empty() && res.back() == L'\0') res.pop_back();
+    return res;
+}
+
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
 static string GetClipboardText() {
     if (!OpenClipboard(NULL)) return "";
     HANDLE hData = GetClipboardData(CF_UNICODETEXT);
@@ -1237,26 +1257,6 @@ static void input_loop() {
             continue;
         }
     }
-}
-
-static wstring utf8_to_wstring(const string& str) {
-    if (str.empty()) return wstring();
-    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
-    if (size <= 0) return wstring();
-    wstring res(size, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
-    if (!res.empty() && res.back() == L'\0') res.pop_back();
-    return res;
-}
-
-static string wstring_to_utf8(const wstring& wstr) {
-    if (wstr.empty()) return string();
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return string();
-    string res(size, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
-    if (!res.empty() && res.back() == '\0') res.pop_back();
-    return res;
 }
 
 static wstring get_app_path(const wstring& appName) {
