@@ -776,31 +776,13 @@ static DWORD mouse_button_flag(int btn, bool down) {
 }
 
 static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData = 0) {
-    POINT pt = screen_pt(normX, normY);
-    SetCursorPos(pt.x, pt.y);
-
-    HWND hwnd = target_window_from_screen_point(pt);
-    if (!hwnd) hwnd = WindowFromPoint(pt);
-    if (!hwnd) return false;
-
-    POINT clientPt = pt;
-    ScreenToClient(hwnd, &clientPt);
-
-    WPARAM wParam = 0;
-    if (flags & MOUSEEVENTF_LEFTDOWN)   wParam |= MK_LBUTTON;
-    if (flags & MOUSEEVENTF_RIGHTDOWN)  wParam |= MK_RBUTTON;
-    if (flags & MOUSEEVENTF_MIDDLEDOWN) wParam |= MK_MBUTTON;
-
-    UINT msg = WM_MOUSEMOVE;
-    if (flags & MOUSEEVENTF_LEFTDOWN)   msg = WM_LBUTTONDOWN;
-    if (flags & MOUSEEVENTF_LEFTUP)     msg = WM_LBUTTONUP;
-    if (flags & MOUSEEVENTF_RIGHTDOWN)  msg = WM_RBUTTONDOWN;
-    if (flags & MOUSEEVENTF_RIGHTUP)    msg = WM_RBUTTONUP;
-    if (flags & MOUSEEVENTF_MIDDLEDOWN) msg = WM_MBUTTONDOWN;
-    if (flags & MOUSEEVENTF_MIDDLEUP)   msg = WM_MBUTTONUP;
-
-    PostMessageW(hwnd, msg, wParam, MAKELPARAM(clientPt.x, clientPt.y));
-    return true;
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dx = normX;
+    input.mi.dy = normY;
+    input.mi.mouseData = mouseData;
+    input.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE;
+    return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
 static LPARAM key_lparam(WORD vk, bool keyUp) {
@@ -1003,6 +985,18 @@ static void input_loop() {
                     g_keyState[vk] ^= 1;
                 } else {
                     g_keyState[vk] |= 0x80;
+
+                    // Sync generic modifier keys
+                    if (vk == VK_LCONTROL || vk == VK_RCONTROL) g_keyState[VK_CONTROL] |= 0x80;
+                    if (vk == VK_LSHIFT || vk == VK_RSHIFT) g_keyState[VK_SHIFT] |= 0x80;
+                    if (vk == VK_LMENU || vk == VK_RMENU) g_keyState[VK_MENU] |= 0x80;
+
+                    // AltGr support: AltGr usually maps to Ctrl + Alt
+                    if (vk == VK_RMENU) {
+                        g_keyState[VK_CONTROL] |= 0x80;
+                        g_keyState[VK_MENU] |= 0x80;
+                    }
+
                     AttachThreadInput(currentThread, targetThread, TRUE);
                     SetKeyboardState(g_keyState);
                     UINT msg = (g_keyState[VK_MENU] & 0x80) ? WM_SYSKEYDOWN : WM_KEYDOWN;
@@ -1012,6 +1006,26 @@ static void input_loop() {
             } else if (action == "hvnc_keyup") {
                 if (vk != VK_CAPITAL && vk != VK_NUMLOCK && vk != VK_SCROLL) {
                     g_keyState[vk] &= ~0x80;
+
+                    // Sync generic modifier keys
+                    if (vk == VK_LCONTROL || vk == VK_RCONTROL) {
+                        if (!(g_keyState[VK_LCONTROL] & 0x80) && !(g_keyState[VK_RCONTROL] & 0x80))
+                            g_keyState[VK_CONTROL] &= ~0x80;
+                    }
+                    if (vk == VK_LSHIFT || vk == VK_RSHIFT) {
+                        if (!(g_keyState[VK_LSHIFT] & 0x80) && !(g_keyState[VK_RSHIFT] & 0x80))
+                            g_keyState[VK_SHIFT] &= ~0x80;
+                    }
+                    if (vk == VK_LMENU || vk == VK_RMENU) {
+                        if (!(g_keyState[VK_LMENU] & 0x80) && !(g_keyState[VK_RMENU] & 0x80))
+                            g_keyState[VK_MENU] &= ~0x80;
+                    }
+
+                    if (vk == VK_RMENU) {
+                        g_keyState[VK_CONTROL] &= ~0x80;
+                        g_keyState[VK_MENU] &= ~0x80;
+                    }
+
                     AttachThreadInput(currentThread, targetThread, TRUE);
                     SetKeyboardState(g_keyState);
                     UINT msg = (g_keyState[VK_MENU] & 0x80) ? WM_SYSKEYUP : WM_KEYUP;
