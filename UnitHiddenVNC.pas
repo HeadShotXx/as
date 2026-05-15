@@ -748,10 +748,10 @@ begin
   // Önce her zaman keydown gönder (kısayollar için: Ctrl+C vb.)
   SendControlCommand('hvnc_keydown', -1, -1, -1, VK, True);
 
-  // Eğer karakter üretiyorsa ayrıca hvnc_char gönder (AltGr desteği için önemli)
+  // Eğer karakter üretiyorsa ayrıca hvnc_char gönder (AltGr ve Kısayol desteği için önemli)
   if GetCharFromKey(Key, CharCode) then
   begin
-    if CharCode >= 32 then
+    if CharCode > 0 then
       SendControlCommand('hvnc_char', -1, -1, -1, CharCode, True);
   end;
 
