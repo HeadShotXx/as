@@ -814,6 +814,32 @@ static WPARAM mouse_wparam_for_button(int btn, bool down) {
     return MK_LBUTTON;
 }
 
+static HWND resolve_child_window_from_point(HWND hwnd, POINT screenPt) {
+    HWND current = hwnd;
+    HWND best = hwnd;
+
+    while (current && IsWindow(current)) {
+        best = current;
+        POINT clientPt = screenPt;
+        if (!ScreenToClient(current, &clientPt)) break;
+
+        HWND child = ChildWindowFromPointEx(current, clientPt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT);
+        if (!child || child == current || !IsWindow(child)) break;
+
+        RECT childRect;
+        if (!GetWindowRect(child, &childRect) || !PtInRect(&childRect, screenPt)) break;
+        current = child;
+    }
+
+    return best;
+}
+
+static HWND target_window_from_screen_point(POINT screenPt) {
+    HWND hwnd = WindowFromPoint(screenPt);
+    if (!hwnd || !IsWindow(hwnd)) return NULL;
+    return resolve_child_window_from_point(hwnd, screenPt);
+}
+
 static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
     if (!hwnd || !IsWindow(hwnd)) return;
     HWND hRoot = GetAncestor(hwnd, GA_ROOT);
@@ -823,10 +849,19 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
     HWND hFore = GetForegroundWindow();
     if (hFore != hRoot) {
-        AttachThreadInput(GetWindowThreadProcessId(hFore, NULL), GetCurrentThreadId(), TRUE);
-        SetForegroundWindow(hRoot);
-        SetFocus(hRoot);
-        AttachThreadInput(GetWindowThreadProcessId(hFore, NULL), GetCurrentThreadId(), FALSE);
+        DWORD foreThreadId = hFore ? GetWindowThreadProcessId(hFore, NULL) : 0;
+        DWORD targetThreadId = GetWindowThreadProcessId(hRoot, NULL);
+        DWORD currentThreadId = GetCurrentThreadId();
+
+        if (foreThreadId && foreThreadId != targetThreadId) {
+            AttachThreadInput(targetThreadId, foreThreadId, TRUE);
+            AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+            SetForegroundWindow(hRoot);
+            AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+            AttachThreadInput(targetThreadId, foreThreadId, FALSE);
+        } else {
+            SetForegroundWindow(hRoot);
+        }
     }
 
     SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(ht, msg));
@@ -955,8 +990,6 @@ static void input_loop() {
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
-                UINT mouseMsg = mouse_message_for_button(btn, true);
-
                 if (ht != HTCLIENT && btn == 0) {
                     HWND hRoot = GetAncestor(hwnd, GA_ROOT);
                     if (hRoot) {
@@ -983,15 +1016,21 @@ static void input_loop() {
                     }
                 }
 
-                activate_target_window(hwnd, mouseMsg, ht);
-                g_hCurrentFocus = hwnd;
-                g_mouseDownTarget[btn] = hwnd;
+                HWND hTarget = target_window_from_screen_point(screenPt);
+                if (!hTarget) hTarget = hwnd;
+
+                UINT mouseMsg = mouse_message_for_button(btn, true);
+                activate_target_window(hTarget, mouseMsg, ht);
+                g_hCurrentFocus = hTarget;
+                g_mouseDownTarget[btn] = hTarget;
 
                 POINT clientPt = screenPt;
-                ScreenToClient(hwnd, &clientPt);
+                ScreenToClient(hTarget, &clientPt);
                 LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
-                PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
-                PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
+
+                PostMessageW(hTarget, WM_MOUSEMOVE, 0, lParam);
+                PostMessageW(hTarget, WM_SETCURSOR, (WPARAM)hTarget, MAKELPARAM(ht, mouseMsg));
+                PostMessageW(hTarget, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
             }
             continue;
         }
@@ -1009,7 +1048,8 @@ static void input_loop() {
             }
 
             HWND hwnd = g_mouseDownTarget[btn];
-            if (!hwnd || !IsWindow(hwnd)) hwnd = WindowFromPoint(screenPt);
+            if (!hwnd || !IsWindow(hwnd)) hwnd = target_window_from_screen_point(screenPt);
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
 
             if (hwnd) {
                 UINT mouseMsg = mouse_message_for_button(btn, false);
@@ -1026,7 +1066,9 @@ static void input_loop() {
             int btn = cmd.value("button", 0);
             if (btn < 0 || btn > 2) btn = 0;
 
-            HWND hwnd = WindowFromPoint(screenPt);
+            HWND hwnd = target_window_from_screen_point(screenPt);
+            if (!hwnd) hwnd = WindowFromPoint(screenPt);
+
             if (hwnd) {
                 LRESULT ht = HTCLIENT;
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
@@ -1044,6 +1086,7 @@ static void input_loop() {
                 WPARAM downWParam = mouse_wparam_for_button(btn, true);
                 WPARAM upWParam   = mouse_wparam_for_button(btn, false);
 
+                PostMessageW(hwnd, WM_MOUSEMOVE, 0, lParam);
                 PostMessageW(hwnd, downMsg, downWParam, lParam);
                 PostMessageW(hwnd, upMsg, upWParam, lParam);
                 PostMessageW(hwnd, dblMsg, downWParam, lParam);
