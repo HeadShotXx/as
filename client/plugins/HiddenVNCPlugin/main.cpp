@@ -916,6 +916,53 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
 // -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
+static string GetClipboardText() {
+    if (!OpenClipboard(NULL)) return "";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData == NULL) {
+        CloseClipboard();
+        return "";
+    }
+    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+    if (pText == NULL) {
+        CloseClipboard();
+        return "";
+    }
+    wstring wstr(pText);
+    GlobalUnlock(hData);
+    CloseClipboard();
+    return wstring_to_utf8(wstr);
+}
+
+static void SetClipboardText(const string& text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    wstring wstr = utf8_to_wstring(text);
+    size_t size = (wstr.size() + 1) * sizeof(wchar_t);
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (hMem) {
+        void* pMem = GlobalLock(hMem);
+        if (pMem) {
+            memcpy(pMem, wstr.c_str(), size);
+            GlobalUnlock(hMem);
+            if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
+                GlobalFree(hMem);
+            }
+        } else {
+            GlobalFree(hMem);
+        }
+    }
+    CloseClipboard();
+}
+
+static void SendCtrlShortcut(HWND hwnd, WORD vk) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    SendMessageTimeoutW(hwnd, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false), SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYDOWN, vk, key_lparam(vk, false), SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYUP, vk, key_lparam(vk, true), SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true), SMTO_ABORTIFHUNG, 200, NULL);
+}
+
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
     HWND hTarget = g_hCurrentFocus;
@@ -1210,53 +1257,6 @@ static string wstring_to_utf8(const wstring& wstr) {
     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
     if (!res.empty() && res.back() == '\0') res.pop_back();
     return res;
-}
-
-static string GetClipboardText() {
-    if (!OpenClipboard(NULL)) return "";
-    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-    if (hData == NULL) {
-        CloseClipboard();
-        return "";
-    }
-    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
-    if (pText == NULL) {
-        CloseClipboard();
-        return "";
-    }
-    wstring wstr(pText);
-    GlobalUnlock(hData);
-    CloseClipboard();
-    return wstring_to_utf8(wstr);
-}
-
-static void SetClipboardText(const string& text) {
-    if (!OpenClipboard(NULL)) return;
-    EmptyClipboard();
-    wstring wstr = utf8_to_wstring(text);
-    size_t size = (wstr.size() + 1) * sizeof(wchar_t);
-    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
-    if (hMem) {
-        void* pMem = GlobalLock(hMem);
-        if (pMem) {
-            memcpy(pMem, wstr.c_str(), size);
-            GlobalUnlock(hMem);
-            if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
-                GlobalFree(hMem);
-            }
-        } else {
-            GlobalFree(hMem);
-        }
-    }
-    CloseClipboard();
-}
-
-static void SendCtrlShortcut(HWND hwnd, WORD vk) {
-    if (!hwnd || !IsWindow(hwnd)) return;
-    SendMessageTimeoutW(hwnd, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false), SMTO_ABORTIFHUNG, 200, NULL);
-    SendMessageTimeoutW(hwnd, WM_KEYDOWN, vk, key_lparam(vk, false), SMTO_ABORTIFHUNG, 200, NULL);
-    SendMessageTimeoutW(hwnd, WM_KEYUP, vk, key_lparam(vk, true), SMTO_ABORTIFHUNG, 200, NULL);
-    SendMessageTimeoutW(hwnd, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true), SMTO_ABORTIFHUNG, 200, NULL);
 }
 
 static wstring get_app_path(const wstring& appName) {
