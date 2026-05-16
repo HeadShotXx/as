@@ -81,7 +81,11 @@ type
     procedure SendControlCommand(const Action: string;
       X: Integer = -1; Y: Integer = -1;
       Button: Integer = -1; KeyCode: Integer = -1;
-      InjectFocus: Boolean = False);
+      InjectFocus: Boolean = False;
+      const Data: string = '');
+
+    function GetClipboardText: string;
+    procedure SetClipboardText(const Text: string);
 
     procedure DisableChildFocus;
     procedure WMSetFocus(var Message: TWMSetFocus); message WM_SETFOCUS;
@@ -115,6 +119,60 @@ const
 // -------------------------------------------------------------------------
 //  Yardımcı: Tuşun o anki klavye durumuna göre karakterini döndürür
 // -------------------------------------------------------------------------
+function TForm10.GetClipboardText: string;
+var
+  Data: HGLOBAL;
+  Ptr: Pointer;
+begin
+  Result := '';
+  if not OpenClipboard(0) then Exit;
+  try
+    Data := GetClipboardData(CF_UNICODETEXT);
+    if Data <> 0 then
+    begin
+      Ptr := GlobalLock(Data);
+      if Ptr <> nil then
+      begin
+        Result := PWideChar(Ptr);
+        GlobalUnlock(Data);
+      end;
+    end;
+  finally
+    CloseClipboard;
+  end;
+end;
+
+procedure TForm10.SetClipboardText(const Text: string);
+var
+  Data: HGLOBAL;
+  Ptr: Pointer;
+  Size: Integer;
+begin
+  if not OpenClipboard(0) then Exit;
+  try
+    EmptyClipboard;
+    if Text <> '' then
+    begin
+      Size := (Length(Text) + 1) * SizeOf(WideChar);
+      Data := GlobalAlloc(GMEM_MOVEABLE, Size);
+      if Data <> 0 then
+      begin
+        Ptr := GlobalLock(Data);
+        if Ptr <> nil then
+        begin
+          Move(PWideChar(Text)^, Ptr^, Size);
+          GlobalUnlock(Data);
+          SetClipboardData(CF_UNICODETEXT, Data);
+        end
+        else
+          GlobalFree(Data);
+      end;
+    end;
+  finally
+    CloseClipboard;
+  end;
+end;
+
 function TForm10.GetCharFromKey(Key: Word; out CharCode: Word): Boolean;
 var
   State: TKeyboardState;
@@ -459,7 +517,7 @@ end;
 //  JSON kontrol komutu gönder
 // -------------------------------------------------------------------------
 procedure TForm10.SendControlCommand(const Action: string;
-  X, Y, Button, KeyCode: Integer; InjectFocus: Boolean);
+  X, Y, Button, KeyCode: Integer; InjectFocus: Boolean; const Data: string);
 var
   JSONObj : TJSONObject;
   NormX   : Integer;
@@ -484,6 +542,8 @@ begin
     if KeyCode <> -1 then JSONObj.AddPair('keycode', TJSONNumber.Create(KeyCode));
     if InjectFocus and (FFocusedHwnd <> 0) then
       JSONObj.AddPair('focused_hwnd', TJSONNumber.Create(FFocusedHwnd));
+    if Data <> '' then
+      JSONObj.AddPair('data', Data);
     FSendJSON(FLine, JSONObj);
   finally
     JSONObj.Free;
@@ -663,6 +723,11 @@ begin
       except
       end;
     end;
+  end
+  else if Action = 'hvnc_clipboard' then
+  begin
+    if Assigned(JSONObj.Values['data']) then
+      SetClipboardText(JSONObj.Values['data'].Value);
   end;
 end;
 
@@ -736,6 +801,36 @@ var
 begin
   if not FPaintBoxActive then Exit;
 
+  if ssCtrl in Shift then
+  begin
+    case Key of
+      Ord('A'):
+        begin
+          SendControlCommand('hvnc_selectall', -1, -1, -1, -1, True);
+          Key := 0;
+          Exit;
+        end;
+      Ord('C'):
+        begin
+          SendControlCommand('hvnc_copy', -1, -1, -1, -1, True);
+          Key := 0;
+          Exit;
+        end;
+      Ord('X'):
+        begin
+          SendControlCommand('hvnc_cut', -1, -1, -1, -1, True);
+          Key := 0;
+          Exit;
+        end;
+      Ord('V'):
+        begin
+          SendControlCommand('hvnc_paste', -1, -1, -1, -1, True, GetClipboardText);
+          Key := 0;
+          Exit;
+        end;
+    end;
+  end;
+
   OriginalKey := Key;
 
   // Enter / Space'in UI butonunu tetiklemesini engelle
@@ -743,7 +838,6 @@ begin
     Key := 0;
 
   if GetCharFromKey(OriginalKey, CharCode) then
-  begin
     // Yalnızca yazdırılabilir karakterleri (boşluk dahil >= 32) hvnc_char gönder
     if CharCode >= 32 then
     begin
