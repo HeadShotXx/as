@@ -7,7 +7,7 @@ uses
   System.SysUtils, System.Variants, System.Classes, System.Types,
   System.JSON, System.SyncObjs,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
-  Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg,
+  Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg, Vcl.Clipbrd,
   ncLines;
 
 type
@@ -663,6 +663,11 @@ begin
       except
       end;
     end;
+  end
+  else if Action = 'hvnc_clipboard' then
+  begin
+    if Assigned(JSONObj.Values['text']) then
+      Clipboard.AsText := JSONObj.Values['text'].Value;
   end;
 end;
 
@@ -733,10 +738,55 @@ procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word;
 var
   OriginalKey: Word;
   CharCode: Word;
+  JSONObj: TJSONObject;
 begin
   if not FPaintBoxActive then Exit;
 
   OriginalKey := Key;
+
+  // Clipboard Shortcuts
+  if (GetKeyState(VK_CONTROL) < 0) and (not (GetKeyState(VK_MENU) < 0)) then
+  begin
+    case OriginalKey of
+      Ord('A'), Ord('a'):
+      begin
+        SendControlCommand('hvnc_selectall', -1, -1, -1, -1, True);
+        Key := 0;
+        Exit;
+      end;
+      Ord('C'), Ord('c'):
+      begin
+        SendControlCommand('hvnc_copy', -1, -1, -1, -1, True);
+        Key := 0;
+        Exit;
+      end;
+      Ord('X'), Ord('x'):
+      begin
+        SendControlCommand('hvnc_cut', -1, -1, -1, -1, True);
+        Key := 0;
+        Exit;
+      end;
+      Ord('V'), Ord('v'):
+      begin
+        if Clipboard.HasFormat(CF_TEXT) or Clipboard.HasFormat(CF_UNICODETEXT) then
+        begin
+          JSONObj := TJSONObject.Create;
+          try
+            JSONObj.AddPair('action', 'hvnc_paste');
+            JSONObj.AddPair('text', Clipboard.AsText);
+            if FFocusedHwnd <> 0 then
+              JSONObj.AddPair('focused_hwnd', TJSONNumber.Create(FFocusedHwnd));
+            if Assigned(FSendJSON) and Assigned(FLine) then
+              FSendJSON(FLine, JSONObj);
+          finally
+            JSONObj.Free;
+          end;
+        end;
+        Key := 0;
+        Exit;
+      end;
+    end;
+  end;
 
   // Enter / Space'in UI butonunu tetiklemesini engelle
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
