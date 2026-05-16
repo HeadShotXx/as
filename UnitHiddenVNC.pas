@@ -7,7 +7,7 @@ uses
   System.SysUtils, System.Variants, System.Classes, System.Types,
   System.JSON, System.SyncObjs,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
-  Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg,
+  Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg, Vcl.Clipbrd,
   ncLines;
 
 type
@@ -134,15 +134,6 @@ begin
   if ScanCode = 0 then Exit;
 
   GetKeyboardState(State);
-  // Refine state for AltGr and other modifiers
-  if (GetKeyState(VK_LSHIFT) < 0)   then State[VK_LSHIFT]   := 128 else State[VK_LSHIFT]   := 0;
-  if (GetKeyState(VK_RSHIFT) < 0)   then State[VK_RSHIFT]   := 128 else State[VK_RSHIFT]   := 0;
-  if (GetKeyState(VK_LCONTROL) < 0) then State[VK_LCONTROL] := 128 else State[VK_LCONTROL] := 0;
-  if (GetKeyState(VK_RCONTROL) < 0) then State[VK_RCONTROL] := 128 else State[VK_RCONTROL] := 0;
-  if (GetKeyState(VK_LMENU) < 0)    then State[VK_LMENU]    := 128 else State[VK_LMENU]    := 0;
-  if (GetKeyState(VK_RMENU) < 0)    then State[VK_RMENU]    := 128 else State[VK_RMENU]    := 0;
-  if (GetKeyState(VK_CAPITAL) and 1 <> 0) then State[VK_CAPITAL] := 1 else State[VK_CAPITAL] := 0;
-
   if ToAscii(Key, ScanCode, State, @OutChar, 0) = 1 then
   begin
     CharCode := Ord(OutChar);
@@ -672,6 +663,11 @@ begin
       except
       end;
     end;
+  end
+  else if Action = 'hvnc_clipboard' then
+  begin
+    if Assigned(JSONObj.Values['text']) then
+      Clipboard.AsText := JSONObj.Values['text'].Value;
   end;
 end;
 
@@ -742,19 +738,54 @@ procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word;
 var
   OriginalKey: Word;
   CharCode: Word;
+  JSONObj: TJSONObject;
 begin
   if not FPaintBoxActive then Exit;
 
   OriginalKey := Key;
 
-  // Distinguish Left/Right modifiers
-  case Key of
-    VK_SHIFT:
-      if GetKeyState(VK_RSHIFT) < 0 then OriginalKey := VK_RSHIFT else OriginalKey := VK_LSHIFT;
-    VK_CONTROL:
-      if GetKeyState(VK_RCONTROL) < 0 then OriginalKey := VK_RCONTROL else OriginalKey := VK_LCONTROL;
-    VK_MENU:
-      if GetKeyState(VK_RMENU) < 0 then OriginalKey := VK_RMENU else OriginalKey := VK_LMENU;
+  // Clipboard Shortcuts
+  if (GetKeyState(VK_CONTROL) < 0) and (not (GetKeyState(VK_MENU) < 0)) then
+  begin
+    case OriginalKey of
+      Ord('A'), Ord('a'):
+      begin
+        SendControlCommand('hvnc_selectall', -1, -1, -1, -1, True);
+        Key := 0;
+        Exit;
+      end;
+      Ord('C'), Ord('c'):
+      begin
+        SendControlCommand('hvnc_copy', -1, -1, -1, -1, True);
+        Key := 0;
+        Exit;
+      end;
+      Ord('X'), Ord('x'):
+      begin
+        SendControlCommand('hvnc_cut', -1, -1, -1, -1, True);
+        Key := 0;
+        Exit;
+      end;
+      Ord('V'), Ord('v'):
+      begin
+        if Clipboard.HasFormat(CF_TEXT) or Clipboard.HasFormat(CF_UNICODETEXT) then
+        begin
+          JSONObj := TJSONObject.Create;
+          try
+            JSONObj.AddPair('action', 'hvnc_paste');
+            JSONObj.AddPair('text', Clipboard.AsText);
+            if FFocusedHwnd <> 0 then
+              JSONObj.AddPair('focused_hwnd', TJSONNumber.Create(FFocusedHwnd));
+            if Assigned(FSendJSON) and Assigned(FLine) then
+              FSendJSON(FLine, JSONObj);
+          finally
+            JSONObj.Free;
+          end;
+        end;
+        Key := 0;
+        Exit;
+      end;
+    end;
   end;
 
   // Enter / Space'in UI butonunu tetiklemesini engelle
@@ -763,12 +794,6 @@ begin
 
   if GetCharFromKey(OriginalKey, CharCode) then
   begin
-    // Support for Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X shortcuts
-    if (GetKeyState(VK_CONTROL) < 0) and (not ((GetKeyState(VK_RMENU) < 0) and (GetKeyState(VK_LCONTROL) < 0))) then
-    begin
-      SendControlCommand('hvnc_keydown', -1, -1, -1, OriginalKey, True);
-      Exit;
-    end;
     // Yalnızca yazdırılabilir karakterleri (boşluk dahil >= 32) hvnc_char gönder
     if CharCode >= 32 then
     begin
@@ -790,21 +815,8 @@ end;
 
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
   Shift: TShiftState);
-var
-  OriginalKey: Word;
 begin
   if not FPaintBoxActive then Exit;
-
-  OriginalKey := Key;
-
-  case Key of
-    VK_SHIFT:
-      if GetKeyState(VK_LSHIFT) >= 0 then OriginalKey := VK_LSHIFT else OriginalKey := VK_RSHIFT;
-    VK_CONTROL:
-      if GetKeyState(VK_LCONTROL) >= 0 then OriginalKey := VK_LCONTROL else OriginalKey := VK_RCONTROL;
-    VK_MENU:
-      if GetKeyState(VK_LMENU) >= 0 then OriginalKey := VK_LMENU else OriginalKey := VK_RMENU;
-  end;
 
   // Eğer tuş hvnc_char ile gönderildiyse keyup atlanır
   if Key in FCharKeyDown then
@@ -813,7 +825,7 @@ begin
     Exit;
   end;
 
-  SendControlCommand('hvnc_keyup', -1, -1, -1, OriginalKey, True);
+  SendControlCommand('hvnc_keyup', -1, -1, -1, Key, True);
 end;
 
 procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
