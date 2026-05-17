@@ -969,30 +969,14 @@ static wstring GetClipboardText() {
 static void SendShortcut(HWND hTarget, WPARAM vk, UINT msg = 0) {
     if (!hTarget || !IsWindow(hTarget)) return;
 
-    DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
-    DWORD currentThreadId = GetCurrentThreadId();
-
-    AttachThreadInput(currentThreadId, targetThreadId, TRUE);
-
-    BYTE keyState[256];
-    GetKeyboardState(keyState);
-    BYTE oldCtrl = keyState[VK_CONTROL];
-    keyState[VK_CONTROL] = 0x80;
-    SetKeyboardState(keyState);
-
     if (msg != 0) {
         SendMessageTimeoutW(hTarget, msg, 0, 0, SMTO_ABORTIFHUNG, 500, NULL);
     }
 
-    SendMessageTimeoutW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false), SMTO_ABORTIFHUNG, 500, NULL);
-    SendMessageTimeoutW(hTarget, WM_KEYDOWN, vk, key_lparam(vk, false), SMTO_ABORTIFHUNG, 500, NULL);
-    SendMessageTimeoutW(hTarget, WM_KEYUP, vk, key_lparam(vk, true), SMTO_ABORTIFHUNG, 500, NULL);
-    SendMessageTimeoutW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true), SMTO_ABORTIFHUNG, 500, NULL);
-
-    keyState[VK_CONTROL] = oldCtrl;
-    SetKeyboardState(keyState);
-
-    AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+    PostMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
+    PostMessageW(hTarget, WM_KEYDOWN, vk, key_lparam((WORD)vk, false));
+    PostMessageW(hTarget, WM_KEYUP, vk, key_lparam((WORD)vk, true));
+    PostMessageW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true));
 }
 
 // -----------------------------------------------------------------------
@@ -1223,9 +1207,8 @@ static void input_loop() {
 
                 SetCursorPos(screenPt.x, screenPt.y);
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
-                PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
-            }
+                PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
             continue;
         }
 
