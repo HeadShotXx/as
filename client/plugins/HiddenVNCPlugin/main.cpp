@@ -969,14 +969,20 @@ static wstring GetClipboardText() {
 static void SendShortcut(HWND hTarget, WPARAM vk, UINT highLevelMsg = 0, WPARAM highLevelWParam = 0) {
     if (!hTarget || !IsWindow(hTarget)) return;
 
+    // Use SendMessageTimeoutW for all messages in the sequence.
+    // This ensures they are processed in order and synchronously, which helps prevent stuck modifiers.
+    SendMessageTimeoutW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false), SMTO_ABORTIFHUNG, 100, NULL);
+
     if (highLevelMsg != 0) {
-        SendMessageTimeoutW(hTarget, highLevelMsg, highLevelWParam, 0, SMTO_ABORTIFHUNG, 250, NULL);
+        SendMessageTimeoutW(hTarget, highLevelMsg, highLevelWParam, 0, SMTO_ABORTIFHUNG, 100, NULL);
     }
 
-    // Always fallback to raw input injection to ensure the app definitely gets the shortcut
-    PostMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
-    PostMessageW(hTarget, WM_KEYDOWN, vk, key_lparam((WORD)vk, false));
-    PostMessageW(hTarget, WM_KEYUP, vk, key_lparam((WORD)vk, true));
+    SendMessageTimeoutW(hTarget, WM_KEYDOWN, vk, key_lparam((WORD)vk, false), SMTO_ABORTIFHUNG, 100, NULL);
+    SendMessageTimeoutW(hTarget, WM_KEYUP, vk, key_lparam((WORD)vk, true), SMTO_ABORTIFHUNG, 100, NULL);
+
+    SendMessageTimeoutW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true), SMTO_ABORTIFHUNG, 100, NULL);
+
+    // Final safety release via PostMessage in case the queue was full
     PostMessageW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true));
 }
 

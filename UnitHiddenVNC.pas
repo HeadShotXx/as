@@ -755,25 +755,25 @@ begin
     case OriginalKey of
       Ord('A'):
         begin
-          SendControlCommand('hvnc_selectall', -1, -1, -1, -1, True);
+          SendControlCommand('hvnc_selectall', -1, -1, -1, -1, False);
           Key := 0;
           Exit;
         end;
       Ord('C'):
         begin
-          SendControlCommand('hvnc_copy', -1, -1, -1, -1, True);
+          SendControlCommand('hvnc_copy', -1, -1, -1, -1, False);
           Key := 0;
           Exit;
         end;
       Ord('X'):
         begin
-          SendControlCommand('hvnc_cut', -1, -1, -1, -1, True);
+          SendControlCommand('hvnc_cut', -1, -1, -1, -1, False);
           Key := 0;
           Exit;
         end;
       Ord('V'):
         begin
-          SendControlCommand('hvnc_paste', -1, -1, -1, -1, True, Clipboard.AsText);
+          SendControlCommand('hvnc_paste', -1, -1, -1, -1, False, Clipboard.AsText);
           Key := 0;
           Exit;
         end;
@@ -808,9 +808,17 @@ end;
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
-  if not FPaintBoxActive then Exit;
-
-  // Eğer tuş hvnc_char ile gönderildiyse keyup atlanır
+  // Suppress KeyUp for shortcuts to avoid interference with client-side injection
+  if (ssCtrl in Shift) then
+  begin
+    case Key of
+      Ord('A'), Ord('C'), Ord('X'), Ord('V'):
+      begin
+        Key := 0;
+        Exit;
+      end;
+    end;
+  end;
   if Key in FCharKeyDown then
   begin
     Exclude(FCharKeyDown, Key);
