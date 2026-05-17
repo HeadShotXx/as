@@ -966,13 +966,14 @@ static wstring GetClipboardText() {
     return res;
 }
 
-static void SendShortcut(HWND hTarget, WPARAM vk, UINT msg = 0) {
+static void SendShortcut(HWND hTarget, WPARAM vk, UINT highLevelMsg = 0, WPARAM highLevelWParam = 0) {
     if (!hTarget || !IsWindow(hTarget)) return;
 
-    if (msg != 0) {
-        SendMessageTimeoutW(hTarget, msg, 0, 0, SMTO_ABORTIFHUNG, 500, NULL);
+    if (highLevelMsg != 0) {
+        SendMessageTimeoutW(hTarget, highLevelMsg, highLevelWParam, 0, SMTO_ABORTIFHUNG, 250, NULL);
     }
 
+    // Always fallback to raw input injection to ensure the app definitely gets the shortcut
     PostMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
     PostMessageW(hTarget, WM_KEYDOWN, vk, key_lparam((WORD)vk, false));
     PostMessageW(hTarget, WM_KEYUP, vk, key_lparam((WORD)vk, true));
@@ -1043,12 +1044,14 @@ static void input_loop() {
             } else if (action == "hvnc_char") {
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             } else if (action == "hvnc_selectall") {
-                SendMessageTimeoutW(hTarget, EM_SETSEL, 0, -1, SMTO_ABORTIFHUNG, 500, NULL);
-                SendShortcut(hTarget, 'A', 0xE122);
+                // Try standard Edit select all
+                SendMessageTimeoutW(hTarget, EM_SETSEL, 0, -1, SMTO_ABORTIFHUNG, 200, NULL);
+                // Try WM_COMMAND select all (standard for many apps)
+                SendShortcut(hTarget, 'A', WM_COMMAND, 0xE122);
             } else if (action == "hvnc_copy" || action == "hvnc_cut") {
                 UINT msg = (action == "hvnc_copy") ? WM_COPY : WM_CUT;
                 WPARAM vk_key = (action == "hvnc_copy") ? 'C' : 'X';
-                SendShortcut(hTarget, vk_key, msg);
+                SendShortcut(hTarget, vk_key, msg, 0);
 
                 thread([]() {
                     Sleep(500);
@@ -1070,7 +1073,7 @@ static void input_loop() {
                 if (!text.empty()) {
                     SetClipboardText(utf8_to_wstring(text));
                 }
-                SendShortcut(hTarget, 'V', WM_PASTE);
+                SendShortcut(hTarget, 'V', WM_PASTE, 0);
             } else if (action == "hvnc_clipboard") {
                 string text = cmd.value("text", "");
                 if (!text.empty()) {
@@ -1209,6 +1212,7 @@ static void input_loop() {
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
                 PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
+            }
             continue;
         }
 
