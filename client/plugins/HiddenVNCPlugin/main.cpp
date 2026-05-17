@@ -916,6 +916,56 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
 // -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
+static wstring utf8_to_wstring(const string& str) {
+    if (str.empty()) return wstring();
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    if (size <= 0) return wstring();
+    wstring res(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
+    if (!res.empty() && res.back() == L'\0') res.pop_back();
+    return res;
+}
+
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
+static void SetClipboardText(const wstring& text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (hGlob) {
+        wchar_t* pBuf = (wchar_t*)GlobalLock(hGlob);
+        if (pBuf) {
+            wcscpy(pBuf, text.c_str());
+            GlobalUnlock(hGlob);
+            SetClipboardData(CF_UNICODETEXT, hGlob);
+        }
+    }
+    CloseClipboard();
+}
+
+static wstring GetClipboardText() {
+    wstring res;
+    if (!OpenClipboard(NULL)) return res;
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData) {
+        wchar_t* pBuf = (wchar_t*)GlobalLock(hData);
+        if (pBuf) {
+            res = pBuf;
+            GlobalUnlock(hData);
+        }
+    }
+    CloseClipboard();
+    return res;
+}
+
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
     HWND hTarget = g_hCurrentFocus;
@@ -1216,56 +1266,6 @@ static void input_loop() {
             continue;
         }
     }
-}
-
-static wstring utf8_to_wstring(const string& str) {
-    if (str.empty()) return wstring();
-    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
-    if (size <= 0) return wstring();
-    wstring res(size, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
-    if (!res.empty() && res.back() == L'\0') res.pop_back();
-    return res;
-}
-
-static string wstring_to_utf8(const wstring& wstr) {
-    if (wstr.empty()) return string();
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return string();
-    string res(size, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
-    if (!res.empty() && res.back() == '\0') res.pop_back();
-    return res;
-}
-
-static void SetClipboardText(const wstring& text) {
-    if (!OpenClipboard(NULL)) return;
-    EmptyClipboard();
-    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
-    if (hGlob) {
-        wchar_t* pBuf = (wchar_t*)GlobalLock(hGlob);
-        if (pBuf) {
-            wcscpy(pBuf, text.c_str());
-            GlobalUnlock(hGlob);
-            SetClipboardData(CF_UNICODETEXT, hGlob);
-        }
-    }
-    CloseClipboard();
-}
-
-static wstring GetClipboardText() {
-    wstring res;
-    if (!OpenClipboard(NULL)) return res;
-    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-    if (hData) {
-        wchar_t* pBuf = (wchar_t*)GlobalLock(hData);
-        if (pBuf) {
-            res = pBuf;
-            GlobalUnlock(hData);
-        }
-    }
-    CloseClipboard();
-    return res;
 }
 
 static wstring get_app_path(const wstring& appName) {
