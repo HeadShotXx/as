@@ -58,7 +58,7 @@ type
     FPendingDirtyY     : Integer;
     FPendingDirtyW     : Integer;
     FPendingDirtyH     : Integer;
-    FPendingFPS        : Integer;
+    FPendingFPS         : Integer;
     FHasFrame    : Boolean;
     FIsDecoding  : Boolean;
 
@@ -330,7 +330,7 @@ begin
     FLock.Leave;
   end;
 
-  TThread.CreateAnonymousThread(
+  System.Classes.TThread.CreateAnonymousThread(
     procedure
     var
       LocalBytes : TBytes;
@@ -383,7 +383,7 @@ begin
             JPG.LoadFromStream(MS);
             TempBmp.Assign(JPG);
 
-            TThread.Synchronize(nil,
+            System.Classes.TThread.Queue(nil,
               procedure
               begin
                 if (csDestroying in ComponentState) then Exit;
@@ -617,7 +617,7 @@ begin
       FPaintBoxActive := False;
     end;
   end
-  else if Action = 'hvnc_focus_ack' then
+  else if Action = 'hvnc_focus' then
   begin
     HwndVal := JSONObj.Values['hwnd'];
     if Assigned(HwndVal) then

