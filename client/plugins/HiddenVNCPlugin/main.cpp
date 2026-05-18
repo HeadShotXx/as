@@ -1295,113 +1295,29 @@ static bool file_exists(const wstring& path) {
     return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY));
 }
 
-static wstring registry_read_string(HKEY root, const wstring& subkey, const wstring& valueName) {
-    HKEY hKey;
-    if (RegOpenKeyExW(root, subkey.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) return L"";
-    wchar_t buffer[MAX_PATH]; DWORD size = sizeof(buffer);
-    wstring res;
-    if (RegQueryValueExW(hKey, valueName.empty() ? NULL : valueName.c_str(), NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) res = buffer;
-    RegCloseKey(hKey);
-    return res;
-}
-
-static wstring parse_executable_path(wstring path) {
-    if (path.empty()) return L"";
-    // Remove leading/trailing whitespace
-    path.erase(0, path.find_first_not_of(L" \t\r\n"));
-    path.erase(path.find_last_not_of(L" \t\r\n") + 1);
-
-    if (path[0] == L'\"') {
-        size_t last = path.find(L'\"', 1);
-        if (last != wstring::npos) return path.substr(1, last - 1);
-    }
-
-    // Check if the whole string is a valid file (handles spaces in paths without quotes)
-    if (file_exists(path)) return path;
-
-    // Try to find .exe and use that as the end (common for command lines like: C:\Path\Exe.exe /arg)
-    size_t exePos = path.find(L".exe");
-    if (exePos != wstring::npos) {
-        wstring sub = path.substr(0, exePos + 4);
-        return sub;
-    }
-
-    return path;
-}
-
 static wstring get_app_path(const wstring& appName) {
-    HKEY hRoots[] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
+    // Aggressive Disk Search (No Registry)
+    wchar_t szPath[MAX_PATH];
 
-    // 1. Registry: App Paths (System & User)
-    wstring appPathsSubkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + appName;
-    for (auto hRoot : hRoots) {
-        wstring p = registry_read_string(hRoot, appPathsSubkey, L"");
-        p = parse_executable_path(p);
-        if (file_exists(p)) return p;
-    }
-
-    // 2. Registry: Browser Registration
-    if (appName == L"operagx.exe" || appName == L"launcher.exe") {
-        const wchar_t* browserKeys[] = {
-            L"SOFTWARE\\Clients\\StartMenuInternet\\Opera GX\\shell\\open\\command",
-            L"SOFTWARE\\Classes\\OperaGX.HTML\\shell\\open\\command",
-            L"SOFTWARE\\Classes\\Applications\\opera.exe\\shell\\open\\command"
-        };
-        for (auto hRoot : hRoots) {
-            for (auto key : browserKeys) {
-                wstring p = registry_read_string(hRoot, key, L"");
-                p = parse_executable_path(p);
-                if (file_exists(p)) return p;
+    if (appName == L"chrome.exe") {
+        int folders[] = { CSIDL_LOCAL_APPDATA, CSIDL_PROGRAM_FILES, CSIDL_PROGRAM_FILESX86 };
+        for (auto fid : folders) {
+            if (SHGetFolderPathW(NULL, fid, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Google\\Chrome\\Application\\chrome.exe";
+                if (file_exists(check)) return check;
+            }
+        }
+    } else if (appName == L"msedge.exe") {
+        int folders[] = { CSIDL_LOCAL_APPDATA, CSIDL_PROGRAM_FILES, CSIDL_PROGRAM_FILESX86 };
+        for (auto fid : folders) {
+            if (SHGetFolderPathW(NULL, fid, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Microsoft\\Edge\\Application\\msedge.exe";
+                if (file_exists(check)) return check;
             }
         }
     }
 
-    // 2. Registry: Uninstall Keys (InstallLocation)
-    if (appName == L"opera.exe" || appName == L"operagx.exe" || appName == L"launcher.exe") {
-        const wchar_t* names[] = { L"Opera GX", L"Opera Stable", L"Opera" };
-        const wchar_t* uninstRoots[] = { L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\", L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" };
-        for (auto r : hRoots) {
-            for (auto ur : uninstRoots) {
-                for (auto n : names) {
-                    wstring fullUninst = ur + wstring(n);
-                    if (RegOpenKeyExW(r, fullUninst.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-                        wchar_t loc[MAX_PATH]; DWORD size = sizeof(loc);
-                        if (RegQueryValueExW(hKey, L"InstallLocation", NULL, NULL, (LPBYTE)loc, &size) == ERROR_SUCCESS) {
-                            wstring base = loc;
-                            if (!base.empty() && base.back() != L'\\') base += L'\\';
-                            const wchar_t* binNames[] = { L"launcher.exe", L"opera.exe", L"operagx.exe" };
-                            for (auto bn : binNames) {
-                                wstring check = base + bn;
-                                if (file_exists(check)) { RegCloseKey(hKey); return check; }
-                            }
-                        }
-                        RegCloseKey(hKey);
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. Registry: Opera Software specific keys
-    if (appName == L"opera.exe" || appName == L"operagx.exe" || appName == L"launcher.exe") {
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Opera Software", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            wchar_t loc[MAX_PATH]; DWORD size = sizeof(loc);
-            if (RegQueryValueExW(hKey, L"Last Stable Install Path", NULL, NULL, (LPBYTE)loc, &size) == ERROR_SUCCESS) {
-                wstring base = loc;
-                if (!base.empty() && base.back() != L'\\') base += L'\\';
-                const wchar_t* binNames[] = { L"launcher.exe", L"opera.exe", L"operagx.exe" };
-                for (auto bn : binNames) {
-                    wstring check = base + bn;
-                    if (file_exists(check)) { RegCloseKey(hKey); return check; }
-                }
-            }
-            RegCloseKey(hKey);
-        }
-    }
-
-    // 4. Exhaustive Disk Search
     if (appName == L"opera.exe" || appName == L"launcher.exe" || appName == L"operagx.exe") {
-        wchar_t szPath[MAX_PATH];
         const wchar_t* subfolders[] = { L"Opera", L"Opera GX", L"Programs\\Opera", L"Programs\\Opera GX", L"Opera Software\\Opera Stable", L"Opera Software\\Opera GX Stable", L"Programs\\Opera GX Stable" };
         const wchar_t* exes[] = { L"launcher.exe", L"opera.exe", L"operagx.exe" };
         int folders[] = { CSIDL_LOCAL_APPDATA, CSIDL_APPDATA, CSIDL_PROGRAM_FILES, CSIDL_PROGRAM_FILESX86, CSIDL_PROFILE };
