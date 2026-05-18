@@ -1325,6 +1325,11 @@ static wstring get_app_path(const wstring& appName) {
                 check = wstring(szPath) + L"\\Opera\\opera.exe";
                 if (fs::exists(check)) return check;
             }
+            // Fallback for GX if launcher.exe was requested
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Programs\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
         } else if (appName == L"operagx.exe") {
             if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
                 wstring check = wstring(szPath) + L"\\Programs\\Opera GX\\launcher.exe";
@@ -1332,6 +1337,8 @@ static wstring get_app_path(const wstring& appName) {
             }
             if (SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, szPath) == S_OK) {
                 wstring check = wstring(szPath) + L"\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+                check = wstring(szPath) + L"\\Opera GX\\operagx.exe";
                 if (fs::exists(check)) return check;
             }
         }
@@ -1494,8 +1501,12 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     wstring exePath = get_app_path(exeName);
                     if (exePath.empty()) {
-                        if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
-                            exePath = get_app_path(L"launcher.exe");
+                        if (wRequestedPath == L"Opera GX") {
+                            exePath = get_app_path(L"operagx.exe");
+                            if (exePath.empty()) exePath = get_app_path(L"launcher.exe");
+                        } else if (wRequestedPath == L"Opera") {
+                            exePath = get_app_path(L"opera.exe");
+                            if (exePath.empty()) exePath = get_app_path(L"launcher.exe");
                         }
                     }
 
