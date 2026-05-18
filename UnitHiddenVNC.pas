@@ -156,6 +156,7 @@ begin
   ComboBox2.Items.Add('explorer.exe');
   ComboBox2.Items.Add('Google Chrome');
   ComboBox2.Items.Add('Microsoft Edge');
+  ComboBox2.Items.Add('Mozilla Firefox');
   ComboBox2.ItemIndex := 0;
 
   PaintBox1.ControlStyle := PaintBox1.ControlStyle + [csDoubleClicks, csOpaque];
