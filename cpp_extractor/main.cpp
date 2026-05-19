@@ -376,6 +376,15 @@ std::vector<uint8_t> decrypt_aes_gcm(const std::vector<uint8_t>& key, const std:
     return plaintext;
 }
 
+bool is_mostly_printable(const std::vector<uint8_t>& data) {
+    if (data.empty()) return true;
+    size_t printable = 0;
+    for (uint8_t b : data) {
+        if ((b >= 32 && b <= 126) || b == '\r' || b == '\n' || b == '\t') printable++;
+    }
+    return (double)printable / data.size() > 0.8;
+}
+
 std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera) {
     if (blob.empty()) return {};
 
@@ -383,24 +392,53 @@ std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::v
         std::vector<uint8_t> nonce(blob.begin() + 3, blob.begin() + 15);
         std::vector<uint8_t> ciphertext(blob.begin() + 15, blob.end());
 
-        std::vector<uint8_t> dec;
-        if (!v10_key.empty()) dec = decrypt_aes_gcm(v10_key, nonce, ciphertext);
-        if (dec.empty() && !v20_key.empty()) dec = decrypt_aes_gcm(v20_key, nonce, ciphertext);
-
-        if (!dec.empty()) {
-            if (is_opera && dec.size() > 32) return std::vector<uint8_t>(dec.begin() + 32, dec.end());
-            return dec;
+        // Try v10 key first
+        if (!v10_key.empty()) {
+            std::vector<uint8_t> dec = decrypt_aes_gcm(v10_key, nonce, ciphertext);
+            if (!dec.empty()) {
+                // In some new versions, even v10 blobs can have a 32-byte App-Bound header
+                if (dec.size() > 32) {
+                    std::vector<uint8_t> header(dec.begin(), dec.begin() + 32);
+                    if (is_opera || !is_mostly_printable(header)) {
+                        return std::vector<uint8_t>(dec.begin() + 32, dec.end());
+                    }
+                }
+                return dec;
+            }
+        }
+        // Fallback to v20 key (App-Bound)
+        if (!v20_key.empty()) {
+            std::vector<uint8_t> dec = decrypt_aes_gcm(v20_key, nonce, ciphertext);
+            if (!dec.empty()) {
+                if (dec.size() > 32) return std::vector<uint8_t>(dec.begin() + 32, dec.end());
+                return dec;
+            }
         }
     } else if (blob.size() > 15 && memcmp(blob.data(), "v20", 3) == 0) {
         std::vector<uint8_t> nonce(blob.begin() + 3, blob.begin() + 15);
         std::vector<uint8_t> ciphertext(blob.begin() + 15, blob.end());
 
-        std::vector<uint8_t> dec;
-        if (!v20_key.empty()) dec = decrypt_aes_gcm(v20_key, nonce, ciphertext);
-        if (dec.empty() && !v10_key.empty()) dec = decrypt_aes_gcm(v10_key, nonce, ciphertext);
-
-        if (!dec.empty() && dec.size() > 32) return std::vector<uint8_t>(dec.begin() + 32, dec.end());
-        return dec;
+        // Try v20 key first
+        if (!v20_key.empty()) {
+            std::vector<uint8_t> dec = decrypt_aes_gcm(v20_key, nonce, ciphertext);
+            if (!dec.empty()) {
+                if (dec.size() > 32) return std::vector<uint8_t>(dec.begin() + 32, dec.end());
+                return dec;
+            }
+        }
+        // Fallback to v10 key
+        if (!v10_key.empty()) {
+            std::vector<uint8_t> dec = decrypt_aes_gcm(v10_key, nonce, ciphertext);
+            if (!dec.empty()) {
+                if (dec.size() > 32) {
+                    std::vector<uint8_t> header(dec.begin(), dec.begin() + 32);
+                    if (is_opera || !is_mostly_printable(header)) {
+                        return std::vector<uint8_t>(dec.begin() + 32, dec.end());
+                    }
+                }
+                return dec;
+            }
+        }
     } else if (blob.size() > 15) {
         DATA_BLOB input = { (DWORD)blob.size(), (BYTE*)blob.data() };
         DATA_BLOB output = { 0, NULL };

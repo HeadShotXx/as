@@ -21,14 +21,14 @@ This is a C++ port of the Rust-based browser extractor that uses the debugger me
 2. Navigate to the `cpp_extractor` directory.
 3. Compile using `cl.exe`:
    ```cmd
-   cl /EHsc /O2 /std:c++17 main.cpp sqlite3.c /link crypt32.lib bcrypt.lib user32.lib advapi32.lib shell32.lib /out:extractor.exe
+   cl /EHsc /O2 /std:c++17 /Iincludes main.cpp sqlite3.c /link crypt32.lib bcrypt.lib user32.lib advapi32.lib shell32.lib /out:extractor.exe
    ```
 
 ### Using MinGW-w64 (g++)
 1. Navigate to the `cpp_extractor` directory.
 2. Compile using `g++`:
    ```bash
-   g++ -O3 -std=c++17 main.cpp sqlite3.c -o extractor.exe -lcrypt32 -lbcrypt -luser32 -ladvapi32 -lshell32
+   g++ -O3 -std=c++17 -Iincludes main.cpp sqlite3.c -o extractor.exe -lcrypt32 -lbcrypt -luser32 -ladvapi32 -lshell32
    ```
 
 ## Usage
