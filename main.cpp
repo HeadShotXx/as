@@ -14,6 +14,7 @@
 #include <regex>
 #include <set>
 #include <cstdio>
+#include <cctype>
 
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "bcrypt.lib")
@@ -49,7 +50,7 @@ std::string path_to_uri(const fs::path& p) {
             encoded += buf;
         }
     }
-    return "file:" + encoded + "?mode=ro&nolock=1";
+    return "file:" + encoded + "?mode=ro&nolock=1&immutable=1";
 }
 
 struct BrowserConfig {
@@ -1057,11 +1058,16 @@ void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_
     fs::create_directories(output_root);
 
     fs::path nss_dir;
+    std::vector<std::wstring> search_roots = get_search_roots();
     for (const auto& path : config.exe_paths) {
-        if (fs::exists(path)) {
-            nss_dir = fs::path(path).parent_path();
-            break;
+        for (const auto& root : search_roots) {
+            fs::path full_path = fs::path(root) / path;
+            if (fs::exists(full_path)) {
+                nss_dir = full_path.parent_path();
+                break;
+            }
         }
+        if (!nss_dir.empty()) break;
     }
 
     for (const auto& entry : fs::directory_iterator(user_data)) {
