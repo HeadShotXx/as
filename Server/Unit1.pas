@@ -1,4 +1,4 @@
-﻿unit Unit1;
+unit Unit1;
 
 interface
 
@@ -49,6 +49,7 @@ type
     TabSheet1        : TTabSheet;
     FileManager1     : TMenuItem;
     HiddenVNC1       : TMenuItem;
+    Recovery1: TMenuItem;
 
     procedure Button1Click(Sender: TObject);
     procedure SendMessage1Click(Sender: TObject);
@@ -64,6 +65,7 @@ type
     procedure OpenURL1Click(Sender: TObject);
     procedure FileManager1Click(Sender: TObject);
     procedure HiddenVNC1Click(Sender: TObject);
+    procedure Recovery1Click(Sender: TObject);
 
   private
     FServerManager: TServerManager;
@@ -441,6 +443,11 @@ end;
 { ------------------------------------------------------------------ }
 {  Popup: Remote Monitoring                                            }
 { ------------------------------------------------------------------ }
+
+procedure TForm1.Recovery1Click(Sender: TObject);
+begin
+// Popup Menu For Recovery System
+end;
 
 procedure TForm1.RemoteMonitoring1Click(Sender: TObject);
 var
@@ -902,6 +909,3 @@ begin
 end;
 
 end.
-
-
-
