@@ -51,7 +51,7 @@ std::string path_to_uri(const fs::path& p) {
             encoded += buf;
         }
     }
-    return "file:" + encoded + "?mode=ro&nolock=1&immutable=1";
+    return "file:///" + encoded + "?mode=ro&nolock=1";
 }
 
 std::string read_file_locked(const fs::path& p) {
@@ -314,24 +314,26 @@ int main() {
         STARTUPINFOW si = { sizeof(si) };
         PROCESS_INFORMATION pi = { 0 };
 
-        fs::path output_root(config.output_dir);
+        fs::path output_root = fs::absolute(config.output_dir);
         fs::create_directories(output_root);
-        std::wstring unique_data_dir = (output_root / (L"tmp_" + std::to_wstring(GetTickCount64()))).wstring();
+        std::wstring unique_data_dir = (output_root / (L"tmp_" + std::wstring(config.name.begin(), config.name.end()) + L"_" + std::to_wstring(GetTickCount64()))).wstring();
         fs::create_directories(unique_data_dir);
 
-        // Copy Local State so the new process has access to the master key
+        // Copy Local State using read_file_locked to avoid sharing violations
         fs::path src_local_state = fs::path(user_data_dir) / L"Local State";
-        if (fs::exists(src_local_state)) {
-            fs::copy_file(src_local_state, fs::path(unique_data_dir) / L"Local State", fs::copy_options::overwrite_existing);
+        std::string local_state_content = read_file_locked(src_local_state);
+        if (!local_state_content.empty()) {
+            std::ofstream ofs(fs::path(unique_data_dir) / L"Local State", std::ios::binary);
+            ofs.write(local_state_content.data(), local_state_content.size());
         }
 
-        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-first-run --no-default-browser-check --user-data-dir=\"" + unique_data_dir + L"\"";
+        std::wstring cmd_line = L"\"" + exe_path + L"\" --headless --no-first-run --no-default-browser-check --disable-gpu --mute-audio --disable-breakpad --disable-logging --user-data-dir=\"" + unique_data_dir + L"\"";
 
         std::vector<wchar_t> cmd_buffer(cmd_line.begin(), cmd_line.end());
         cmd_buffer.push_back(0);
 
         if (CreateProcessW(NULL, cmd_buffer.data(), NULL, NULL, FALSE,
-            DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+            DEBUG_PROCESS | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
 
             debug_loop(pi.hProcess, config, user_data_dir);
 
@@ -743,7 +745,11 @@ void debug_loop(HANDLE h_process, const BrowserConfig& config, const std::wstrin
                     std::wstring path = buffer;
                     std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
                     if (path.find(dll_name_w) != std::wstring::npos) {
-                        target_address = find_target_address(h_process, debug_event.u.LoadDll.lpBaseOfDll, config.name);
+                        HANDLE h_event_process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, debug_event.dwProcessId);
+                        if (h_event_process) {
+                            target_address = find_target_address(h_event_process, debug_event.u.LoadDll.lpBaseOfDll, config.name);
+                            CloseHandle(h_event_process);
+                        }
                         if (target_address != 0) {
                             std::vector<uint32_t> threads = get_all_threads(debug_event.dwProcessId);
                             for (uint32_t thread_id : threads) {
@@ -763,9 +769,13 @@ void debug_loop(HANDLE h_process, const BrowserConfig& config, const std::wstrin
             case EXCEPTION_DEBUG_EVENT: {
                 if (debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
                     if ((size_t)debug_event.u.Exception.ExceptionRecord.ExceptionAddress == target_address) {
-                        if (extract_key(debug_event.dwThreadId, h_process, config, user_data_dir)) {
-                            clear_hardware_breakpoints(debug_event.dwProcessId);
-                            TerminateProcess(h_process, 0);
+                        HANDLE h_event_process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, debug_event.dwProcessId);
+                        if (h_event_process) {
+                            if (extract_key(debug_event.dwThreadId, h_event_process, config, user_data_dir)) {
+                                clear_hardware_breakpoints(debug_event.dwProcessId);
+                                TerminateProcess(h_event_process, 0);
+                            }
+                            CloseHandle(h_event_process);
                         }
                     }
                     set_resume_flag(debug_event.dwThreadId);
