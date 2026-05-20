@@ -161,7 +161,7 @@ int main() {
             {L"Yandex", L"YandexBrowser", L"User Data"},
             "yandex_extract",
             "yandex_tmp",
-            false, false, true, false
+            false, false, false, false
         }
     };
 
