@@ -445,8 +445,29 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TForm1.Recovery1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
+  JSONObj: TJSONObject;
 begin
-// Popup Menu For Recovery System
+  if ListView1.Selected = nil then
+  begin
+    MessageBox(Handle, 'Lütfen önce bir client seçin.', 'Recovery',
+               MB_OK or MB_ICONWARNING);
+    Exit;
+  end;
+
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then Exit;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'recovery_start');
+    FServerManager.SendJSON(SelectedLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
+
+  MessageBox(Handle, 'Recovery plugin start command sent to client.', 'Information', MB_OK or MB_ICONINFORMATION);
 end;
 
 procedure TForm1.RemoteMonitoring1Click(Sender: TObject);
