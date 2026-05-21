@@ -1300,7 +1300,7 @@ begin
 
   if not TryGetClientInfo(aLine, Info) then Exit;
 
-  ClientDir := ExtractFilePath(ParamStr(0)) + 'Clients Folder\' + Info.ID + '\recovery_credentials\';
+  ClientDir := ExtractFilePath(ParamStr(0)) + 'Clients Folder\' + Info.ID + '\Recovery\';
   SavePath := ClientDir + RelPath.Replace('/', '\');
 
   ForceDirectories(ExtractFilePath(SavePath));
