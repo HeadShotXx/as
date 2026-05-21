@@ -445,8 +445,14 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TForm1.Recovery1Click(Sender: TObject);
+var
+  SelectedLine: TncLine;
 begin
-// Popup Menu For Recovery System
+  if ListView1.Selected = nil then Exit;
+  SelectedLine := TncLine(ListView1.Selected.Data);
+  if SelectedLine = nil then Exit;
+
+  FServerManager.SendRecoveryPlugin(SelectedLine);
 end;
 
 procedure TForm1.RemoteMonitoring1Click(Sender: TObject);
