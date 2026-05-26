@@ -10,6 +10,7 @@
 #include <thread>
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 #include "../include/json.hpp"
 #include "../include/PluginManager.hpp"
 

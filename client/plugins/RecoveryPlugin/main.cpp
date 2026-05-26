@@ -517,7 +517,7 @@ std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::v
         if (res.empty()) res = try_decrypt(v20_key);
         return res;
     } else if (blob.size() > 15) {
-        DATA_BLOB input = { (DWORD)blob_size, (BYTE*)blob_data }; DATA_BLOB output = { 0, NULL };
+        DATA_BLOB input = { (DWORD)blob.size(), (BYTE*)blob.data() }; DATA_BLOB output = { 0, NULL };
         if (CryptUnprotectData(&input, NULL, NULL, NULL, NULL, 0, &output)) {
             std::vector<uint8_t> dec(output.pbData, output.pbData + output.cbData); LocalFree(output.pbData); return dec;
         }
