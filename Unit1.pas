@@ -139,6 +139,7 @@ begin
   if Assigned(Keylogger1)      then Keylogger1.OnClick      := Keylogger1Click;
   if Assigned(FileManager1)    then FileManager1.OnClick    := FileManager1Click;
   if Assigned(HiddenVNC1)      then HiddenVNC1.OnClick      := HiddenVNC1Click;
+  if Assigned(Recovery1)       then Recovery1.OnClick       := Recovery1Click;
 
   EnsureRemoteMonitoringMenuItem;
   EnsureKeyloggerMenuItem;
