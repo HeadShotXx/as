@@ -58,34 +58,48 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
     if (sock == INVALID_SOCKET) return;
 
     uint32_t pathLen = (uint32_t)relPath.size();
-    uint32_t dataSize = (uint32_t)data.size();
-    uint32_t totalSize = sizeof(uint32_t) + pathLen + dataSize;
+    uint32_t totalDataSize = (uint32_t)data.size();
+    const uint32_t CHUNK_SIZE = 64 * 1024;
+    uint32_t offset = 0;
 
-    PacketHeader header;
-    header.signature = PACKET_SIGNATURE;
-    header.type = PACKET_TYPE_RECOVERY_FILE;
-    header.size = totalSize;
-
-    std::vector<uint8_t> packet;
-    packet.resize(sizeof(PacketHeader) + totalSize);
-    memcpy(packet.data(), &header, sizeof(PacketHeader));
-
-    uint8_t* ptr = packet.data() + sizeof(PacketHeader);
-    memcpy(ptr, &pathLen, sizeof(uint32_t));
-    ptr += sizeof(uint32_t);
-    memcpy(ptr, relPath.c_str(), pathLen);
-    ptr += pathLen;
-    if (dataSize > 0) {
-        memcpy(ptr, data.data(), dataSize);
+    if (totalDataSize == 0) {
+        uint32_t payloadSize = sizeof(uint32_t) + pathLen + sizeof(uint32_t) + 0;
+        PacketHeader header = { PACKET_SIGNATURE, PACKET_TYPE_RECOVERY_FILE, payloadSize };
+        std::vector<uint8_t> packet(sizeof(PacketHeader) + payloadSize);
+        uint8_t* ptr = packet.data();
+        memcpy(ptr, &header, sizeof(PacketHeader)); ptr += sizeof(PacketHeader);
+        memcpy(ptr, &pathLen, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+        memcpy(ptr, relPath.c_str(), pathLen); ptr += pathLen;
+        uint32_t zero = 0;
+        memcpy(ptr, &zero, sizeof(uint32_t));
+        send(sock, (const char*)packet.data(), (int)packet.size(), 0);
+        return;
     }
 
-    int remaining = (int)packet.size();
-    const char* p = (const char*)packet.data();
-    while (remaining > 0) {
-        int sent = send(sock, p, remaining, 0);
-        if (sent <= 0) break;
-        p += sent;
-        remaining -= sent;
+    while (offset < totalDataSize) {
+        uint32_t currentChunkSize = (totalDataSize - offset > CHUNK_SIZE) ? CHUNK_SIZE : (totalDataSize - offset);
+        uint32_t payloadSize = sizeof(uint32_t) + pathLen + sizeof(uint32_t) + currentChunkSize;
+
+        PacketHeader header = { PACKET_SIGNATURE, PACKET_TYPE_RECOVERY_FILE, payloadSize };
+        std::vector<uint8_t> packet(sizeof(PacketHeader) + payloadSize);
+        uint8_t* ptr = packet.data();
+        memcpy(ptr, &header, sizeof(PacketHeader)); ptr += sizeof(PacketHeader);
+        memcpy(ptr, &pathLen, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+        memcpy(ptr, relPath.c_str(), pathLen); ptr += pathLen;
+        memcpy(ptr, &offset, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+        memcpy(ptr, data.data() + offset, currentChunkSize);
+
+        int remaining = (int)packet.size();
+        const char* p = (const char*)packet.data();
+        while (remaining > 0) {
+            int sent = send(sock, p, remaining, 0);
+            if (sent <= 0) break;
+            p += sent;
+            remaining -= sent;
+        }
+
+        offset += currentChunkSize;
+        if (offset < totalDataSize) Sleep(10);
     }
 }
 
