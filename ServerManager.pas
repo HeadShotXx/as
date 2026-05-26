@@ -1335,7 +1335,7 @@ begin
     finally
       FS.Free;
     end;
-    if (DataSize > 100 * 1024) or (ExtractFileExt(SavePath).ToLower = '.json') or (ExtractFileExt(SavePath).ToLower = '.txt') then
+    if (DataSize > 100 * 1024) or SameText(ExtractFileExt(SavePath), '.json') or SameText(ExtractFileExt(SavePath), '.txt') then
       DoLog(lcCommand, 'Recovery data received: ' + RelPath + ' [' + Info.IPAddress + ']');
   except
     on E: Exception do

