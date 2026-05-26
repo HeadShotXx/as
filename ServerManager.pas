@@ -1282,6 +1282,7 @@ end;
 procedure TServerManager.ProcessRecoveryBinaryPacket(aLine: TncLine; const Payload: TBytes);
 var
   PathLen: Cardinal;
+  Offset: Cardinal;
   DataSize: Integer;
   RelPath: string;
   Info: TClientInfo;
@@ -1289,11 +1290,13 @@ var
   FS: TFileStream;
   ClientDir: string;
 begin
-  if Length(Payload) < 4 then Exit;
+  if Length(Payload) < 8 then Exit;
   Move(Payload[0], PathLen, 4);
-  if Length(Payload) < Integer(4 + PathLen) then Exit;
+  if Length(Payload) < Integer(4 + PathLen + 4) then Exit;
 
   RelPath := TEncoding.UTF8.GetString(Payload, 4, PathLen);
+  Move(Payload[4 + PathLen], Offset, 4);
+
   { Basic path sanitization }
   RelPath := RelPath.Replace('\', '/').Replace('..', '');
   while RelPath.StartsWith('/') do Delete(RelPath, 1, 1);
@@ -1305,18 +1308,25 @@ begin
 
   ForceDirectories(ExtractFilePath(SavePath));
 
-  DataSize := Length(Payload) - (4 + Integer(PathLen));
+  DataSize := Length(Payload) - (4 + Integer(PathLen) + 4);
   if DataSize < 0 then Exit;
 
   try
-    FS := TFileStream.Create(SavePath, fmCreate);
+    if (Offset = 0) or (not FileExists(SavePath)) then
+      FS := TFileStream.Create(SavePath, fmCreate)
+    else
+      FS := TFileStream.Create(SavePath, fmOpenWrite or fmShareDenyWrite);
+
     try
+      FS.Position := Offset;
       if DataSize > 0 then
-        FS.WriteBuffer(Payload[4 + PathLen], DataSize);
+        FS.WriteBuffer(Payload[4 + PathLen + 4], DataSize);
     finally
       FS.Free;
     end;
-    DoLog(lcCommand, 'Recovery file saved: ' + RelPath + ' [' + Info.IPAddress + ']');
+
+    if Offset = 0 then
+      DoLog(lcCommand, 'Recovery file started: ' + RelPath + ' [' + Info.IPAddress + ']');
   except
     on E: Exception do
       DoLog(lcError, 'Failed to save recovery file ' + RelPath + ': ' + E.Message);

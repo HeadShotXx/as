@@ -451,6 +451,7 @@ end;
 procedure TForm1.Recovery1Click(Sender: TObject);
 var
   SelectedLine: TncLine;
+  JSONObj: TJSONObject;
 begin
   if ListView1.Selected = nil then
   begin
@@ -467,7 +468,13 @@ begin
     Exit;
   end;
 
-  FServerManager.SendRecoveryPlugin(SelectedLine);
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'recovery');
+    FServerManager.SendJSON(SelectedLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
 end;
 
 procedure TForm1.RemoteMonitoring1Click(Sender: TObject);
