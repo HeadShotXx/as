@@ -593,7 +593,7 @@ std::vector<uint8_t> debug_loop_get_key(uint32_t process_id, const BrowserConfig
         if (!WaitForDebugEvent(&debug_event, 100)) continue;
         switch (debug_event.dwDebugEventCode) {
         case CREATE_PROCESS_DEBUG_EVENT:
-            process_handles[debug_event.dwProcessId] = debug_event.u.CreateProcess.hProcess;
+            process_handles[debug_event.dwProcessId] = debug_event.u.CreateProcessInfo.hProcess;
             break;
         case EXIT_PROCESS_DEBUG_EVENT:
             process_handles.erase(debug_event.dwProcessId);
