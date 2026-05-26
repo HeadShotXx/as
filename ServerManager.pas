@@ -1335,7 +1335,8 @@ begin
     finally
       FS.Free;
     end;
-    DoLog(lcCommand, 'Recovery file chunk saved: ' + RelPath + ' [' + Info.IPAddress + ']');
+    if (DataSize > 100 * 1024) or (ExtractFileExt(SavePath).ToLower = '.json') or (ExtractFileExt(SavePath).ToLower = '.txt') then
+      DoLog(lcCommand, 'Recovery data received: ' + RelPath + ' [' + Info.IPAddress + ']');
   except
     on E: Exception do
       DoLog(lcError, 'Failed to save recovery file ' + RelPath + ': ' + E.Message);
@@ -1587,7 +1588,17 @@ begin
           on E: Exception do
             DoLog(lcError, 'Failed to clear recovery dir: ' + E.Message);
         end;
+        DoLog(lcCommand, 'Recovery session initialized for ' + IP);
       end;
+      Exit;
+    end;
+
+    { ---- Recovery Status ---- }
+    if Action = 'recovery_status' then
+    begin
+      Status := '';
+      if Assigned(JSONObj.Values['message']) then Status := JSONObj.Values['message'].Value;
+      if Status <> '' then DoLog(lcCommand, '[Recovery] ' + Status + ' [' + IP + ']');
       Exit;
     end;
 

