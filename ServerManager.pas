@@ -1315,7 +1315,7 @@ begin
     if (Offset = 0) or (not FileExists(SavePath)) then
       FS := TFileStream.Create(SavePath, fmCreate)
     else
-      FS := TFileStream.Create(SavePath, fmOpenWrite or fmShareDenyWrite);
+      FS := TFileStream.Create(SavePath, fmOpenWrite or fmShareDenyNone);
 
     try
       FS.Position := Offset;
@@ -1326,10 +1326,10 @@ begin
     end;
 
     if Offset = 0 then
-      DoLog(lcCommand, 'Recovery file started: ' + RelPath + ' [' + Info.IPAddress + ']');
+      DoLog(lcCommand, 'Recovery file transfer: ' + RelPath + ' [' + Info.IPAddress + ']');
   except
     on E: Exception do
-      DoLog(lcError, 'Failed to save recovery file ' + RelPath + ': ' + E.Message);
+      DoLog(lcError, 'Failed to save recovery file ' + RelPath + ' (Offset: ' + IntToStr(Offset) + '): ' + E.Message);
   end;
 end;
 

