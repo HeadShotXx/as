@@ -36,3 +36,7 @@ x86_64-w64-mingw32-g++ -O2 -std=c++17 -static injector/src/main.cpp -o injector.
 4. Run `injector.exe --browser all` on the target machine.
 
 Alternatively, if `EMBEDDED_DLL_BASE64` is left empty, the injector will look for `payload.dll` in the same directory.
+
+### Debugging
+
+If the extraction fails or no folders are created, check `extractor_log.txt` on your Desktop for detailed execution logs.
