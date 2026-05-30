@@ -14,8 +14,8 @@ typedef struct _DllInfo {
 extern "C" {
 #endif
 
-__attribute__((section(".text")))
-inline void WINAPI realign_pe(DllInfo* dll_info) {
+__attribute__((section(".text"), noinline))
+void WINAPI realign_pe(DllInfo* dll_info) {
     if (!dll_info || !dll_info->base) return;
 
     void* base = dll_info->base;
@@ -87,8 +87,10 @@ inline void WINAPI realign_pe(DllInfo* dll_info) {
     }
 }
 
-__attribute__((section(".text")))
-inline void WINAPI realign_pe_end() {}
+__attribute__((section(".text"), noinline))
+void WINAPI realign_pe_end() {
+    volatile int i = 0; // Prevent optimization to NOP
+}
 
 #ifdef __cplusplus
 }
