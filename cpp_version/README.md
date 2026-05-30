@@ -8,24 +8,32 @@ This directory contains the C++ translation of the original Rust project. It con
 
 ## Dependencies
 - **MinGW-w64**: For cross-compiling to Windows on Linux.
-- **SQLite3**: The payload requires the SQLite3 amalgamation (`sqlite3.c` and `sqlite3.h`). Download from [sqlite.org](https://www.sqlite.org/download.html) and place them in the `payload/` directory.
-- **nlohmann/json**: The payload requires the `json.hpp` header. Download from [nlohmann/json](https://github.com/nlohmann/json) and place it in the `payload/nlohmann/` directory.
+- **SQLite3 & nlohmann/json**: These are required for the payload. You can download them automatically using the provided script:
+  ```bash
+  chmod +x download_deps.sh
+  ./download_deps.sh
+  ```
 
 ## Compilation
 
 ### Injector
 ```bash
-x86_64-w64-mingw32-g++ -O2 injector/main.cpp -o injector/injector.exe -ladvapi32 -static
+x86_64-w64-mingw32-g++ -O2 injector/main.cpp -o injector/injector.exe -ladvapi32 -lshlwapi -lshell32 -static
 ```
 
 ### Payload
 ```bash
-x86_64-w64-mingw32-gcc -c payload/sqlite3.c -o payload/sqlite3.o
-x86_64-w64-mingw32-g++ -O2 -shared payload/main.cpp payload/sqlite3.o -o payload/payload.dll -lbcrypt -lcrypt32 -lole32 -loleaut32 -static -I.
+# Compile SQLite first
+x86_64-w64-mingw32-gcc -O2 -c payload/sqlite3.c -o payload/sqlite3.o
+# Compile the Payload DLL
+x86_64-w64-mingw32-g++ -O2 -shared payload/main.cpp payload/sqlite3.o -o payload/payload.dll -lbcrypt -lcrypt32 -lole32 -loleaut32 -static -Ipayload/
 ```
 
 ## Usage
-1. Compile the payload to `payload.dll`.
-2. Encode `payload.dll` to Base64 and replace the `EMBEDDED_DLL_BASE64` constant in `injector/main.cpp`.
-3. Compile the injector to `injector.exe`.
-4. Run `injector.exe [browser_name]` (e.g., `injector.exe chrome`).
+1. **Compile the Payload**: Compile `payload/main.cpp` to `payload.dll` as described above. Ensure `sqlite3.c`, `sqlite3.h`, and `nlohmann/json.hpp` are in the correct locations.
+2. **Compile the Injector**: Compile `injector/main.cpp` to `injector.exe`.
+3. **Run**: Place `payload.dll` in the same directory as `injector.exe` and run:
+   ```bash
+   injector.exe [browser_name]
+   ```
+   *Optional*: You can encode `payload.dll` to Base64 and update the `EMBEDDED_DLL_BASE64` constant in `injector/main.cpp` to create a single standalone executable.

