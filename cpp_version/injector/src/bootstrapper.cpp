@@ -21,7 +21,7 @@ struct IMAGE_IMPORT_DESCRIPTOR_ {
     union {
         uint32_t Characteristics;
         uint32_t OriginalFirstThunk;
-    } DUMMYUNIONNAME;
+    };
     uint32_t TimeDateStamp;
     uint32_t ForwarderChain;
     uint32_t Name;
@@ -83,7 +83,7 @@ extern "C" __declspec(dllexport) void NTAPI realign_pe(DllInfo* dll_info) {
             char* lib_name = (char*)((size_t)base + import_desc->Name);
             HMODULE h_module = _LoadLibraryA(lib_name);
 
-            uint64_t* orig_thunk = (uint64_t*)((size_t)base + (import_desc->DUMMYUNIONNAME.OriginalFirstThunk ? import_desc->DUMMYUNIONNAME.OriginalFirstThunk : import_desc->FirstThunk));
+            uint64_t* orig_thunk = (uint64_t*)((size_t)base + (import_desc->OriginalFirstThunk ? import_desc->OriginalFirstThunk : import_desc->FirstThunk));
             uint64_t* first_thunk = (uint64_t*)((size_t)base + import_desc->FirstThunk);
 
             while (*orig_thunk != 0) {
