@@ -13,7 +13,7 @@ struct DllInfo {
 
 extern "C" {
 
-__attribute__((section(".text"), noinline))
+__attribute__((section(".inject"), noinline))
 inline void WINAPI realign_pe(DllInfo* dll_info) {
     void* base = dll_info->base;
     LoadLibraryA_t load_library_a = dll_info->load_library_a;
@@ -86,7 +86,7 @@ inline void WINAPI realign_pe(DllInfo* dll_info) {
     }
 }
 
-__attribute__((section(".text"), noinline))
+__attribute__((section(".inject"), noinline))
 inline void WINAPI realign_pe_end() {}
 
 }

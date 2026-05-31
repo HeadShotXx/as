@@ -127,7 +127,9 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
     BCRYPT_ALG_HANDLE h_alg = nullptr;
     BCRYPT_KEY_HANDLE h_key = nullptr;
     BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
-    BCRYPT_INIT_AUTH_INFO(info);
+    memset(&info, 0, sizeof(info));
+    info.cbSize = sizeof(info);
+    info.dwInfoVersion = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO_VERSION;
 
     if (BCryptOpenAlgorithmProvider(&h_alg, BCRYPT_AES_ALGORITHM, nullptr, 0) != 0) return {};
     if (BCryptSetProperty(h_alg, BCRYPT_CHAINING_MODE, (BYTE*)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0) != 0) { BCryptCloseAlgorithmProvider(h_alg, 0); return {}; }
