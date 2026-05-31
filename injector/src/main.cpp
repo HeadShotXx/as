@@ -11,6 +11,7 @@
 #include <sstream>
 #include <cctype>
 #include <cwctype>
+#include <shlobj.h>
 #include "bootstrapper.h"
 #include "json.hpp"
 
@@ -75,10 +76,22 @@ struct BrowserConfig {
 const std::vector<BrowserConfig> BROWSERS = {
     {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}},
     {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}},
-    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}}
+    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}},
+    {L"Opera", L"opera.exe", {L"C:\\Program Files\\Opera\\launcher.exe", L"C:\\Program Files (x86)\\Opera\\launcher.exe"}},
+    {L"OperaGX", L"opera.exe", {L"C:\\Program Files\\Opera GX\\launcher.exe", L"C:\\Program Files (x86)\\Opera GX\\launcher.exe"}}
 };
 
+std::wstring get_local_appdata_path() {
+    wchar_t path[MAX_PATH];
+    if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path) == S_OK) {
+        return std::wstring(path);
+    }
+    return L"";
+}
+
 std::wstring find_browser_exe(const std::wstring& name) {
+    std::wstring local_appdata = get_local_appdata_path();
+
     for (const auto& b : BROWSERS) {
         std::wstring b_name_lower = b.name;
         std::wstring target_name_lower = name;
@@ -87,6 +100,19 @@ std::wstring find_browser_exe(const std::wstring& name) {
         if (b_name_lower == target_name_lower) {
             for (const auto& path : b.common_paths) {
                 if (fs::exists(path)) return path;
+            }
+            // Add dynamic AppData paths
+            if (!local_appdata.empty()) {
+                if (b.name == L"Opera") {
+                    std::wstring p = local_appdata + L"\\Programs\\Opera\\launcher.exe";
+                    if (fs::exists(p)) return p;
+                } else if (b.name == L"OperaGX") {
+                    std::wstring p = local_appdata + L"\\Programs\\Opera GX\\launcher.exe";
+                    if (fs::exists(p)) return p;
+                } else if (b.name == L"Chrome") {
+                    std::wstring p = local_appdata + L"\\Google\\Chrome\\Application\\chrome.exe";
+                    if (fs::exists(p)) return p;
+                }
             }
         }
     }
