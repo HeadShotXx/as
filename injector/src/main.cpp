@@ -122,20 +122,6 @@ std::vector<unsigned char> strip_signature(const std::vector<unsigned char>& dat
     return data;
 }
 
-std::vector<unsigned char> decrypt_blob(const std::vector<unsigned char>& blob, const std::vector<unsigned char>& v10_key, const std::vector<unsigned char>& v20_key) {
-    if (blob.empty()) return {};
-    std::vector<unsigned char> dec;
-    if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v20") {
-        if (!v20_key.empty()) dec = aes_gcm_decrypt(v20_key, blob);
-    } else if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v10") {
-        if (!v10_key.empty()) dec = aes_gcm_decrypt(v10_key, blob);
-    } else {
-        dec = decrypt_dpapi(blob);
-    }
-    if (!dec.empty()) return strip_signature(dec);
-    return dec;
-}
-
 std::vector<unsigned char> decrypt_dpapi(const std::vector<unsigned char>& data) {
     DATA_BLOB input = { (DWORD)data.size(), (BYTE*)data.data() };
     DATA_BLOB output = { 0, nullptr };
@@ -176,6 +162,20 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
     BCryptCloseAlgorithmProvider(h_alg, 0);
     plaintext.resize(cb_plain);
     return plaintext;
+}
+
+std::vector<unsigned char> decrypt_blob(const std::vector<unsigned char>& blob, const std::vector<unsigned char>& v10_key, const std::vector<unsigned char>& v20_key) {
+    if (blob.empty()) return {};
+    std::vector<unsigned char> dec;
+    if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v20") {
+        if (!v20_key.empty()) dec = aes_gcm_decrypt(v20_key, blob);
+    } else if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v10") {
+        if (!v10_key.empty()) dec = aes_gcm_decrypt(v10_key, blob);
+    } else {
+        dec = decrypt_dpapi(blob);
+    }
+    if (!dec.empty()) return strip_signature(dec);
+    return dec;
 }
 
 std::string wstring_to_utf8(const std::wstring& wstr) {
