@@ -112,13 +112,21 @@ std::string ensure_utf8(const std::string& input) {
     return sanitize_internal((const unsigned char*)input.data(), input.size());
 }
 
-std::vector<unsigned char> strip_signature(const std::vector<unsigned char>& data) {
+std::vector<unsigned char> strip_signature(const std::vector<unsigned char>& data, bool force = false) {
     if (data.size() < 32) return data;
+    if (force) return std::vector<unsigned char>(data.begin() + 32, data.end());
+
     int non_printable = 0;
+    bool has_control = false;
     for (int i = 0; i < 32; i++) {
-        if (data[i] < 32 || data[i] > 126) non_printable++;
+        unsigned char c = data[i];
+        if (c < 32 && c != '\r' && c != '\n' && c != '\t') has_control = true;
+        if (c < 32 || c > 126) non_printable++;
     }
-    if (non_printable > 16) return std::vector<unsigned char>(data.begin() + 32, data.end());
+
+    if (has_control || non_printable > 4) {
+        return std::vector<unsigned char>(data.begin() + 32, data.end());
+    }
     return data;
 }
 
@@ -167,14 +175,16 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
 std::vector<unsigned char> decrypt_blob(const std::vector<unsigned char>& blob, const std::vector<unsigned char>& v10_key, const std::vector<unsigned char>& v20_key) {
     if (blob.empty()) return {};
     std::vector<unsigned char> dec;
+    bool is_v20 = false;
     if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v20") {
+        is_v20 = true;
         if (!v20_key.empty()) dec = aes_gcm_decrypt(v20_key, blob);
     } else if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v10") {
         if (!v10_key.empty()) dec = aes_gcm_decrypt(v10_key, blob);
     } else {
         dec = decrypt_dpapi(blob);
     }
-    if (!dec.empty()) return strip_signature(dec);
+    if (!dec.empty()) return strip_signature(dec, is_v20);
     return dec;
 }
 
