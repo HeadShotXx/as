@@ -90,24 +90,50 @@ std::vector<unsigned char> base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
-std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
+std::string ensure_utf8(const std::string& input) {
+    if (input.empty()) return "";
     std::string output;
     output.reserve(input.size());
-    for (unsigned char c : input) {
-        if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
-        else output += (char)c;
+    for (size_t i = 0; i < input.size(); ) {
+        unsigned char c = (unsigned char)input[i];
+        if (c < 0x80) {
+            if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
+            else output += (char)c;
+            i++;
+        } else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) {
+                output += (char)input[i]; output += (char)input[i + 1]; i += 2;
+            } else { output += ' '; i++; }
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 < input.size() && (input[i + 1] & 0xC0) == 0x80 && (input[i + 2] & 0xC0) == 0x80) {
+                output += (char)input[i]; output += (char)input[i + 1]; output += (char)input[i + 2]; i += 3;
+            } else { output += ' '; i++; }
+        } else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 < input.size() && (input[i + 1] & 0xC0) == 0x80 && (input[i + 2] & 0xC0) == 0x80 && (input[i + 3] & 0xC0) == 0x80) {
+                output += (char)input[i]; output += (char)input[i + 1]; output += (char)input[i + 2]; output += (char)input[i + 3]; i += 4;
+            } else { output += ' '; i++; }
+        } else { output += ' '; i++; }
     }
     return output;
 }
 
-std::string ensure_utf8(const std::string& input) {
-    std::string output;
-    output.reserve(input.size());
-    for (unsigned char c : input) {
-        if (c < 32 && c != '\r' && c != '\n' && c != '\t') output += ' ';
-        else output += (char)c;
+std::string to_utf8_lossy(const std::vector<unsigned char>& input) {
+    if (input.empty()) return "";
+
+    // Heuristic: App-Bound Metadata (32 bytes) often persists after decryption
+    // If the first 32 bytes contain many non-printable characters, strip them.
+    size_t start_idx = 0;
+    if (input.size() >= 32) {
+        int non_printable = 0;
+        for (int i = 0; i < 32; i++) {
+            unsigned char c = input[i];
+            if (c < 32 && c != '\r' && c != '\n' && c != '\t') non_printable++;
+        }
+        if (non_printable > 8) start_idx = 32;
     }
-    return output;
+
+    std::string raw(input.begin() + start_idx, input.end());
+    return ensure_utf8(raw);
 }
 
 std::vector<unsigned char> decrypt_dpapi(const std::vector<unsigned char>& data) {
@@ -163,10 +189,7 @@ std::string decrypt_browser_data(const std::vector<unsigned char>& enc_data, con
     if (enc_data.size() > 3 && enc_data[0] == 'v' && enc_data[1] == '2' && enc_data[2] == '0') {
         if (!v20_key.empty()) {
             auto dec = aes_gcm_decrypt(v20_key, enc_data);
-            if (!dec.empty()) {
-                if (dec.size() >= 32) dec.erase(dec.begin(), dec.begin() + 32);
-                return to_utf8_lossy(dec);
-            }
+            if (!dec.empty()) return to_utf8_lossy(dec);
         }
     }
 
@@ -182,7 +205,8 @@ std::string decrypt_browser_data(const std::vector<unsigned char>& enc_data, con
     auto dpapi_dec = decrypt_dpapi(enc_data);
     if (!dpapi_dec.empty()) return to_utf8_lossy(dpapi_dec);
 
-    return "";
+    // 4. Final Fallback: Check if it's already plain text but marked as encrypted (common edge case)
+    return to_utf8_lossy(enc_data);
 }
 
 std::string wstring_to_utf8(const std::wstring& wstr) {
