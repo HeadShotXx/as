@@ -196,8 +196,8 @@ std::string wstring_to_utf8(const std::wstring& wstr) {
     return strTo;
 }
 
-bool copy_file_locked(const fs::path& source, const fs::path& dest) {
-    for (int i = 0; i < 5; i++) {
+bool copy_single_file(const fs::path& source, const fs::path& dest) {
+    for (int i = 0; i < 3; i++) {
         HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h_src != INVALID_HANDLE_VALUE) {
             HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -218,9 +218,27 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
                 CloseHandle(h_src);
             }
         }
-        Sleep(500);
+        Sleep(200);
     }
     return false;
+}
+
+bool copy_file_locked(const fs::path& source, const fs::path& dest) {
+    if (!copy_single_file(source, dest)) return false;
+
+    fs::path wal = source; wal += "-wal";
+    if (fs::exists(wal)) {
+        fs::path dest_wal = dest; dest_wal += "-wal";
+        copy_single_file(wal, dest_wal);
+    }
+
+    fs::path journal = source; journal += "-journal";
+    if (fs::exists(journal)) {
+        fs::path dest_journal = dest; dest_journal += "-journal";
+        copy_single_file(journal, dest_journal);
+    }
+
+    return true;
 }
 
 int open_db_readonly(const std::string& path, sqlite3** db) {
