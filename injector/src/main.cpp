@@ -197,26 +197,28 @@ std::string wstring_to_utf8(const std::wstring& wstr) {
 }
 
 bool copy_file_locked(const fs::path& source, const fs::path& dest) {
-    for (int i = 0; i < 3; i++) {
-        HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    for (int i = 0; i < 5; i++) {
+        HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h_src != INVALID_HANDLE_VALUE) {
-            HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+            HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (h_dest != INVALID_HANDLE_VALUE) {
                 char buffer[65536];
                 DWORD bytes_read, bytes_written;
-                bool has_data = false;
+                bool success = true;
                 while (ReadFile(h_src, buffer, sizeof(buffer), &bytes_read, nullptr) && bytes_read > 0) {
-                    WriteFile(h_dest, buffer, bytes_read, &bytes_written, nullptr);
-                    has_data = true;
+                    if (!WriteFile(h_dest, buffer, bytes_read, &bytes_written, nullptr) || bytes_read != bytes_written) {
+                        success = false;
+                        break;
+                    }
                 }
                 CloseHandle(h_src);
                 CloseHandle(h_dest);
-                if (has_data) return true;
+                if (success) return true;
             } else {
                 CloseHandle(h_src);
             }
         }
-        Sleep(200);
+        Sleep(500);
     }
     return false;
 }
