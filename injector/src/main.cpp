@@ -235,8 +235,12 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
 }
 
 int open_db_readonly(const std::string& path, sqlite3** db) {
-    // 2026 Solution: Open temp copy as READWRITE to allow WAL recovery even if original is locked.
-    return sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+    // 2026 Solution: Open temp copy as READWRITE and force a checkpoint to merge WAL data.
+    int rc = sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+    if (rc == SQLITE_OK) {
+        sqlite3_exec(*db, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
+    }
+    return rc;
 }
 
 void cleanup_db_temp(const fs::path& path) {
@@ -312,7 +316,8 @@ DWORD find_main_process(const std::wstring& exe_name) {
                             RTL_USER_PROCESS_PARAMETERS params;
                             if (ReadProcessMemory(h, peb.ProcessParameters, &params, sizeof(params), NULL)) {
                                 wchar_t cmd_line[4096];
-                                if (ReadProcessMemory(h, params.CommandLine.Buffer, cmd_line, std::min((USHORT)4095, params.CommandLine.Length), NULL)) {
+                                if (ReadProcessMemory(h, params.CommandLine.Buffer, cmd_line, std::min((size_t)4095, (size_t)params.CommandLine.Length), NULL)) {
+                                    cmd_line[params.CommandLine.Length / 2] = L'\0';
                                     std::wstring cmd(cmd_line);
                                     if (cmd.find(L"--type=") != std::wstring::npos) is_main = false;
                                 }
