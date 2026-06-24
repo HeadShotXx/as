@@ -1,0 +1,1000 @@
+    if choice == 1500:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 4694 ( s^et /a \"{state.fb_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 2941 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1501:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 2115 ( s^et /a \"{state.ds_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2468 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1502:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ms_var}! * 82) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.fb_var}! - (1 * {idx_val})\"\n")
+    if choice == 1503:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 2644 ( s^et /a \"{state.last_rs_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 3475 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1504:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.fb_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.rs_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1505:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ds_var}! * 17) + (!{state.ms_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.last_rs_var}! - (73 * {idx_val})\"\n")
+    if choice == 1506:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.cnt_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.aux_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1507:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1508:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3587 ( s^et /a \"{state.fb_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 2518 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1509:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 5876 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1510:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 6734 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1511:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.cnt_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.fb_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1512:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 4992 ( s^et /a \"{state.cnt_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4731 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1513:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 4720 ( s^et /a \"{state.ds_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4191 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1514:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 4748 ( s^et /a \"{state.aux_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4108 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1515:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.cnt_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.aux_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1516:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 4584 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1517:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.fb_var}! * 85) + (!{state.ds_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.rs_var}! - (18 * {idx_val})\"\n")
+    if choice == 1518:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2156 ( s^et /a \"{state.ms_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4905 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1519:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 2562 ( s^et /a \"{state.ds_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 2274 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1520:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.last_rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.aux_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1521:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3858 ( s^et /a \"{state.ms_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4846 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1522:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1523:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4906 ( s^et /a \"{state.last_rs_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 2500 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1524:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.last_rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1525:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1526:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 2730 ( s^et /a \"{state.rs_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 2911 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1527:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.ms_var}! * 43) + (!{state.cnt_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.aux_var}! - (23 * {idx_val})\"\n")
+    if choice == 1528:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.fb_var}! * 86) + (!{state.ms_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.ds_var}! - (74 * {idx_val})\"\n")
+    if choice == 1529:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.rs_var}! * 78) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.ms_var}! - (95 * {idx_val})\"\n")
+    if choice == 1530:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 5814 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1531:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ds_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.aux_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1532:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3207 ( s^et /a \"{state.rs_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4863 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1533:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3222 ( s^et /a \"{state.fb_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 4944 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1534:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.last_rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.fb_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1535:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1536:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 3645 ( s^et /a \"{state.last_rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 4268 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1537:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3688 ( s^et /a \"{state.last_rs_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 3467 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1538:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.aux_var}! * 43) + (!{state.fb_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ds_var}! - (27 * {idx_val})\"\n")
+    if choice == 1539:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.last_rs_var}! * 30) + (!{state.cnt_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.rs_var}! - (30 * {idx_val})\"\n")
+    if choice == 1540:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 5636 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1541:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.rs_var}! * 71) + (!{state.fb_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.last_rs_var}! - (56 * {idx_val})\"\n")
+    if choice == 1542:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3938 ( s^et /a \"{state.aux_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4102 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1543:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.aux_var}! * 88) + (!{state.cnt_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.ds_var}! - (53 * {idx_val})\"\n")
+    if choice == 1544:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 2800 ( s^et /a \"{state.rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 3502 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1545:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4818 ( s^et /a \"{state.rs_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2148 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1546:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 2285 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1547:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1548:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 4671 ( s^et /a \"{state.ds_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2121 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1549:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.aux_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1550:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.fb_var}! * 70) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.aux_var}! - (44 * {idx_val})\"\n")
+    if choice == 1551:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.ds_var}! * 7) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.cnt_var}! - (6 * {idx_val})\"\n")
+    if choice == 1552:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3168 ( s^et /a \"{state.fb_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2405 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1553:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 6712 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1554:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.aux_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.ds_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1555:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ms_var}! * 37) + (!{state.rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.fb_var}! - (55 * {idx_val})\"\n")
+    if choice == 1556:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4930 ( s^et /a \"{state.aux_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2391 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1557:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1558:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.last_rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.ds_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1559:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 3592 ( s^et /a \"{state.ds_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2291 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1560:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.fb_var}! * 69) + (!{state.rs_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ds_var}! - (28 * {idx_val})\"\n")
+    if choice == 1561:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.aux_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1562:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.rs_var}! * 67) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.last_rs_var}! - (71 * {idx_val})\"\n")
+    if choice == 1563:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2340 ( s^et /a \"{state.cnt_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 2603 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1564:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.fb_var}! * 6) + (!{state.ms_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ds_var}! - (65 * {idx_val})\"\n")
+    if choice == 1565:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 4577 ( s^et /a \"{state.rs_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4838 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1566:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 2222 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1567:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.cnt_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.fb_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1568:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1569:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 2489 ( s^et /a \"{state.aux_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2453 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1570:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1571:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 3621 ( s^et /a \"{state.last_rs_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4693 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1572:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.fb_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.ds_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1573:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1574:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1575:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1576:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1577:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.cnt_var}! * 11) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.aux_var}! - (6 * {idx_val})\"\n")
+    if choice == 1578:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.last_rs_var}! * 45) + (!{state.rs_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.fb_var}! - (74 * {idx_val})\"\n")
+    if choice == 1579:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 4962 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1580:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 4703 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1581:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.aux_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1582:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 3201 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1583:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1584:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1585:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1586:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1587:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 7713 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1588:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 4107 ( s^et /a \"{state.last_rs_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 3248 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1589:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.aux_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.cnt_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1590:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3604 ( s^et /a \"{state.fb_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 2089 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1591:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1592:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1593:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1594:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.last_rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.fb_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1595:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.last_rs_var}! * 38) + (!{state.cnt_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ms_var}! - (17 * {idx_val})\"\n")
+    if choice == 1596:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1597:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 3274 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.ms_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.ms_var}!\" )\n")
+    if choice == 1598:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 5938 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1599:
+        cmds.append(f"i^f !{state.aux_var}! G^TR 1694 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1600:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1601:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 2331 ( s^et /a \"{state.ds_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2784 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1602:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4667 ( s^et /a \"{state.aux_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4729 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1603:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.ms_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.last_rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1604:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1605:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.cnt_var}! * 84) + (!{state.ms_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.last_rs_var}! - (44 * {idx_val})\"\n")
+    if choice == 1606:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.ds_var}! * 55) + (!{state.cnt_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ms_var}! - (87 * {idx_val})\"\n")
+    if choice == 1607:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2039 ( s^et /a \"{state.cnt_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4694 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1608:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ms_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1609:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.ms_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.last_rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1610:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 2888 ( s^et /a \"{state.ms_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4795 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1611:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 5297 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1612:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3308 ( s^et /a \"{state.ds_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 2696 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1613:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 2365 ( s^et /a \"{state.ds_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 3380 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1614:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1615:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.fb_var}! * 26) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ms_var}! - (61 * {idx_val})\"\n")
+    if choice == 1616:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.cnt_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.aux_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1617:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.last_rs_var}! * 44) + (!{state.rs_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.fb_var}! - (19 * {idx_val})\"\n")
+    if choice == 1618:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 7200 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1619:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 5476 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1620:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.fb_var}! * 65) + (!{state.rs_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.last_rs_var}! - (37 * {idx_val})\"\n")
+    if choice == 1621:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2112 ( s^et /a \"{state.rs_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4114 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1622:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.fb_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.last_rs_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1623:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ds_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1624:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1625:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.rs_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.cnt_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1626:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2578 ( s^et /a \"{state.rs_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 3515 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1627:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1628:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 2835 ( s^et /a \"{state.rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 3127 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1629:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.rs_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.aux_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1630:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1631:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1632:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.cnt_var}! * 83) + (!{state.ds_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.aux_var}! - (32 * {idx_val})\"\n")
+    if choice == 1633:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4429 ( s^et /a \"{state.ds_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 3200 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1634:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ms_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1635:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ds_var}! * 59) + (!{state.cnt_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (75 * {idx_val})\"\n")
+    if choice == 1636:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1637:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.fb_var}! * 81) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.cnt_var}! - (14 * {idx_val})\"\n")
+    if choice == 1638:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2323 ( s^et /a \"{state.fb_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 3093 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1639:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1640:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.aux_var}! * 89) + (!{state.ds_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.cnt_var}! - (94 * {idx_val})\"\n")
+    if choice == 1641:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1642:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 6475 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1643:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.fb_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.last_rs_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1644:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.last_rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.fb_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1645:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 4451 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1646:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2877 ( s^et /a \"{state.ms_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4223 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1647:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1648:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.ms_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1649:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.last_rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.rs_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1650:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.ds_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1651:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ms_var}! * 15) + (!{state.rs_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (59 * {idx_val})\"\n")
+    if choice == 1652:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.fb_var}! * 91) + (!{state.ms_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.rs_var}! - (30 * {idx_val})\"\n")
+    if choice == 1653:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1654:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.cnt_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1655:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.cnt_var}! * 7) + (!{state.fb_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.last_rs_var}! - (25 * {idx_val})\"\n")
+    if choice == 1656:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.rs_var}! * 78) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.fb_var}! - (44 * {idx_val})\"\n")
+    if choice == 1657:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.cnt_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1658:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.ms_var}! * 14) + (!{state.aux_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.ds_var}! - (96 * {idx_val})\"\n")
+    if choice == 1659:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.fb_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1660:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ms_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1661:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2300 ( s^et /a \"{state.fb_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 2143 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1662:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1663:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3118 ( s^et /a \"{state.aux_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 4345 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1664:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.ms_var}! * 91) + (!{state.ds_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.aux_var}! - (91 * {idx_val})\"\n")
+    if choice == 1665:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.fb_var}! * 55) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.aux_var}! - (12 * {idx_val})\"\n")
+    if choice == 1666:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.last_rs_var}! * 44) + (!{state.ms_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.aux_var}! - (40 * {idx_val})\"\n")
+    if choice == 1667:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1668:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.last_rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1669:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1670:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.cnt_var}! * 11) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.ds_var}! - (70 * {idx_val})\"\n")
+    if choice == 1671:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1672:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1673:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.ds_var}! * 54) + (!{state.fb_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ms_var}! - (8 * {idx_val})\"\n")
+    if choice == 1674:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 2431 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.aux_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1675:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.fb_var}! * 44) + (!{state.cnt_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ms_var}! - (60 * {idx_val})\"\n")
+    if choice == 1676:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1677:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1678:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 1054 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1679:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 3911 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1680:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1681:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.fb_var}! * 63) + (!{state.aux_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.cnt_var}! - (47 * {idx_val})\"\n")
+    if choice == 1682:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 3355 ( s^et /a \"{state.rs_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 2724 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1683:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 2252 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1684:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.last_rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.fb_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1685:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.cnt_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.rs_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1686:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1687:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 7575 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1688:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 3082 ( s^et /a \"{state.last_rs_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 2801 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1689:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1690:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 1023 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1691:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3781 ( s^et /a \"{state.ms_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2473 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1692:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1693:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.ms_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1694:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 1510 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1695:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3971 ( s^et /a \"{state.ms_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 3060 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1696:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3847 ( s^et /a \"{state.cnt_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 3846 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1697:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1698:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ds_var}! * 56) + (!{state.rs_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.fb_var}! - (69 * {idx_val})\"\n")
+    if choice == 1699:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.last_rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.aux_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1700:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 4536 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1701:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.last_rs_var}! * 70) + (!{state.rs_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.cnt_var}! - (61 * {idx_val})\"\n")
+    if choice == 1702:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 5226 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1703:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3976 ( s^et /a \"{state.ds_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2105 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1704:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 2688 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1705:
+        cmds.append(f"i^f !{state.aux_var}! G^TR 4801 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1706:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.aux_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1707:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.last_rs_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1708:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.last_rs_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1709:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 2991 ( s^et /a \"{state.aux_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2036 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1710:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1711:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 6032 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.aux_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1712:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.aux_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.fb_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1713:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ds_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.rs_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1714:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 6503 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1715:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 4096 ( s^et /a \"{state.ds_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4623 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1716:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4433 ( s^et /a \"{state.ms_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 3567 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1717:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ms_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.last_rs_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1718:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 5966 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1719:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4100 ( s^et /a \"{state.cnt_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 2277 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1720:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.fb_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ds_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1721:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.fb_var}! * 6) + (!{state.ds_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.rs_var}! - (67 * {idx_val})\"\n")
+    if choice == 1722:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.aux_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1723:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3230 ( s^et /a \"{state.fb_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4289 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1724:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.last_rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.aux_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1725:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3115 ( s^et /a \"{state.last_rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 3312 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1726:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2696 ( s^et /a \"{state.ds_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 3552 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1727:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.rs_var}! * 46) + (!{state.fb_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.last_rs_var}! - (29 * {idx_val})\"\n")
+    if choice == 1728:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 4009 ( s^et /a \"{state.aux_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 3926 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1729:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 7912 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1730:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.ms_var}! * 73) + (!{state.aux_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.rs_var}! - (1 * {idx_val})\"\n")
+    if choice == 1731:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.rs_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1732:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 6795 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1733:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ds_var}! * 28) + (!{state.rs_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.fb_var}! - (70 * {idx_val})\"\n")
+    if choice == 1734:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1735:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.ms_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1736:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.fb_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.ds_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1737:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.ms_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1738:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1739:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1740:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ds_var}! * 69) + (!{state.rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.last_rs_var}! - (96 * {idx_val})\"\n")
+    if choice == 1741:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1742:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 1073 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1743:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ms_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1744:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1745:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1746:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.aux_var}! * 10) + (!{state.rs_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ds_var}! - (98 * {idx_val})\"\n")
+    if choice == 1747:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.last_rs_var}! * 23) + (!{state.fb_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ds_var}! - (49 * {idx_val})\"\n")
+    if choice == 1748:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ds_var}! * 32) + (!{state.rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.last_rs_var}! - (63 * {idx_val})\"\n")
+    if choice == 1749:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.rs_var}! * 100) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.cnt_var}! - (24 * {idx_val})\"\n")
+    if choice == 1750:
+        cmds.append(f"i^f !{state.aux_var}! G^TR 3905 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1751:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1752:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.last_rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.ds_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1753:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.aux_var}! * 54) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.rs_var}! - (78 * {idx_val})\"\n")
+    if choice == 1754:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ds_var}! * 94) + (!{state.cnt_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (4 * {idx_val})\"\n")
+    if choice == 1755:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1756:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 2323 ( s^et /a \"{state.last_rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 3803 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1757:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1758:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1759:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ms_var}! * 95) + (!{state.fb_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.last_rs_var}! - (10 * {idx_val})\"\n")
+    if choice == 1760:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3415 ( s^et /a \"{state.aux_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4336 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1761:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 2981 ( s^et /a \"{state.ds_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 2192 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1762:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 7987 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1763:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 2842 ( s^et /a \"{state.cnt_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4141 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1764:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1765:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.last_rs_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1766:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ms_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1767:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3197 ( s^et /a \"{state.last_rs_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 3918 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1768:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.cnt_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.aux_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1769:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.ms_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.rs_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1770:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1771:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.ms_var}! * 97) + (!{state.fb_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.aux_var}! - (50 * {idx_val})\"\n")
+    if choice == 1772:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 1170 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.ms_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.ms_var}!\" )\n")
+    if choice == 1773:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.fb_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.ds_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1774:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1775:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.last_rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.aux_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1776:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1777:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 4162 ( s^et /a \"{state.cnt_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 2584 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1778:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1779:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 3912 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.ms_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.ms_var}!\" )\n")
+    if choice == 1780:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 3600 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1781:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 4561 ( s^et /a \"{state.fb_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 3853 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1782:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1783:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1784:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.aux_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.rs_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1785:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3120 ( s^et /a \"{state.last_rs_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 4273 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1786:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 4247 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1787:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1788:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1789:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 6388 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1790:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 4255 ( s^et /a \"{state.ds_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4464 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1791:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1792:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 3972 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1793:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 3932 ( s^et /a \"{state.aux_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4256 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1794:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2834 ( s^et /a \"{state.last_rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4141 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1795:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1796:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.ms_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.ds_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1797:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.last_rs_var}! * 18) + (!{state.ds_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.cnt_var}! - (23 * {idx_val})\"\n")
+    if choice == 1798:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3428 ( s^et /a \"{state.last_rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 4522 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1799:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3755 ( s^et /a \"{state.cnt_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4619 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1800:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 1727 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1801:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.ms_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.ds_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1802:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 6405 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1803:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1804:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.fb_var}! * 18) + (!{state.aux_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.ds_var}! - (53 * {idx_val})\"\n")
+    if choice == 1805:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.rs_var}! * 70) + (!{state.aux_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.fb_var}! - (38 * {idx_val})\"\n")
+    if choice == 1806:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1807:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4293 ( s^et /a \"{state.cnt_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2344 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1808:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4609 ( s^et /a \"{state.fb_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 4522 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1809:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 4050 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1810:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 5572 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1811:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 2067 ( s^et /a \"{state.rs_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4493 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1812:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.cnt_var}! * 64) + (!{state.ds_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.last_rs_var}! - (72 * {idx_val})\"\n")
+    if choice == 1813:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2518 ( s^et /a \"{state.rs_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2929 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1814:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.ms_var}! * 14) + (!{state.aux_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.rs_var}! - (44 * {idx_val})\"\n")
+    if choice == 1815:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ds_var}! * 69) + (!{state.fb_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.last_rs_var}! - (17 * {idx_val})\"\n")
+    if choice == 1816:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.cnt_var}! * 8) + (!{state.aux_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.fb_var}! - (52 * {idx_val})\"\n")
+    if choice == 1817:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.aux_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.ms_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1818:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1819:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3522 ( s^et /a \"{state.ds_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 3108 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1820:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 7046 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1821:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.ms_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1822:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 6572 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1823:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1824:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3340 ( s^et /a \"{state.rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 2058 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1825:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.ds_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.fb_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1826:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3391 ( s^et /a \"{state.ms_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4324 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1827:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4538 ( s^et /a \"{state.ms_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4484 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1828:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.ms_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1829:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1830:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.ms_var}! * 72) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.rs_var}! - (87 * {idx_val})\"\n")
+    if choice == 1831:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 3441 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1832:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 4180 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1833:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1834:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 6564 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1835:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1836:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1837:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4002 ( s^et /a \"{state.ms_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2891 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1838:
+        cmds.append(f"i^f !{state.cnt_var}! L^SS 3331 ( s^et /a \"{state.fb_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 2937 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1839:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ds_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.aux_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1840:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ms_var}! * 12) + (!{state.cnt_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.last_rs_var}! - (11 * {idx_val})\"\n")
+    if choice == 1841:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.last_rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.ms_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1842:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.cnt_var}! * 22) + (!{state.aux_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (73 * {idx_val})\"\n")
+    if choice == 1843:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 4302 ( s^et /a \"{state.fb_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 4174 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1844:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1845:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 4295 ( s^et /a \"{state.fb_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2217 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1846:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.fb_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1847:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.aux_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1848:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.aux_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.aux_var}! + {data_val}\"\n")
+    if choice == 1849:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.last_rs_var}! * 38) + (!{state.ms_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ds_var}! - (54 * {idx_val})\"\n")
+    if choice == 1850:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1851:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3742 ( s^et /a \"{state.ms_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2471 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1852:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.last_rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1853:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3835 ( s^et /a \"{state.fb_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4314 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1854:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.last_rs_var}! * 2) + (!{state.ms_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.cnt_var}! - (42 * {idx_val})\"\n")
+    if choice == 1855:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 7072 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1856:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.fb_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.rs_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1857:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.fb_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1858:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 6260 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.fb_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.fb_var}!\" )\n")
+    if choice == 1859:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.aux_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ds_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1860:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3326 ( s^et /a \"{state.fb_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 4835 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1861:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1862:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.fb_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1863:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1864:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1865:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.cnt_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.rs_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1866:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.last_rs_var}! * 16) + (!{state.fb_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.rs_var}! - (36 * {idx_val})\"\n")
+    if choice == 1867:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.last_rs_var}! * 9) + (!{state.ds_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.fb_var}! - (95 * {idx_val})\"\n")
+    if choice == 1868:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 4617 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.cnt_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.cnt_var}-=!{state.aux_var}!\" ) ) e^lse ( s^et /a \"{state.cnt_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1869:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.rs_var}! * 19) + (!{state.fb_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.aux_var}! - (82 * {idx_val})\"\n")
+    if choice == 1870:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.cnt_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1871:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.cnt_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1872:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1873:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1874:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1875:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.aux_var}! * 17) + (!{state.cnt_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.last_rs_var}! - (70 * {idx_val})\"\n")
+    if choice == 1876:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1877:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1878:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.aux_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1879:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.cnt_var}! * 73) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.ms_var}! - (46 * {idx_val})\"\n")
+    if choice == 1880:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.cnt_var}! * 48) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (59 * {idx_val})\"\n")
+    if choice == 1881:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.rs_var}! * 28) + (!{state.cnt_var}! ^ {data_val})\", \"{state.ms_var}+=!{state.fb_var}! - (30 * {idx_val})\"\n")
+    if choice == 1882:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.aux_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.rs_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1883:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.fb_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1884:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1885:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.aux_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.cnt_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1886:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1887:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.ms_var}! * 60) + (!{state.rs_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.fb_var}! - (36 * {idx_val})\"\n")
+    if choice == 1888:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2303 ( s^et /a \"{state.last_rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2919 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1889:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1890:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1891:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 6212 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.last_rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.last_rs_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.last_rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1892:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 5322 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.ds_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1893:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 3373 ( s^et /a \"{state.aux_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 4579 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1894:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ms_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.rs_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1895:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.cnt_var}! * 55) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.ds_var}! - (94 * {idx_val})\"\n")
+    if choice == 1896:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.last_rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.aux_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1897:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.ds_var}! * 92) + (!{state.cnt_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.rs_var}! - (39 * {idx_val})\"\n")
+    if choice == 1898:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.rs_var}! * 68) + (!{state.fb_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.aux_var}! - (22 * {idx_val})\"\n")
+    if choice == 1899:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.cnt_var}! * 1) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (58 * {idx_val})\"\n")
+    if choice == 1900:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.cnt_var}! * 14) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.fb_var}! - (31 * {idx_val})\"\n")
+    if choice == 1901:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 1805 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1902:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1903:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.cnt_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1904:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.rs_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1905:
+        cmds.append(f"s^et /a \"{state.ds_var}=!{state.last_rs_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.ds_var}!) do s^et /a \"{state.cnt_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1906:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1907:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 3368 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.ms_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.ms_var}!\" )\n")
+    if choice == 1908:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 2758 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1909:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ms_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.rs_var}+=!{state.cnt_var}! ^ {data_val}\"\n")
+    if choice == 1910:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3710 ( s^et /a \"{state.rs_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 4398 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1911:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 4128 ( s^et /a \"{state.last_rs_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 2288 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1912:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.rs_var}! * 40) + (!{state.ds_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.cnt_var}! - (83 * {idx_val})\"\n")
+    if choice == 1913:
+        cmds.append(f"i^f !{state.aux_var}! G^TR 4334 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1914:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.last_rs_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1915:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 4441 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1916:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1917:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.cnt_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.fb_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1918:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1919:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1920:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4343 ( s^et /a \"{state.ms_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2092 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1921:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1922:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4086 ( s^et /a \"{state.cnt_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 4069 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1923:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3647 ( s^et /a \"{state.aux_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2208 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1924:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.aux_var}! * 22) + (!{state.fb_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.ds_var}! - (21 * {idx_val})\"\n")
+    if choice == 1925:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1926:
+        cmds.append(f"s^et /a \"{state.ms_var}=!{state.ds_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.ms_var}!) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1927:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 7428 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.aux_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1928:
+        cmds.append(f"i^f !{state.last_rs_var}! G^TR 6521 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ms_var}+=!{state.cnt_var}!\" ) e^lse ( s^et /a \"{state.ms_var}-=!{state.rs_var}!\" ) ) e^lse ( s^et /a \"{state.ms_var}={data_val} * {idx_val} ^ !{state.cnt_var}!\" )\n")
+    if choice == 1929:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.last_rs_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1930:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 4844 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.aux_var}+=!{state.rs_var}!\" ) e^lse ( s^et /a \"{state.aux_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.aux_var}={data_val} * {idx_val} ^ !{state.rs_var}!\" )\n")
+    if choice == 1931:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.rs_var}! %% 6 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ds_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1932:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.aux_var}! * 99) + (!{state.cnt_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.ms_var}! - (86 * {idx_val})\"\n")
+    if choice == 1933:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.rs_var}! * 31) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.ms_var}! - (13 * {idx_val})\"\n")
+    if choice == 1934:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.cnt_var}! * 80) + (!{state.rs_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ds_var}! - (80 * {idx_val})\"\n")
+    if choice == 1935:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 3373 ( s^et /a \"{state.ds_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2996 ( s^et /a \"{state.ds_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ds_var}-={idx_val}\" ) )\n")
+    if choice == 1936:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4266 ( s^et /a \"{state.fb_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 2896 ( s^et /a \"{state.fb_var}+={data_val}\" ) e^lse ( s^et /a \"{state.fb_var}-={idx_val}\" ) )\n")
+    if choice == 1937:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.cnt_var}! * 77) + (!{state.ms_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.last_rs_var}! - (30 * {idx_val})\"\n")
+    if choice == 1938:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 4117 ( s^et /a \"{state.rs_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ms_var}! G^TR 3748 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1939:
+        cmds.append(f"i^f !{state.ds_var}! G^TR 4288 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1940:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.ds_var}! * 20) + (!{state.rs_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.cnt_var}! - (44 * {idx_val})\"\n")
+    if choice == 1941:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3412 ( s^et /a \"{state.cnt_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4274 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1942:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.fb_var}! * 67) + (!{state.aux_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.cnt_var}! - (84 * {idx_val})\"\n")
+    if choice == 1943:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.aux_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ds_var}+=!{state.fb_var}! ^ {data_val}\"\n")
+    if choice == 1944:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.cnt_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1945:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.last_rs_var}! * 73) + (!{state.ms_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.rs_var}! - (25 * {idx_val})\"\n")
+    if choice == 1946:
+        cmds.append(f"s^et /a \"{state.ds_var}=(!{state.fb_var}! * 68) + (!{state.ms_var}! ^ {data_val})\", \"{state.aux_var}+=!{state.ds_var}! - (31 * {idx_val})\"\n")
+    if choice == 1947:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 4297 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.ms_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.aux_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.ms_var}!\" )\n")
+    if choice == 1948:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 4826 ( s^et /a \"{state.aux_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 2712 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1949:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ds_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.fb_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1950:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3546 ( s^et /a \"{state.rs_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4211 ( s^et /a \"{state.rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.rs_var}-={idx_val}\" ) )\n")
+    if choice == 1951:
+        cmds.append(f"i^f !{state.cnt_var}! G^TR 4212 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1952:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.fb_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.ds_var}+=!{state.rs_var}! ^ {data_val}\"\n")
+    if choice == 1953:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.fb_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.ms_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1954:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1955:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.fb_var}! * 46) + (!{state.last_rs_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.ms_var}! - (91 * {idx_val})\"\n")
+    if choice == 1956:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.fb_var}! * 26) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.aux_var}! - (48 * {idx_val})\"\n")
+    if choice == 1957:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 3498 ( s^et /a \"{state.aux_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 2308 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1958:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.rs_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.rs_var}! + {data_val}\"\n")
+    if choice == 1959:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.cnt_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1960:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 2902 ( s^et /a \"{state.cnt_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.rs_var}! G^TR 4634 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1961:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1962:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=(!{state.ds_var}! * 18) + (!{state.fb_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.last_rs_var}! - (59 * {idx_val})\"\n")
+    if choice == 1963:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.cnt_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.aux_var}+=!{state.cnt_var}! + {data_val}\"\n")
+    if choice == 1964:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.last_rs_var}+=!{state.rs_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.last_rs_var}! + {data_val}\"\n")
+    if choice == 1965:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.aux_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1966:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 7258 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.cnt_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1967:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.fb_var}! * 38) + (!{state.ds_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.aux_var}! - (70 * {idx_val})\"\n")
+    if choice == 1968:
+        cmds.append(f"i^f !{state.fb_var}! G^TR 7186 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.ds_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.ds_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.ds_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1969:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.rs_var}! * 27) + (!{state.cnt_var}! ^ {data_val})\", \"{state.ds_var}+=!{state.ms_var}! - (21 * {idx_val})\"\n")
+    if choice == 1970:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.fb_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1971:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.fb_var}! * 41) + (!{state.ds_var}! ^ {data_val})\", \"{state.cnt_var}+=!{state.ms_var}! - (84 * {idx_val})\"\n")
+    if choice == 1972:
+        cmds.append(f"s^et /a \"{state.rs_var}=!{state.cnt_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.rs_var}!) do s^et /a \"{state.last_rs_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1973:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.cnt_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.fb_var}+=!{state.ds_var}! ^ {data_val}\"\n")
+    if choice == 1974:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 2877 ( s^et /a \"{state.last_rs_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 3791 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1975:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2010 ( s^et /a \"{state.cnt_var}^=!{state.ms_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 3692 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1976:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 4551 ( s^et /a \"{state.aux_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4359 ( s^et /a \"{state.aux_var}+={data_val}\" ) e^lse ( s^et /a \"{state.aux_var}-={idx_val}\" ) )\n")
+    if choice == 1977:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ms_var}+=!{state.ds_var}! ^ {idx_val}\", \"{state.fb_var}+=!{state.ms_var}! + {data_val}\"\n")
+    if choice == 1978:
+        cmds.append(f"i^f !{state.rs_var}! L^SS 2142 ( s^et /a \"{state.cnt_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2763 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1979:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 4486 ( s^et /a \"{state.last_rs_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 4169 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1980:
+        cmds.append(f"f^or /L %%a in (1,1,2) do f^or /L %%b in (1,1,2) do s^et /a \"{state.ds_var}+=!{state.last_rs_var}! ^ {idx_val}\", \"{state.ms_var}+=!{state.ds_var}! + {data_val}\"\n")
+    if choice == 1981:
+        cmds.append(f"i^f !{state.aux_var}! G^TR 2253 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.rs_var}+=!{state.ds_var}!\" ) e^lse ( s^et /a \"{state.rs_var}-=!{state.fb_var}!\" ) ) e^lse ( s^et /a \"{state.rs_var}={data_val} * {idx_val} ^ !{state.ds_var}!\" )\n")
+    if choice == 1982:
+        cmds.append(f"s^et /a \"{state.aux_var}=(!{state.fb_var}! * 2) + (!{state.cnt_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.aux_var}! - (75 * {idx_val})\"\n")
+    if choice == 1983:
+        cmds.append(f"i^f !{state.ms_var}! G^TR 5703 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.aux_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.last_rs_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.aux_var}!\" )\n")
+    if choice == 1984:
+        cmds.append(f"s^et /a \"{state.cnt_var}=(!{state.ds_var}! * 48) + (!{state.ms_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.cnt_var}! - (99 * {idx_val})\"\n")
+    if choice == 1985:
+        cmds.append(f"f^or /L %%a in (1,1,3) do f^or /L %%b in (1,1,2) do s^et /a \"{state.fb_var}+=!{state.ms_var}! ^ {idx_val}\", \"{state.ds_var}+=!{state.fb_var}! + {data_val}\"\n")
+    if choice == 1986:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3217 ( s^et /a \"{state.ms_var}^=!{state.last_rs_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4794 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
+    if choice == 1987:
+        cmds.append(f"s^et /a \"{state.last_rs_var}=!{state.ds_var}! %% 4 + 2\" & f^or /L %%i in (1,1,!{state.last_rs_var}!) do s^et /a \"{state.aux_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1988:
+        cmds.append(f"i^f !{state.ds_var}! L^SS 2476 ( s^et /a \"{state.last_rs_var}^=!{state.cnt_var}!\" ) e^lse ( i^f !{state.fb_var}! G^TR 2886 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1989:
+        cmds.append(f"s^et /a \"{state.fb_var}=(!{state.cnt_var}! * 11) + (!{state.aux_var}! ^ {data_val})\", \"{state.rs_var}+=!{state.fb_var}! - (44 * {idx_val})\"\n")
+    if choice == 1990:
+        cmds.append(f"i^f !{state.aux_var}! L^SS 3266 ( s^et /a \"{state.cnt_var}^=!{state.ds_var}!\" ) e^lse ( i^f !{state.last_rs_var}! G^TR 4835 ( s^et /a \"{state.cnt_var}+={data_val}\" ) e^lse ( s^et /a \"{state.cnt_var}-={idx_val}\" ) )\n")
+    if choice == 1991:
+        cmds.append(f"s^et /a \"{state.rs_var}=(!{state.aux_var}! * 82) + (!{state.cnt_var}! ^ {data_val})\", \"{state.fb_var}+=!{state.rs_var}! - (8 * {idx_val})\"\n")
+    if choice == 1992:
+        cmds.append(f"s^et /a \"{state.cnt_var}=!{state.ms_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.cnt_var}!) do s^et /a \"{state.fb_var}+=!{state.aux_var}! ^ {data_val}\"\n")
+    if choice == 1993:
+        cmds.append(f"s^et /a \"{state.fb_var}=!{state.rs_var}! %% 5 + 2\" & f^or /L %%i in (1,1,!{state.fb_var}!) do s^et /a \"{state.cnt_var}+=!{state.last_rs_var}! ^ {data_val}\"\n")
+    if choice == 1994:
+        cmds.append(f"i^f !{state.fb_var}! L^SS 3915 ( s^et /a \"{state.last_rs_var}^=!{state.rs_var}!\" ) e^lse ( i^f !{state.aux_var}! G^TR 3862 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1995:
+        cmds.append(f"i^f !{state.rs_var}! G^TR 6955 ( i^f {data_val} L^SS {idx_val} ( s^et /a \"{state.fb_var}+=!{state.last_rs_var}!\" ) e^lse ( s^et /a \"{state.fb_var}-=!{state.ms_var}!\" ) ) e^lse ( s^et /a \"{state.fb_var}={data_val} * {idx_val} ^ !{state.last_rs_var}!\" )\n")
+    if choice == 1996:
+        cmds.append(f"i^f !{state.ms_var}! L^SS 4020 ( s^et /a \"{state.last_rs_var}^=!{state.fb_var}!\" ) e^lse ( i^f !{state.cnt_var}! G^TR 4857 ( s^et /a \"{state.last_rs_var}+={data_val}\" ) e^lse ( s^et /a \"{state.last_rs_var}-={idx_val}\" ) )\n")
+    if choice == 1997:
+        cmds.append(f"s^et /a \"{state.aux_var}=!{state.last_rs_var}! %% 3 + 2\" & f^or /L %%i in (1,1,!{state.aux_var}!) do s^et /a \"{state.ds_var}+=!{state.ms_var}! ^ {data_val}\"\n")
+    if choice == 1998:
+        cmds.append(f"s^et /a \"{state.ms_var}=(!{state.cnt_var}! * 15) + (!{state.ds_var}! ^ {data_val})\", \"{state.last_rs_var}+=!{state.ms_var}! - (22 * {idx_val})\"\n")
+    if choice == 1999:
+        cmds.append(f"i^f !{state.last_rs_var}! L^SS 3366 ( s^et /a \"{state.ms_var}^=!{state.aux_var}!\" ) e^lse ( i^f !{state.ds_var}! G^TR 4306 ( s^et /a \"{state.ms_var}+={data_val}\" ) e^lse ( s^et /a \"{state.ms_var}-={idx_val}\" ) )\n")
