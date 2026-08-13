@@ -1,0 +1,4 @@
+target/
+polimorphic/target/
+Cargo.lock
+*.log
