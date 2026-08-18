@@ -195,13 +195,15 @@ begin
   FOnUnregister := aUnregisterProc;
 
   Caption := 'File Manager - ' + FClientID;
-  FCurrentPath := '';
   if not Assigned(FOpenStreams) then
+  begin
+    FCurrentPath := '';
     FOpenStreams := TDictionary<string, TFileStream>.Create;
-  Edit1.Text := '';
-  ListView1.Items.Clear;
-  FLastStatus := 'Folders [0] Files [0]';
-  StatusBar1.SimpleText := FLastStatus;
+    Edit1.Text := '';
+    ListView1.Items.Clear;
+    FLastStatus := 'Folders [0] Files [0]';
+    StatusBar1.SimpleText := FLastStatus;
+  end;
 
   // Translation
   Geri.Caption := 'Back';

